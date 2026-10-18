@@ -130,7 +130,11 @@ export function urlLogin(redirectUri: string, state: string) {
   u.searchParams.set("client_id", process.env.META_APP_ID ?? "");
   u.searchParams.set("redirect_uri", redirectUri);
   u.searchParams.set("state", state);
-  u.searchParams.set("scope", ESCOPOS_LOGIN);
+  // Apps do tipo Empresa usam "Login do Facebook para Empresas", que exige um config_id;
+  // sem ele, cai no login clássico com a lista de permissões.
+  const configId = process.env.META_LOGIN_CONFIG_ID;
+  if (configId) u.searchParams.set("config_id", configId);
+  else u.searchParams.set("scope", ESCOPOS_LOGIN);
   return u.toString();
 }
 

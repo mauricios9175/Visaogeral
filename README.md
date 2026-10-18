@@ -24,8 +24,9 @@ Painel único para acompanhar todos os clientes de Meta Ads: investimento, leads
 **Login com Facebook (contas que ficam só no BM do cliente):**
 1. No app, adicione o produto **Login do Facebook para Empresas**.
 2. Em *URIs de redirecionamento OAuth válidos*, coloque `https://SEU-PAINEL.vercel.app/api/meta/callback`.
-3. Em **Configurações do app → Básico**, copie o **ID do app** e a **Chave secreta**. Elas viram `META_APP_ID` e `META_APP_SECRET`.
-4. Enquanto o app estiver em modo de desenvolvimento, só quem tiver função no app (você) consegue logar. Para uso próprio isso basta.
+3. Em **Configurações**, crie uma configuração do tipo **Token de acesso do usuário** com as permissões `ads_read`, `business_management` e `leads_retrieval`. O ID dela vira `META_LOGIN_CONFIG_ID`.
+4. Em **Configurações do app → Básico**, copie o **ID do app** e a **Chave secreta**. Elas viram `META_APP_ID` e `META_APP_SECRET`.
+5. Enquanto o app estiver em modo de desenvolvimento, só quem tiver função no app (você) consegue logar. Para uso próprio isso basta.
 
 > O token do Login com Facebook dura cerca de 60 dias. O painel avisa em Configurações quando faltar 7 dias. Aí é só clicar em "Conectar / reconectar perfil". Se puder, peça aos clientes para compartilharem a conta com o seu BM como parceiro, porque assim o acesso não expira.
 
