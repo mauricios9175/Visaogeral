@@ -201,7 +201,7 @@ export type AlertaConta = {
 };
 
 /** Até quantos dias de saldo/limite o painel considera "baixo". */
-export const DIAS_SALDO_ALERTA = 3;
+export const DIAS_SALDO_ALERTA = 5;
 
 /**
  * Problemas de saldo, limite de gastos e status nas contas vinculadas a clientes.
