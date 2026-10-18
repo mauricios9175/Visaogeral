@@ -6,8 +6,9 @@ let client: SupabaseClient | null = null;
 /** Cliente Supabase com a chave service_role. Só usar no servidor. */
 export function db(): SupabaseClient {
   if (!client) {
-    const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    // Aceita tanto https://x.supabase.co quanto a URL da Data API (…/rest/v1/)
+    const url = process.env.SUPABASE_URL?.trim().replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
     if (!url || !key) {
       throw new Error("Configure SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no .env");
     }
