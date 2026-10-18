@@ -1,0 +1,134 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { resolverPeriodo } from "@/lib/datas";
+import { detalheCliente, type LinhaTabela } from "@/lib/consultas";
+import { decimal, dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
+import { Kpi, SeletorPeriodo, Variacao } from "@/components/ui";
+import { BarrasDiarias } from "@/components/graficos";
+
+
+const NIVEIS = [
+  { chave: "campanhas", rotulo: "Campanhas" },
+  { chave: "conjuntos", rotulo: "Conjuntos" },
+  { chave: "anuncios", rotulo: "Anúncios" },
+] as const;
+
+export default async function PaginaCliente({ params, searchParams }: PageProps<"/clientes/[id]">) {
+  const { id } = await params;
+  const { p, nivel } = (await searchParams) as { p?: string; nivel?: string };
+  const { atual, anterior } = resolverPeriodo(p);
+  const d = await detalheCliente(id, atual, anterior);
+  if (!d) notFound();
+  const { cliente: c, atual: a, anterior: b } = d;
+  const nivelAtual = NIVEIS.find((n) => n.chave === nivel) ?? NIVEIS[0];
+  const linhas = d[nivelAtual.chave];
+  const base = `/clientes/${id}`;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <Link href={`/?p=${atual.chave}`} className="text-sm text-texto-3 hover:text-texto">← Visão geral</Link>
+          <h1 className="text-xl font-semibold">{c.nome}</h1>
+          <p className="text-sm text-texto-2">
+            {d.contas.map((x) => x.nome).join(", ") || "Nenhuma conta vinculada"}
+            {d.contas[0] && <> · atualizado {quandoFoi(d.contas[0].ultima_sync)}</>}
+          </p>
+        </div>
+        <SeletorPeriodo atual={atual.chave} base={base} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <Kpi rotulo="Investido" valor={dinheiro(a.gasto)}><Variacao atual={a.gasto} anterior={b.gasto} neutro /></Kpi>
+        <Kpi rotulo="Resultados" valor={inteiro(a.resultados)}>
+          <span className="text-xs text-texto-3">{inteiro(a.leads)} leads · {inteiro(a.conversas)} conversas</span>
+        </Kpi>
+        <Kpi rotulo={`Custo/resultado${c.cpl_meta ? ` (meta ${dinheiro(c.cpl_meta)})` : ""}`} valor={dinheiro(a.cpr)}>
+          <Variacao atual={a.cpr} anterior={b.cpr} menorMelhor />
+        </Kpi>
+        <Kpi rotulo="CTR (link)" valor={pct(a.ctr)}><Variacao atual={a.ctr} anterior={b.ctr} /></Kpi>
+        <Kpi rotulo="CPM" valor={dinheiro(a.cpm)}><Variacao atual={a.cpm} anterior={b.cpm} menorMelhor /></Kpi>
+        {a.compras > 0 ? (
+          <Kpi rotulo="ROAS" valor={decimal(a.roas)}>
+            <span className="text-xs text-texto-3">{inteiro(a.compras)} compras · {dinheiro(a.valor_compras)}</span>
+          </Kpi>
+        ) : (
+          <Kpi rotulo="Frequência média" valor={decimal(a.frequencia)}>
+            <span className="text-xs text-texto-3">aproximada</span>
+          </Kpi>
+        )}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <BarrasDiarias dados={d.serie} campo="gasto" titulo="Investido por dia" formato="dinheiro" />
+        <BarrasDiarias dados={d.serie} campo="resultados" titulo="Resultados por dia" formato="inteiro" />
+        <BarrasDiarias dados={d.serie} campo="cpr" titulo="Custo por resultado por dia" formato="dinheiro" />
+      </div>
+
+      <div className="rounded-xl border border-borda bg-superficie">
+        <div className="flex gap-1 border-b border-borda p-2 text-sm">
+          {NIVEIS.map((n) => (
+            <Link
+              key={n.chave}
+              href={`${base}?p=${atual.chave}&nivel=${n.chave}`}
+              className={`rounded-md px-3 py-1 ${n.chave === nivelAtual.chave ? "bg-fundo font-medium" : "text-texto-2 hover:text-texto"}`}
+            >
+              {n.rotulo} <span className="text-texto-3">({d[n.chave].length})</span>
+            </Link>
+          ))}
+        </div>
+        <Tabela linhas={linhas} meta={c.cpl_meta} />
+      </div>
+    </div>
+  );
+}
+
+function Tabela({ linhas, meta }: { linhas: LinhaTabela[]; meta: number | null }) {
+  if (!linhas.length) return <p className="p-4 text-sm text-texto-3">Sem dados no período.</p>;
+  const media = (() => {
+    const g = linhas.reduce((s, l) => s + l.gasto, 0);
+    const r = linhas.reduce((s, l) => s + l.resultados, 0);
+    return r ? g / r : null;
+  })();
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-left text-xs text-texto-3">
+          <tr>
+            <th className="px-4 py-2 font-normal">Nome</th>
+            {["Investido", "Resultados", "Custo/result.", "CTR", "CPC", "CPM", "Freq."].map((h) => (
+              <th key={h} className="px-3 py-2 text-right font-normal">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="num">
+          {linhas.map((l) => {
+            const ref = meta ?? media;
+            const caro = ref !== null && l.cpr !== null && l.cpr > ref * 1.3;
+            const semResultado = l.gasto > 0 && l.resultados === 0;
+            return (
+              <tr key={l.id} className="border-t border-borda">
+                <td className="max-w-80 px-4 py-2">
+                  <div className="truncate" title={l.nome}>{l.nome}</div>
+                  {l.pai && <div className="truncate text-xs text-texto-3">{l.pai}</div>}
+                </td>
+                <td className="px-3 py-2 text-right">{dinheiro(l.gasto)}</td>
+                <td className="px-3 py-2 text-right">{inteiro(l.resultados)}</td>
+                <td className={`px-3 py-2 text-right ${caro || semResultado ? "text-critico" : ""}`}>
+                  {semResultado ? "sem resultado" : dinheiro(l.cpr)}
+                </td>
+                <td className="px-3 py-2 text-right">{pct(l.ctr)}</td>
+                <td className="px-3 py-2 text-right">{dinheiro(l.cpc)}</td>
+                <td className="px-3 py-2 text-right">{dinheiro(l.cpm)}</td>
+                <td className="px-3 py-2 text-right">{decimal(l.frequencia)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="px-4 py-2 text-xs text-texto-3">
+        Em vermelho: custo por resultado 30% acima {meta ? "da meta" : "da média do cliente"}, ou gasto sem resultado.
+      </p>
+    </div>
+  );
+}

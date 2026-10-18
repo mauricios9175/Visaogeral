@@ -1,0 +1,30 @@
+name: Sincronizar Meta Ads
+
+# Puxa os dados automaticamente chamando o painel publicado.
+# Configure em Settings → Secrets and variables → Actions:
+#   APP_URL      → endereço do painel (ex.: https://visaogeral.vercel.app)
+#   CRON_SECRET  → o mesmo valor configurado na Vercel
+on:
+  schedule:
+    - cron: "7 * * * *"   # a cada hora: hoje + ontem
+    - cron: "17 6 * * *"  # 03:17 de Brasília: reprocessa últimos 7 dias
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "hoje, semana ou mes"
+        default: "semana"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Chamar sincronização
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          MODO: ${{ github.event.inputs.modo || (github.event.schedule == '17 6 * * *' && 'semana') || 'hoje' }}
+        run: |
+          curl -sS --fail-with-body --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/sync?modo=$MODO"
