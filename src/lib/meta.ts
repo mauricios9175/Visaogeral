@@ -51,15 +51,51 @@ export type ContaMeta = {
   timezone_name: string;
   account_status: number;
   business?: { name: string };
+  is_prepay_account?: boolean;
+  amount_spent?: string;   // em centavos
+  spend_cap?: string;      // em centavos; "0" = sem limite
+  funding_source_details?: { display_string?: string };
 };
 
 export function listarContas(token: string) {
   return todasPaginas<ContaMeta>(
     montarUrl("me/adaccounts", token, {
-      fields: "id,name,currency,timezone_name,account_status,business{name}",
+      fields: [
+        "id", "name", "currency", "timezone_name", "account_status", "business{name}",
+        "is_prepay_account", "amount_spent", "spend_cap", "funding_source_details",
+      ].join(","),
       limit: "200",
     }),
   );
+}
+
+/**
+ * O Meta só informa o saldo pré-pago como texto, ex.: "Saldo disponível (R$ 1.234,56 BRL)"
+ * ou "Available balance (R$1,234.56 BRL)". Extrai o número nos dois formatos.
+ */
+export function lerSaldo(texto: string | undefined): number | null {
+  if (!texto || !/saldo|balance/i.test(texto)) return null;
+  const numeros = texto.match(/\d[\d.,]*/g);
+  if (!numeros) return null;
+  const bruto = numeros[numeros.length - 1];
+  const decimalVirgula = /,\d{1,2}$/.test(bruto);
+  const limpo = decimalVirgula ? bruto.replace(/\./g, "").replace(",", ".") : bruto.replace(/,/g, "");
+  const valor = Number(limpo);
+  return Number.isFinite(valor) ? valor : null;
+}
+
+/** Campos de saldo/limite prontos para salvar em contas_anuncio. */
+export function dadosFinanceiros(c: ContaMeta) {
+  const texto = c.funding_source_details?.display_string ?? null;
+  const cap = Number(c.spend_cap ?? 0) / 100;
+  return {
+    pre_paga: c.is_prepay_account ?? null,
+    saldo: c.is_prepay_account ? lerSaldo(texto ?? undefined) : null,
+    saldo_texto: texto,
+    limite_gasto: cap > 0 ? cap : null,
+    total_gasto: c.amount_spent != null ? Number(c.amount_spent) / 100 : null,
+    saldo_em: new Date().toISOString(),
+  };
 }
 
 export function quemSou(token: string) {

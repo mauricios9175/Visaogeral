@@ -1,5 +1,5 @@
 import { db, type Cliente, type ContaAnuncio, type TokenMeta } from "@/lib/db";
-import { diasAte, quandoFoi } from "@/lib/formato";
+import { diasAte, dinheiro, quandoFoi } from "@/lib/formato";
 import { Aviso } from "@/components/ui";
 import { alternarSyncConta, importar, salvarCliente, sincronizarAgora, vincularConta } from "../../acoes";
 
@@ -14,7 +14,8 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
   const banco = db();
   const [{ data: clientes }, { data: contas }, { data: tokens }] = await Promise.all([
     banco.from("clientes").select("*").order("nome"),
-    banco.from("contas_anuncio").select("*").order("nome"),
+    banco.from("contas_anuncio").select("*")
+      .order("cliente_id", { nullsFirst: false }).order("status").order("nome"),
     banco.from("tokens_meta").select("id, fb_user_id, nome, expira_em"),
   ]);
   const listaClientes = (clientes ?? []) as Cliente[];
@@ -108,12 +109,13 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
           <Aviso>Nenhuma conta ainda. Clique em “Buscar contas no Meta”.</Aviso>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
-            <table className="w-full min-w-[760px] text-sm">
+            <table className="w-full min-w-[900px] text-sm">
               <thead className="text-left text-xs text-texto-3">
                 <tr>
                   <th className="px-4 py-2 font-normal">Conta</th>
                   <th className="px-3 py-2 font-normal">Acesso</th>
                   <th className="px-3 py-2 font-normal">Última sync</th>
+                  <th className="px-3 py-2 font-normal">Saldo / limite</th>
                   <th className="px-3 py-2 font-normal">Cliente</th>
                   <th className="px-3 py-2 font-normal">Sincronizar</th>
                 </tr>
@@ -130,6 +132,16 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                     </td>
                     <td className="px-3 py-2 text-texto-2">{conta.origem === "bm" ? "Seu BM" : "Login FB"}</td>
                     <td className="px-3 py-2 text-texto-2">{quandoFoi(conta.ultima_sync)}</td>
+                    <td className="num px-3 py-2 text-texto-2">
+                      {conta.pre_paga
+                        ? <span title={conta.saldo_texto ?? ""}>Pré-paga: {dinheiro(conta.saldo)}</span>
+                        : conta.pre_paga === false ? "Pós-paga (cartão)" : "—"}
+                      {conta.limite_gasto != null && conta.total_gasto != null && (
+                        <div className="text-xs text-texto-3">
+                          Limite: resta {dinheiro(conta.limite_gasto - conta.total_gasto)}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-3 py-2">
                       <form action={vincularConta} className="flex gap-2">
                         <input type="hidden" name="conta_id" value={conta.id} />

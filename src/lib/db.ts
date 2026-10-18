@@ -40,6 +40,12 @@ export type ContaAnuncio = {
   ativa_sync: boolean;
   ultima_sync: string | null;
   ultimo_erro: string | null;
+  pre_paga: boolean | null;
+  saldo: number | null;
+  saldo_texto: string | null;
+  limite_gasto: number | null;
+  total_gasto: number | null;
+  saldo_em: string | null;
 };
 
 export type TokenMeta = {

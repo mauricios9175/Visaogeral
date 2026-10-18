@@ -1,6 +1,6 @@
 import "server-only";
 import { db, type ContaAnuncio, type TokenMeta } from "./db";
-import { extrairResultados, insightsPorAnuncio, listarContas } from "./meta";
+import { dadosFinanceiros, extrairResultados, insightsPorAnuncio, listarContas } from "./meta";
 import { diasAtras, hojeISO } from "./datas";
 
 /** Busca no Meta todas as contas que os tokens enxergam e cadastra/atualiza no banco. */
@@ -14,7 +14,7 @@ export async function importarContas() {
       encontradas.set(c.id, {
         id: c.id, nome: c.name, moeda: c.currency, fuso: c.timezone_name,
         status: c.account_status, bm_nome: c.business?.name ?? null,
-        origem: "usuario", token_id: t.id,
+        origem: "usuario", token_id: t.id, ...dadosFinanceiros(c),
       });
     }
   }
@@ -25,7 +25,7 @@ export async function importarContas() {
       encontradas.set(c.id, {
         id: c.id, nome: c.name, moeda: c.currency, fuso: c.timezone_name,
         status: c.account_status, bm_nome: c.business?.name ?? null,
-        origem: "bm", token_id: null,
+        origem: "bm", token_id: null, ...dadosFinanceiros(c),
       });
     }
   }
@@ -88,13 +88,22 @@ export async function sincronizar(modo: ModoSync) {
   const banco = db();
   const { desde, ate } = intervalo(modo);
   const { data: exec } = await banco.from("sync_execucoes").insert({ modo }).select("id").single();
+  const erros: string[] = [];
 
-  const { data: contas } = await banco.from("contas_anuncio").select("*").eq("ativa_sync", true);
+  // Atualiza status, saldo e limite de todas as contas (uma chamada por token, é barato).
+  try {
+    await importarContas();
+  } catch (e) {
+    erros.push(`Atualização de saldo/contas: ${e instanceof Error ? e.message : e}`);
+  }
+
+  // Métricas só das contas vinculadas a um cliente: as outras não aparecem no painel.
+  const { data: contas } = await banco.from("contas_anuncio").select("*")
+    .eq("ativa_sync", true).not("cliente_id", "is", null);
   const { data: tokens } = await banco.from("tokens_meta").select("id, token");
   const tokenPorId = new Map((tokens ?? []).map((t) => [t.id as string, t.token as string]));
 
   const fila = [...((contas ?? []) as ContaAnuncio[])];
-  const erros: string[] = [];
   let totalLinhas = 0;
 
   async function trabalhador() {

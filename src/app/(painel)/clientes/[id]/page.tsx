@@ -31,7 +31,8 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
           <Link href={`/?p=${atual.chave}`} className="text-sm text-texto-3 hover:text-texto">← Visão geral</Link>
           <h1 className="text-xl font-semibold">{c.nome}</h1>
           <p className="text-sm text-texto-2">
-            {d.contas.map((x) => x.nome).join(", ") || "Nenhuma conta vinculada"}
+            {d.contas.map((x) => x.nome + (x.pre_paga && x.saldo != null ? ` (saldo ${dinheiro(x.saldo)})` : "")).join(", ")
+              || "Nenhuma conta vinculada"}
             {d.contas[0] && <> · atualizado {quandoFoi(d.contas[0].ultima_sync)}</>}
           </p>
         </div>

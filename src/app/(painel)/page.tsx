@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { resolverPeriodo, progressoDoMes } from "@/lib/datas";
-import { resumoClientes, type ResumoCliente } from "@/lib/consultas";
+import { alertasContas, resumoClientes, type AlertaConta, type ResumoCliente } from "@/lib/consultas";
 import { db } from "@/lib/db";
 import { dinheiro, inteiro, quandoFoi } from "@/lib/formato";
 import { Aviso, SeletorPeriodo, SeloSaude, Variacao } from "@/components/ui";
@@ -12,11 +12,12 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
   const { p } = (await searchParams) as { p?: string };
   const { atual, anterior } = resolverPeriodo(p);
   const banco = db();
-  const [resumos, { data: ultima }, { count: semCliente }] = await Promise.all([
+  const [resumos, alertas, { data: ultima }, { count: semCliente }] = await Promise.all([
     resumoClientes(atual, anterior),
+    alertasContas(),
     banco.from("sync_execucoes").select("finalizado_em, status").not("finalizado_em", "is", null)
       .order("id", { ascending: false }).limit(1).maybeSingle(),
-    banco.from("contas_anuncio").select("id", { count: "exact", head: true }).is("cliente_id", null),
+    banco.from("contas_anuncio").select("id", { count: "exact", head: true }).is("cliente_id", null).eq("status", 1),
   ]);
   resumos.sort((a, b) => ORDEM[a.saude] - ORDEM[b.saude] || b.atual.gasto - a.atual.gasto);
 
@@ -38,9 +39,11 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
         <SeletorPeriodo atual={atual.chave} base="/" />
       </div>
 
+      {alertas.length > 0 && <PainelAlertas alertas={alertas} />}
+
       {!!semCliente && (
         <Aviso>
-          {semCliente} conta(s) de anúncio ainda sem cliente vinculado.{" "}
+          {semCliente} conta(s) ativa(s) de anúncio ainda sem cliente vinculado.{" "}
           <Link href="/configuracoes" className="text-destaque underline">Vincular agora</Link>
         </Aviso>
       )}
@@ -52,7 +55,12 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {resumos.map((r) => <CardCliente key={r.cliente.id} r={r} periodo={atual.chave} />)}
+        {resumos.map((r) => (
+          <CardCliente
+            key={r.cliente.id} r={r} periodo={atual.chave}
+            alertas={alertas.filter((a) => a.clienteId === r.cliente.id).length}
+          />
+        ))}
       </div>
       <p className="text-xs text-texto-3">
         Resultados = leads (formulário/site) + conversas iniciadas. Variações comparam com {anterior.rotulo}.
@@ -61,7 +69,35 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
   );
 }
 
-function CardCliente({ r, periodo }: { r: ResumoCliente; periodo: string }) {
+function PainelAlertas({ alertas }: { alertas: AlertaConta[] }) {
+  return (
+    <section className="rounded-xl border border-borda bg-superficie">
+      <h2 className="border-b border-borda px-4 py-2 text-sm font-medium">
+        Precisa de atenção agora ({alertas.length})
+      </h2>
+      <ul className="divide-y divide-borda text-sm">
+        {alertas.map((a, i) => (
+          <li key={i} className="flex gap-3 px-4 py-2">
+            <span
+              className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                a.nivel === "critico" ? "bg-critico-bg text-critico" : "bg-atencao-bg text-atencao"
+              }`}
+            >
+              {a.nivel === "critico" ? "■ Crítico" : "▲ Atenção"}
+            </span>
+            <span>
+              <Link href={`/clientes/${a.clienteId}`} className="font-medium hover:underline">{a.clienteNome}</Link>
+              <span className="text-texto-3"> · {a.contaNome}</span>
+              <span className="block text-texto-2">{a.mensagem}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function CardCliente({ r, periodo, alertas }: { r: ResumoCliente; periodo: string; alertas: number }) {
   const { cliente: c, atual: a, anterior: b, mes } = r;
   const { diaAtual, totalDias } = progressoDoMes();
   const usoOrc = c.orcamento_mensal ? Math.min(mes.gasto / c.orcamento_mensal, 1) : null;
@@ -78,7 +114,14 @@ function CardCliente({ r, periodo }: { r: ResumoCliente; periodo: string }) {
           <div className="font-medium">{c.nome}</div>
           <div className="text-xs text-texto-3">{c.nicho ?? "—"} · {r.contas} conta(s)</div>
         </div>
-        <SeloSaude saude={r.saude} />
+        <div className="flex flex-col items-end gap-1">
+          <SeloSaude saude={r.saude} />
+          {alertas > 0 && (
+            <span className="rounded-full bg-critico-bg px-2 py-0.5 text-xs font-medium text-critico">
+              ■ {alertas} alerta(s) de conta
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-2">

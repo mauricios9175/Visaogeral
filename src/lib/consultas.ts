@@ -1,6 +1,7 @@
 import "server-only";
 import { db, type Cliente, type ContaAnuncio, type Metricas } from "./db";
-import { progressoDoMes, hojeISO, type Periodo } from "./datas";
+import { progressoDoMes, hojeISO, somarDias as somarDiasISO, type Periodo } from "./datas";
+import { dinheiro as dinheiroBR } from "./formato";
 
 const ZERO: Metricas = {
   gasto: 0, impressoes: 0, alcance: 0, cliques: 0, cliques_link: 0,
@@ -180,4 +181,74 @@ export async function detalheCliente(clienteId: string, atual: Periodo, anterior
     conjuntos: agrupar(doAtual, (l) => [l.adset_id, l.adset_nome, l.campaign_nome]),
     anuncios: agrupar(doAtual, (l) => [l.ad_id, l.ad_nome, l.adset_nome]),
   };
+}
+
+const STATUS_CONTA: Record<number, string> = {
+  2: "conta desativada",
+  3: "pagamento pendente (conta bloqueada por falta de pagamento)",
+  7: "conta em análise pelo Meta",
+  9: "conta em período de carência de pagamento",
+  100: "conta com encerramento pendente",
+  101: "conta encerrada",
+};
+
+export type AlertaConta = {
+  clienteId: string;
+  clienteNome: string;
+  contaNome: string;
+  nivel: "critico" | "atencao";
+  mensagem: string;
+};
+
+/** Até quantos dias de saldo/limite o painel considera "baixo". */
+export const DIAS_SALDO_ALERTA = 3;
+
+/**
+ * Problemas de saldo, limite de gastos e status nas contas vinculadas a clientes.
+ * Os dias restantes usam a média de gasto diário dos últimos 7 dias da conta.
+ */
+export async function alertasContas(): Promise<AlertaConta[]> {
+  const banco = db();
+  const desde = somarDiasISO(hojeISO(), -7);
+  const [{ data: contas }, { data: clientes }, gastos] = await Promise.all([
+    banco.from("contas_anuncio").select("*").not("cliente_id", "is", null),
+    banco.from("clientes").select("id, nome").eq("ativo", true),
+    buscarTudo<{ conta_id: string; gasto: number }>((de, ate) =>
+      banco.from("metricas_diarias").select("conta_id, gasto").gte("data", desde).range(de, ate),
+    ),
+  ]);
+  const nomeCliente = new Map((clientes ?? []).map((c) => [c.id as string, c.nome as string]));
+  const gasto7d = new Map<string, number>();
+  for (const g of gastos) gasto7d.set(g.conta_id, (gasto7d.get(g.conta_id) ?? 0) + Number(g.gasto));
+
+  const alertas: AlertaConta[] = [];
+  for (const c of (contas ?? []) as ContaAnuncio[]) {
+    const clienteNome = nomeCliente.get(c.cliente_id ?? "");
+    if (!clienteNome) continue; // cliente inativo
+    const base = { clienteId: c.cliente_id!, clienteNome, contaNome: c.nome };
+
+    if (c.status != null && STATUS_CONTA[c.status]) {
+      alertas.push({ ...base, nivel: "critico", mensagem: STATUS_CONTA[c.status] });
+    }
+
+    const mediaDia = (gasto7d.get(c.id) ?? 0) / 7;
+    const avaliar = (restante: number, oque: string) => {
+      if (restante <= 0) {
+        alertas.push({ ...base, nivel: "critico", mensagem: `${oque} esgotado. Os anúncios param de rodar.` });
+        return;
+      }
+      if (mediaDia <= 0) return;
+      const dias = restante / mediaDia;
+      if (dias <= DIAS_SALDO_ALERTA) {
+        alertas.push({
+          ...base,
+          nivel: dias <= 1 ? "critico" : "atencao",
+          mensagem: `${oque}: ${dinheiroBR(restante)}, dá para ~${dias < 1 ? "menos de 1 dia" : `${Math.floor(dias)} dia(s)`} no ritmo atual (${dinheiroBR(mediaDia)}/dia). Recarregue.`,
+        });
+      }
+    };
+    if (c.pre_paga && c.saldo != null) avaliar(c.saldo, "Saldo pré-pago");
+    if (c.limite_gasto != null && c.total_gasto != null) avaliar(c.limite_gasto - c.total_gasto, "Limite de gastos da conta");
+  }
+  return alertas.sort((a, b) => (a.nivel === b.nivel ? 0 : a.nivel === "critico" ? -1 : 1));
 }
