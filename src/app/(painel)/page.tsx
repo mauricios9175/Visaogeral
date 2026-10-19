@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { resolverPeriodo, progressoDoMes } from "@/lib/datas";
-import { alertasContas, resumoClientes, type AlertaConta, type ResumoCliente } from "@/lib/consultas";
+import { alertasContas, resumoClientes, resumoCrm, type AlertaConta, type NumerosCrm, type ResumoCliente } from "@/lib/consultas";
 import { db } from "@/lib/db";
 import { dataCurta, dinheiro, inteiro, quandoFoi } from "@/lib/formato";
 import { Aviso, SeletorPeriodo, SeloSaude, TiposResultado, Variacao } from "@/components/ui";
@@ -11,13 +11,14 @@ const ORDEM = { critico: 0, atencao: 1, ok: 2, sem_dados: 3 };
 export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
   const { atual, anterior } = resolverPeriodo((await searchParams) as { p?: string; de?: string; ate?: string });
   const banco = db();
-  const [resumos, alertas, { data: ultima }, { count: semCliente }, { data: primeiro }] = await Promise.all([
+  const [resumos, alertas, { data: ultima }, { count: semCliente }, { data: primeiro }, crm] = await Promise.all([
     resumoClientes(atual, anterior),
     alertasContas(),
     banco.from("sync_execucoes").select("finalizado_em, status").not("finalizado_em", "is", null)
       .order("id", { ascending: false }).limit(1).maybeSingle(),
     banco.from("contas_anuncio").select("id", { count: "exact", head: true }).is("cliente_id", null).eq("status", 1),
     banco.from("metricas_diarias").select("data").order("data").limit(1).maybeSingle(),
+    resumoCrm(atual, anterior),
   ]);
   const historicoDesde: string | null = primeiro?.data ?? null;
   resumos.sort((a, b) => ORDEM[a.saude] - ORDEM[b.saude] || b.atual.gasto - a.atual.gasto);
@@ -68,6 +69,7 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
           <CardCliente
             key={r.cliente.id} r={r} periodo={atual.qs}
             alertas={alertas.filter((a) => a.clienteId === r.cliente.id).length}
+            crm={crm.get(r.cliente.id)?.atual}
           />
         ))}
       </div>
@@ -106,7 +108,9 @@ function PainelAlertas({ alertas }: { alertas: AlertaConta[] }) {
   );
 }
 
-function CardCliente({ r, periodo, alertas }: { r: ResumoCliente; periodo: string; alertas: number }) {
+function CardCliente({ r, periodo, alertas, crm }: {
+  r: ResumoCliente; periodo: string; alertas: number; crm?: NumerosCrm;
+}) {
   const { cliente: c, atual: a, anterior: b, mes } = r;
   const { diaAtual, totalDias } = progressoDoMes();
   const usoOrc = c.orcamento_mensal ? Math.min(mes.gasto / c.orcamento_mensal, 1) : null;
@@ -146,6 +150,13 @@ function CardCliente({ r, periodo, alertas }: { r: ResumoCliente; periodo: strin
       </div>
 
       <div className="mt-2"><TiposResultado m={a} compacto /></div>
+      {crm && (
+        <div className="mt-2 rounded-lg bg-fundo px-2 py-1 text-xs text-texto-2">
+          CRM: {crm.qualificados != null && <>{inteiro(crm.qualificados)} qualificados · </>}
+          {inteiro(crm.vendas)} vendas · {dinheiro(crm.faturamento)}
+          {a.gasto > 0 && crm.faturamento > 0 && <> · ROAS {(crm.faturamento / a.gasto).toFixed(1).replace(".", ",")}</>}
+        </div>
+      )}
 
       {c.cpl_meta && (
         <div className="mt-2 text-xs text-texto-3">

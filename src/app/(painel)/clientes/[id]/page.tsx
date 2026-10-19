@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { resolverPeriodo } from "@/lib/datas";
-import { detalheCliente, type LinhaTabela } from "@/lib/consultas";
+import { detalheCliente, detalheCrm, type LinhaTabela } from "@/lib/consultas";
 import { decimal, dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
-import { Kpi, SeletorPeriodo, TiposResultado, Variacao } from "@/components/ui";
+import { Aviso, Kpi, SeletorPeriodo, TiposResultado, Variacao } from "@/components/ui";
 import { BarrasDiarias } from "@/components/graficos";
 
 
@@ -54,7 +54,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
   const { nivel } = busca;
   const filtro = FILTROS.find((f) => f.chave === busca.status) ?? FILTROS[0];
   const { atual, anterior } = resolverPeriodo(busca);
-  const d = await detalheCliente(id, atual, anterior);
+  const [d, crm] = await Promise.all([detalheCliente(id, atual, anterior), detalheCrm(id, atual, anterior)]);
   if (!d) notFound();
   const { cliente: c, atual: a, anterior: b } = d;
   const nivelAtual = NIVEIS.find((n) => n.chave === nivel) ?? NIVEIS[0];
@@ -73,6 +73,8 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
             {d.contas[0] && <> · atualizado {quandoFoi(d.contas[0].ultima_sync)}</>}
             {" · "}
             <Link href={`${base}/diagnostico`} className="text-destaque underline">Diagnóstico de resultados</Link>
+            {" · "}
+            <Link href={`${base}/crm`} className="text-destaque underline">{crm ? "Configurar CRM" : "Conectar CRM"}</Link>
           </p>
         </div>
         <SeletorPeriodo atual={atual} base={base} />
@@ -98,6 +100,8 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
           </Kpi>
         )}
       </div>
+
+      <SecaoCrm crm={crm} gasto={a.gasto} gastoAnterior={b.gasto} base={base} />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <BarrasDiarias dados={d.serie} campo="gasto" titulo="Investido por dia" formato="dinheiro" />
@@ -186,5 +190,81 @@ function Tabela({ linhas, meta }: { linhas: LinhaTabela[]; meta: number | null }
         Em vermelho: custo por resultado 30% acima {meta ? "da meta" : "da média do cliente"}, ou gasto sem resultado.
       </p>
     </div>
+  );
+}
+
+function SecaoCrm({ crm, gasto, gastoAnterior, base }: {
+  crm: Awaited<ReturnType<typeof detalheCrm>>;
+  gasto: number;
+  gastoAnterior: number;
+  base: string;
+}) {
+  if (!crm) return null;
+  const { atual: x, anterior: y, conexao } = crm;
+  const div = (a: number, b: number | null) => (b ? a / b : null);
+  if (conexao.ultimo_erro) {
+    return (
+      <Aviso>
+        Erro no CRM: {conexao.ultimo_erro} · <Link href={`${base}/crm`} className="text-destaque underline">ver configuração</Link>
+      </Aviso>
+    );
+  }
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium">
+        CRM <span className="font-normal text-texto-3">· atualizado {quandoFoi(conexao.ultima_sync)}</span>
+      </h2>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Kpi rotulo="Leads no CRM" valor={inteiro(x.leads)}>
+          <Variacao atual={x.leads} anterior={y.leads} />
+        </Kpi>
+        <Kpi rotulo="Qualificados" valor={x.qualificados == null ? "—" : inteiro(x.qualificados)}>
+          {x.qualificados == null ? (
+            <Link href={`${base}/crm`} className="text-xs text-destaque underline">definir etapa</Link>
+          ) : (
+            <span className="text-xs text-texto-3">
+              {dinheiro(div(gasto, x.qualificados))} por qualificado
+              {x.leads > 0 && ` · ${pct((x.qualificados / x.leads) * 100)} dos leads`}
+            </span>
+          )}
+        </Kpi>
+        <Kpi rotulo="Vendas" valor={inteiro(x.vendas)}>
+          <span className="text-xs text-texto-3">{dinheiro(div(gasto, x.vendas))} por venda</span>
+        </Kpi>
+        <Kpi rotulo="Faturamento" valor={dinheiro(x.faturamento)}>
+          <span className="block text-xs text-texto-3">ROAS real {decimal(div(x.faturamento, gasto))}</span>
+          <Variacao atual={div(x.faturamento, gasto)} anterior={div(y.faturamento, gastoAnterior)} />
+        </Kpi>
+      </div>
+      {crm.porOrigem.length > 0 && (
+        <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs text-texto-3">
+              <tr>
+                <th className="px-4 py-2 font-normal">Campanha / origem no CRM</th>
+                {["Leads", "Qualificados", "Vendas", "Faturamento"].map((h) => (
+                  <th key={h} className="px-3 py-2 text-right font-normal">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="num">
+              {crm.porOrigem.map((o) => (
+                <tr key={o.nome} className="border-t border-borda">
+                  <td className="max-w-96 truncate px-4 py-2" title={o.nome}>{o.nome}</td>
+                  <td className="px-3 py-2 text-right">{inteiro(o.leads)}</td>
+                  <td className="px-3 py-2 text-right">{o.qualificados == null ? "—" : inteiro(o.qualificados)}</td>
+                  <td className="px-3 py-2 text-right">{inteiro(o.vendas)}</td>
+                  <td className="px-3 py-2 text-right">{dinheiro(o.faturamento)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="px-4 py-2 text-xs text-texto-3">
+            Leads e qualificados: negócios criados no período. Vendas: negócios ganhos com fechamento no período.
+            A campanha vem do campo Campanha (ou UTM) do negócio no RD; sem ela, aparece a Fonte.
+          </p>
+        </div>
+      )}
+    </section>
   );
 }

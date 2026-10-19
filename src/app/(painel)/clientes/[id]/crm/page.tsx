@@ -1,0 +1,148 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { db } from "@/lib/db";
+import { quandoFoi } from "@/lib/formato";
+import { listarFunis, type FunilRd } from "@/lib/crm/rd";
+import type { ConexaoCrm } from "@/lib/crm/sync";
+import { Aviso } from "@/components/ui";
+import { BotaoEnviar } from "@/components/botao";
+import { removerConexaoCrm, salvarConexaoCrm, salvarFunilCrm, sincronizarCrmAgora } from "../../../../acoes";
+
+export const maxDuration = 300;
+
+const campo = "rounded-lg border border-borda bg-fundo px-2 py-1.5 text-sm outline-none focus:border-destaque";
+const botao = "rounded-lg border border-borda bg-superficie px-3 py-1.5 text-sm hover:border-destaque";
+const botaoPrimario = "rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium text-white";
+
+export default async function ConfigCrm({ params, searchParams }: PageProps<"/clientes/[id]/crm">) {
+  const { id } = await params;
+  const { msg } = (await searchParams) as { msg?: string };
+  const banco = db();
+  const [{ data: cliente }, { data: conexao }] = await Promise.all([
+    banco.from("clientes").select("id, nome").eq("id", id).maybeSingle(),
+    banco.from("crm_conexoes").select("*").eq("cliente_id", id).maybeSingle(),
+  ]);
+  if (!cliente) notFound();
+  const c = conexao as ConexaoCrm | null;
+
+  let funis: FunilRd[] = [];
+  let erroFunis: string | null = null;
+  if (c) {
+    try {
+      funis = await listarFunis(c.token);
+    } catch (e) {
+      erroFunis = e instanceof Error ? e.message : String(e);
+    }
+  }
+  const valorAtual =
+    c?.etapa_qualificado
+      ? (() => {
+          const f = funis.find((x) => x.id === c.pipeline_id);
+          const e = f?.etapas.find((x) => x.id === c.etapa_qualificado);
+          return f && e ? `${f.id}|${f.nome}|${e.id}|${e.nome}|${e.ordem}` : "";
+        })()
+      : "";
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      <div>
+        <Link href={`/clientes/${id}`} className="text-sm text-texto-3 hover:text-texto">← {cliente.nome}</Link>
+        <h1 className="text-xl font-semibold">CRM de {cliente.nome}</h1>
+        <p className="text-sm text-texto-2">
+          O painel só lê o CRM: traz os negócios, a etapa em que estão, se viraram venda e o valor. Nada é alterado lá.
+        </p>
+      </div>
+      {msg && <Aviso>{msg}</Aviso>}
+
+      {/* 1. Conexão */}
+      <section className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+        <h2 className="font-medium">1. Conexão</h2>
+        <form action={salvarConexaoCrm} className="flex flex-wrap items-end gap-3">
+          <input type="hidden" name="cliente_id" value={id} />
+          <label className="flex flex-col gap-1 text-sm">
+            CRM
+            <select name="tipo" defaultValue={c?.tipo ?? "rd_crm"} className={campo}>
+              <option value="rd_crm">RD Station CRM</option>
+              <option value="kommo" disabled>Kommo (em breve)</option>
+            </select>
+          </label>
+          <label className="flex min-w-64 flex-1 flex-col gap-1 text-sm">
+            Token da API
+            <input
+              type="password" name="token" autoComplete="off" className={campo}
+              placeholder={c ? "•••••••• (deixe vazio para manter o atual)" : "Cole aqui o token do RD Station CRM"}
+            />
+          </label>
+          <BotaoEnviar className={botaoPrimario} aguardando="Testando…">
+            {c ? "Atualizar e testar" : "Conectar"}
+          </BotaoEnviar>
+        </form>
+        <p className="text-xs text-texto-3">
+          Onde achar o token no RD Station CRM: clique no seu nome (canto superior direito) → Perfil → aba
+          Integrações (ou “Token da instância”) → copie o token.
+        </p>
+        {c && (
+          <p className="text-sm text-texto-2">
+            Conectado · última sincronização {quandoFoi(c.ultima_sync)}
+            {c.ultimo_erro && <span className="block text-critico">Erro: {c.ultimo_erro}</span>}
+          </p>
+        )}
+      </section>
+
+      {/* 2. Funil e qualificação */}
+      {c && (
+        <section className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+          <h2 className="font-medium">2. Funil e etapa de qualificação</h2>
+          {erroFunis ? (
+            <p className="text-sm text-critico">Não foi possível ler os funis: {erroFunis}</p>
+          ) : (
+            <form action={salvarFunilCrm} className="space-y-3">
+              <input type="hidden" name="cliente_id" value={id} />
+              <label className="flex flex-col gap-1 text-sm">
+                A partir de qual etapa o lead conta como <b>qualificado</b>?
+                <select name="escolha" required defaultValue={valorAtual} className={campo}>
+                  <option value="" disabled>Escolha o funil e a etapa…</option>
+                  {funis.map((f) => (
+                    <optgroup key={f.id} label={`Funil: ${f.nome}`}>
+                      {f.etapas.map((e) => (
+                        <option key={e.id} value={`${f.id}|${f.nome}|${e.id}|${e.nome}|${e.ordem}`}>
+                          {e.ordem}. {e.nome}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+              <p className="text-xs text-texto-3">
+                Conta como qualificado todo negócio desse funil que estiver nessa etapa ou em uma etapa depois dela,
+                além dos negócios ganhos. <b>Venda</b> = negócio marcado como ganho no RD, com o valor dele.
+              </p>
+              <BotaoEnviar className={botaoPrimario}>Salvar</BotaoEnviar>
+            </form>
+          )}
+          {c.pipeline_nome && (
+            <p className="text-sm text-texto-2">
+              Atual: funil <b>{c.pipeline_nome}</b>, qualificado a partir de <b>{c.etapa_qualificado_nome}</b>.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* 3. Sincronizar / remover */}
+      {c && (
+        <section className="flex flex-wrap items-start gap-3">
+          <form action={sincronizarCrmAgora}>
+            <input type="hidden" name="cliente_id" value={id} />
+            <BotaoEnviar className={botao} aguardando="Sincronizando CRM…" aviso="Pode levar até 1 minuto.">
+              Sincronizar CRM agora
+            </BotaoEnviar>
+          </form>
+          <form action={removerConexaoCrm}>
+            <input type="hidden" name="cliente_id" value={id} />
+            <BotaoEnviar className={`${botao} text-critico`} aguardando="Removendo…">Remover conexão</BotaoEnviar>
+          </form>
+        </section>
+      )}
+    </div>
+  );
+}

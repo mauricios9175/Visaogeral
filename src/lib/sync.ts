@@ -5,6 +5,7 @@ import {
   objetivosDosConjuntos, type LinhaInsight, type ObjetivoConjunto,
 } from "./meta";
 import { diasAtras, diasEntre, hojeISO, somarDias } from "./datas";
+import { sincronizarCrms } from "./crm/sync";
 
 /** Busca no Meta todas as contas que os tokens enxergam e cadastra/atualiza no banco. */
 export async function importarContas() {
@@ -177,6 +178,14 @@ export async function sincronizar(modo: ModoSync) {
     }
   }
   await Promise.all([trabalhador(), trabalhador(), trabalhador()]);
+
+  // CRM dos clientes: a cada hora olha 30 dias (pega mudanças de etapa); de madrugada, 90.
+  try {
+    const crm = await sincronizarCrms(modo === "hoje" ? 30 : 90);
+    erros.push(...crm.erros);
+  } catch (e) {
+    erros.push(`CRM: ${e instanceof Error ? e.message : e}`);
+  }
 
   const resultado = {
     contas: contas?.length ?? 0,

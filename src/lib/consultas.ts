@@ -310,3 +310,98 @@ export async function alertasContas(): Promise<AlertaConta[]> {
   }
   return alertas.sort((a, b) => (a.nivel === b.nivel ? 0 : a.nivel === "critico" ? -1 : 1));
 }
+
+// ---------- CRM ----------
+
+type NegocioCrm = {
+  cliente_id: string; pipeline_id: string | null; criado_em: string; fechado_em: string | null;
+  etapa_ordem: number | null; ganho: boolean | null; valor: number; campanha: string | null; origem: string | null;
+};
+type ConexaoResumo = {
+  cliente_id: string; pipeline_id: string | null; etapa_qualificado_ordem: number | null;
+  ultima_sync: string | null; ultimo_erro: string | null;
+};
+
+export type NumerosCrm = {
+  leads: number;
+  qualificados: number | null;   // null = etapa de qualificação não configurada
+  vendas: number;
+  faturamento: number;
+};
+
+const diaSP = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date(iso));
+
+/**
+ * Leads e qualificados: negócios CRIADOS no período (coorte).
+ * Vendas e faturamento: negócios GANHOS com data de fechamento no período.
+ */
+function numerosCrm(negocios: NegocioCrm[], cx: ConexaoResumo, p: Periodo): NumerosCrm {
+  const doFunil = negocios.filter((n) => !cx.pipeline_id || n.pipeline_id === cx.pipeline_id);
+  const criados = doFunil.filter((n) => { const d = diaSP(n.criado_em); return d >= p.desde && d <= p.ate; });
+  const ganhos = doFunil.filter((n) => {
+    if (n.ganho !== true || !n.fechado_em) return false;
+    const d = diaSP(n.fechado_em);
+    return d >= p.desde && d <= p.ate;
+  });
+  const qualificado = (n: NegocioCrm) =>
+    n.ganho === true || (cx.etapa_qualificado_ordem != null && (n.etapa_ordem ?? -1) >= cx.etapa_qualificado_ordem);
+  return {
+    leads: criados.length,
+    qualificados: cx.etapa_qualificado_ordem == null ? null : criados.filter(qualificado).length,
+    vendas: ganhos.length,
+    faturamento: ganhos.reduce((s, n) => s + Number(n.valor), 0),
+  };
+}
+
+async function negociosDe(clienteIds: string[], desde: string) {
+  if (!clienteIds.length) return [];
+  // margem de 1 dia por causa do fuso
+  const limite = `${somarDiasISO(desde, -1)}T00:00:00Z`;
+  return buscarTudo<NegocioCrm>((de, ate) =>
+    db().from("crm_negocios")
+      .select("cliente_id, pipeline_id, criado_em, fechado_em, etapa_ordem, ganho, valor, campanha, origem")
+      .in("cliente_id", clienteIds)
+      .or(`criado_em.gte.${limite},fechado_em.gte.${limite}`)
+      .range(de, ate),
+  );
+}
+
+/** Números do CRM por cliente para a visão geral (só clientes com CRM conectado). */
+export async function resumoCrm(atual: Periodo, anterior: Periodo) {
+  const { data: conexoes } = await db().from("crm_conexoes")
+    .select("cliente_id, pipeline_id, etapa_qualificado_ordem, ultima_sync, ultimo_erro");
+  const lista = (conexoes ?? []) as ConexaoResumo[];
+  const negocios = await negociosDe(lista.map((c) => c.cliente_id), anterior.desde);
+  return new Map(lista.map((cx) => {
+    const meus = negocios.filter((n) => n.cliente_id === cx.cliente_id);
+    return [cx.cliente_id, { atual: numerosCrm(meus, cx, atual), anterior: numerosCrm(meus, cx, anterior) }] as const;
+  }));
+}
+
+/** CRM na tela do cliente: totais do período e quebra por campanha/origem. */
+export async function detalheCrm(clienteId: string, atual: Periodo, anterior: Periodo) {
+  const { data } = await db().from("crm_conexoes")
+    .select("cliente_id, pipeline_id, pipeline_nome, etapa_qualificado_ordem, etapa_qualificado_nome, ultima_sync, ultimo_erro")
+    .eq("cliente_id", clienteId).maybeSingle();
+  if (!data) return null;
+  const cx = data as ConexaoResumo & { pipeline_nome: string | null; etapa_qualificado_nome: string | null };
+  const negocios = await negociosDe([clienteId], anterior.desde);
+
+  // agrupa por campanha (UTM) ou, na falta, pela fonte do negócio
+  const grupos = new Map<string, NegocioCrm[]>();
+  for (const n of negocios) {
+    const chave = n.campanha || (n.origem ? `Fonte: ${n.origem}` : "Sem origem identificada");
+    grupos.set(chave, [...(grupos.get(chave) ?? []), n]);
+  }
+  const porOrigem = [...grupos.entries()]
+    .map(([nome, ns]) => ({ nome, ...numerosCrm(ns, cx, atual) }))
+    .filter((g) => g.leads || g.vendas)
+    .sort((a, b) => b.faturamento - a.faturamento || b.leads - a.leads);
+
+  return {
+    conexao: cx,
+    atual: numerosCrm(negocios, cx, atual),
+    anterior: numerosCrm(negocios, cx, anterior),
+    porOrigem,
+  };
+}

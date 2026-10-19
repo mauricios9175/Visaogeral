@@ -6,6 +6,8 @@ import { revalidatePath } from "next/cache";
 import { COOKIE_SESSAO, criarSessao, senhaCorreta } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { importarContas, sincronizar } from "@/lib/sync";
+import { listarFunis } from "@/lib/crm/rd";
+import { sincronizarCrmCliente, type ConexaoCrm } from "@/lib/crm/sync";
 
 export async function entrar(_: unknown, form: FormData) {
   if (!senhaCorreta(String(form.get("senha") ?? ""))) return { erro: "Senha incorreta." };
@@ -88,4 +90,75 @@ export async function sincronizarAgora(form: FormData) {
   }
   revalidatePath("/", "layout");
   aviso(msg);
+}
+
+// ---------- CRM ----------
+
+function avisoCrm(clienteId: string, msg: string): never {
+  redirect(`/clientes/${clienteId}/crm?msg=${encodeURIComponent(msg)}`);
+}
+
+export async function salvarConexaoCrm(form: FormData) {
+  const clienteId = String(form.get("cliente_id"));
+  const tipo = String(form.get("tipo") ?? "rd_crm");
+  const token = String(form.get("token") ?? "").trim();
+  const banco = db();
+  const { data: atual } = await banco.from("crm_conexoes").select("token").eq("cliente_id", clienteId).maybeSingle();
+  const tokenFinal = token || atual?.token;
+  if (!tokenFinal) avisoCrm(clienteId, "Informe o token do CRM.");
+  let msg: string;
+  try {
+    const funis = await listarFunis(tokenFinal);
+    const { error } = await banco.from("crm_conexoes").upsert(
+      { cliente_id: clienteId, tipo, token: tokenFinal, ultimo_erro: null },
+      { onConflict: "cliente_id" },
+    );
+    if (error) throw new Error(error.message);
+    msg = `Conectado! ${funis.length} funil(is) encontrado(s). Agora escolha o funil e a etapa de qualificação.`;
+  } catch (e) {
+    msg = `Não foi possível conectar: ${e instanceof Error ? e.message : e}`;
+  }
+  revalidatePath("/", "layout");
+  avisoCrm(clienteId, msg);
+}
+
+export async function salvarFunilCrm(form: FormData) {
+  const clienteId = String(form.get("cliente_id"));
+  // valor no formato "funilId|funilNome|etapaId|etapaNome|etapaOrdem"
+  const [pipelineId, pipelineNome, etapaId, etapaNome, etapaOrdem] = String(form.get("escolha") ?? "").split("|");
+  const { error } = await db().from("crm_conexoes").update({
+    pipeline_id: pipelineId || null,
+    pipeline_nome: pipelineNome || null,
+    etapa_qualificado: etapaId || null,
+    etapa_qualificado_nome: etapaNome || null,
+    etapa_qualificado_ordem: etapaOrdem ? Number(etapaOrdem) : null,
+  }).eq("cliente_id", clienteId);
+  if (error) avisoCrm(clienteId, `Erro: ${error.message}`);
+  // Funil mudou: limpa os negócios antigos para não misturar funis.
+  await db().from("crm_negocios").delete().eq("cliente_id", clienteId);
+  revalidatePath("/", "layout");
+  avisoCrm(clienteId, "Configuração salva. Clique em “Sincronizar CRM agora” para trazer os negócios.");
+}
+
+export async function sincronizarCrmAgora(form: FormData) {
+  const clienteId = String(form.get("cliente_id"));
+  const { data: conexao } = await db().from("crm_conexoes").select("*").eq("cliente_id", clienteId).maybeSingle();
+  let msg: string;
+  try {
+    if (!conexao) throw new Error("Cliente sem CRM conectado.");
+    const n = await sincronizarCrmCliente(conexao as ConexaoCrm, 90);
+    msg = `CRM sincronizado: ${n} negócio(s) dos últimos 90 dias.`;
+  } catch (e) {
+    msg = `Erro ao sincronizar o CRM: ${e instanceof Error ? e.message : e}`;
+  }
+  revalidatePath("/", "layout");
+  avisoCrm(clienteId, msg);
+}
+
+export async function removerConexaoCrm(form: FormData) {
+  const clienteId = String(form.get("cliente_id"));
+  await db().from("crm_negocios").delete().eq("cliente_id", clienteId);
+  await db().from("crm_conexoes").delete().eq("cliente_id", clienteId);
+  revalidatePath("/", "layout");
+  avisoCrm(clienteId, "Conexão com o CRM removida.");
 }
