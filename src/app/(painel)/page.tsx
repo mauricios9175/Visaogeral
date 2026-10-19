@@ -2,7 +2,7 @@ import Link from "next/link";
 import { resolverPeriodo, progressoDoMes } from "@/lib/datas";
 import { alertasContas, resumoClientes, type AlertaConta, type ResumoCliente } from "@/lib/consultas";
 import { db } from "@/lib/db";
-import { dinheiro, inteiro, quandoFoi } from "@/lib/formato";
+import { dataCurta, dinheiro, inteiro, quandoFoi } from "@/lib/formato";
 import { Aviso, SeletorPeriodo, SeloSaude, Variacao } from "@/components/ui";
 
 
@@ -12,13 +12,15 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
   const { p } = (await searchParams) as { p?: string };
   const { atual, anterior } = resolverPeriodo(p);
   const banco = db();
-  const [resumos, alertas, { data: ultima }, { count: semCliente }] = await Promise.all([
+  const [resumos, alertas, { data: ultima }, { count: semCliente }, { data: primeiro }] = await Promise.all([
     resumoClientes(atual, anterior),
     alertasContas(),
     banco.from("sync_execucoes").select("finalizado_em, status").not("finalizado_em", "is", null)
       .order("id", { ascending: false }).limit(1).maybeSingle(),
     banco.from("contas_anuncio").select("id", { count: "exact", head: true }).is("cliente_id", null).eq("status", 1),
+    banco.from("metricas_diarias").select("data").order("data").limit(1).maybeSingle(),
   ]);
+  const historicoDesde: string | null = primeiro?.data ?? null;
   resumos.sort((a, b) => ORDEM[a.saude] - ORDEM[b.saude] || b.atual.gasto - a.atual.gasto);
 
   const total = resumos.reduce(
@@ -38,6 +40,14 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
         </div>
         <SeletorPeriodo atual={atual.chave} base="/" />
       </div>
+
+      {historicoDesde && historicoDesde > atual.desde && (
+        <Aviso>
+          O histórico carregado começa em {dataCurta(historicoDesde)}, então este período mostra só os dias a partir daí.
+          Para comparar períodos maiores, clique em “Recarregar últimos 30 dias” em{" "}
+          <Link href="/configuracoes" className="text-destaque underline">Configurações</Link>.
+        </Aviso>
+      )}
 
       {alertas.length > 0 && <PainelAlertas alertas={alertas} />}
 
