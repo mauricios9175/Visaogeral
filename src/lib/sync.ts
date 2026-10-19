@@ -1,8 +1,8 @@
 import "server-only";
 import { db, type ContaAnuncio, type TokenMeta } from "./db";
 import {
-  dadosFinanceiros, extrairResultados, insightsPorAnuncio, listarContas, MetaErro, objetivosDosConjuntos,
-  type LinhaInsight,
+  dadosFinanceiros, extrairResultados, insightsPorAnuncio, listarContas, listarStatus, MetaErro,
+  objetivosDosConjuntos, type LinhaInsight, type ObjetivoConjunto,
 } from "./meta";
 import { diasAtras, diasEntre, hojeISO, somarDias } from "./datas";
 
@@ -69,6 +69,29 @@ async function insightsEmPartes(contaId: string, token: string, desde: string, a
   }
 }
 
+/** Guarda o status atual (ativo, pausado, reprovado...) de campanhas, conjuntos e anúncios. */
+async function salvarStatus(conta: ContaAnuncio, token: string, conjuntos?: Map<string, ObjetivoConjunto>) {
+  try {
+    const [campanhas, anuncios] = await Promise.all([
+      listarStatus(conta.id, token, "campaigns"),
+      listarStatus(conta.id, token, "ads"),
+    ]);
+    const agora = new Date().toISOString();
+    const linhas = [
+      ...campanhas.map((c) => ({ id: c.id, nivel: "campanha", status: c.effective_status })),
+      ...[...(conjuntos?.values() ?? [])].map((c) => ({ id: c.id, nivel: "conjunto", status: c.effective_status ?? "UNKNOWN" })),
+      ...anuncios.map((a) => ({ id: a.id, nivel: "anuncio", status: a.effective_status })),
+    ].map((l) => ({ ...l, conta_id: conta.id, atualizado_em: agora }));
+    for (let i = 0; i < linhas.length; i += 500) {
+      const { error } = await db().from("status_meta").upsert(linhas.slice(i, i + 500), { onConflict: "id" });
+      if (error) throw new Error(error.message);
+    }
+  } catch (e) {
+    // Status é informativo: falha aqui não deve impedir de salvar as métricas.
+    console.error(`Status de ${conta.nome}:`, e);
+  }
+}
+
 async function sincronizarConta(conta: ContaAnuncio, token: string, desde: string, ate: string) {
   const linhas = await insightsEmPartes(conta.id, token, desde, ate);
   // Objetivo de cada conjunto: define o que conta como "resultado" quando o Meta não manda o campo pronto.
@@ -76,6 +99,7 @@ async function sincronizarConta(conta: ContaAnuncio, token: string, desde: strin
     console.error(`Objetivos dos conjuntos de ${conta.nome}:`, e);
     return undefined;
   });
+  await salvarStatus(conta, token, conjuntos);
   const registros = linhas.map((l) => {
     const r = extrairResultados(l, conjuntos);
     return {

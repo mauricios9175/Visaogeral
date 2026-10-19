@@ -13,16 +13,52 @@ const NIVEIS = [
   { chave: "anuncios", rotulo: "Anúncios" },
 ] as const;
 
+const ATIVOS = ["ACTIVE", "IN_PROCESS", "PENDING_REVIEW", "PREAPPROVED"];
+
+const FILTROS = [
+  { chave: "todos", rotulo: "Todos", aceita: () => true },
+  { chave: "ativos", rotulo: "Ativos", aceita: (s: string | null) => !!s && ATIVOS.includes(s) },
+  { chave: "pausados", rotulo: "Pausados", aceita: (s: string | null) => !s || !ATIVOS.includes(s) },
+] as const;
+
+const STATUS: Record<string, { rotulo: string; classe: string; icone: string }> = {
+  ACTIVE: { rotulo: "Ativo", classe: "bg-bom-bg text-bom", icone: "●" },
+  PAUSED: { rotulo: "Pausado", classe: "bg-fundo text-texto-3", icone: "❚❚" },
+  CAMPAIGN_PAUSED: { rotulo: "Campanha pausada", classe: "bg-fundo text-texto-3", icone: "❚❚" },
+  ADSET_PAUSED: { rotulo: "Conjunto pausado", classe: "bg-fundo text-texto-3", icone: "❚❚" },
+  IN_PROCESS: { rotulo: "Em análise", classe: "bg-atencao-bg text-atencao", icone: "◐" },
+  PENDING_REVIEW: { rotulo: "Em análise", classe: "bg-atencao-bg text-atencao", icone: "◐" },
+  PREAPPROVED: { rotulo: "Pré-aprovado", classe: "bg-atencao-bg text-atencao", icone: "◐" },
+  DISAPPROVED: { rotulo: "Reprovado", classe: "bg-critico-bg text-critico", icone: "■" },
+  WITH_ISSUES: { rotulo: "Com problemas", classe: "bg-critico-bg text-critico", icone: "■" },
+  PENDING_BILLING_INFO: { rotulo: "Pagamento pendente", classe: "bg-critico-bg text-critico", icone: "■" },
+  ARCHIVED: { rotulo: "Arquivado", classe: "bg-fundo text-texto-3", icone: "○" },
+  DELETED: { rotulo: "Excluído", classe: "bg-fundo text-texto-3", icone: "○" },
+};
+
+/** Status atual no Meta; ícone + texto, nunca só cor. */
+function SeloStatus({ status }: { status: string | null }) {
+  const s = status ? STATUS[status] ?? { rotulo: status, classe: "bg-fundo text-texto-3", icone: "○" }
+    : { rotulo: "Arquivado/excluído", classe: "bg-fundo text-texto-3", icone: "○" };
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${s.classe}`}>
+      <span aria-hidden>{s.icone}</span>
+      {s.rotulo}
+    </span>
+  );
+}
+
 export default async function PaginaCliente({ params, searchParams }: PageProps<"/clientes/[id]">) {
   const { id } = await params;
-  const busca = (await searchParams) as { p?: string; de?: string; ate?: string; nivel?: string };
+  const busca = (await searchParams) as { p?: string; de?: string; ate?: string; nivel?: string; status?: string };
   const { nivel } = busca;
+  const filtro = FILTROS.find((f) => f.chave === busca.status) ?? FILTROS[0];
   const { atual, anterior } = resolverPeriodo(busca);
   const d = await detalheCliente(id, atual, anterior);
   if (!d) notFound();
   const { cliente: c, atual: a, anterior: b } = d;
   const nivelAtual = NIVEIS.find((n) => n.chave === nivel) ?? NIVEIS[0];
-  const linhas = d[nivelAtual.chave];
+  const linhas = d[nivelAtual.chave].filter((l) => filtro.aceita(l.status));
   const base = `/clientes/${id}`;
 
   return (
@@ -70,16 +106,27 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
       </div>
 
       <div className="rounded-xl border border-borda bg-superficie">
-        <div className="flex gap-1 border-b border-borda p-2 text-sm">
+        <div className="flex flex-wrap items-center gap-1 border-b border-borda p-2 text-sm">
           {NIVEIS.map((n) => (
             <Link
               key={n.chave}
-              href={`${base}?${atual.qs}&nivel=${n.chave}`}
+              href={`${base}?${atual.qs}&nivel=${n.chave}&status=${filtro.chave}`}
               className={`rounded-md px-3 py-1 ${n.chave === nivelAtual.chave ? "bg-fundo font-medium" : "text-texto-2 hover:text-texto"}`}
             >
-              {n.rotulo} <span className="text-texto-3">({d[n.chave].length})</span>
+              {n.rotulo} <span className="text-texto-3">({d[n.chave].filter((l) => filtro.aceita(l.status)).length})</span>
             </Link>
           ))}
+          <span className="ml-auto flex gap-1">
+            {FILTROS.map((f) => (
+              <Link
+                key={f.chave}
+                href={`${base}?${atual.qs}&nivel=${nivelAtual.chave}&status=${f.chave}`}
+                className={`rounded-md px-3 py-1 ${f.chave === filtro.chave ? "bg-fundo font-medium" : "text-texto-2 hover:text-texto"}`}
+              >
+                {f.rotulo}
+              </Link>
+            ))}
+          </span>
         </div>
         <Tabela linhas={linhas} meta={c.cpl_meta} />
       </div>
@@ -113,7 +160,10 @@ function Tabela({ linhas, meta }: { linhas: LinhaTabela[]; meta: number | null }
             return (
               <tr key={l.id} className="border-t border-borda">
                 <td className="max-w-80 px-4 py-2">
-                  <div className="truncate" title={l.nome}>{l.nome}</div>
+                  <div className="flex items-center gap-2">
+                    <SeloStatus status={l.status} />
+                    <span className="truncate" title={l.nome}>{l.nome}</span>
+                  </div>
                   <div className="truncate text-xs text-texto-3">
                     {[l.tipo, l.pai].filter(Boolean).join(" · ")}
                   </div>

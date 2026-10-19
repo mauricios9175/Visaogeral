@@ -159,7 +159,7 @@ function comTipos(l: LinhaAnuncio): LinhaAnuncio {
   return m;
 }
 
-export type LinhaTabela = Derivadas & { id: string; nome: string; pai?: string; tipo: string | null };
+export type LinhaTabela = Derivadas & { id: string; nome: string; pai?: string; tipo: string | null; status: string | null };
 
 /** Rótulo do tipo de resultado que mais aparece (ex.: "conversas"), para mostrar ao lado do nome. */
 export function tipoPrincipal(m: Metricas): string | null {
@@ -168,7 +168,11 @@ export function tipoPrincipal(m: Metricas): string | null {
   return m[maior] > 0 ? ROTULO_TIPO[maior] : null;
 }
 
-function agrupar(linhas: LinhaAnuncio[], chave: (l: LinhaAnuncio) => [string, string, string?]): LinhaTabela[] {
+function agrupar(
+  linhas: LinhaAnuncio[],
+  chave: (l: LinhaAnuncio) => [string, string, string?],
+  status: Map<string, string>,
+): LinhaTabela[] {
   const mapa = new Map<string, { nome: string; pai?: string; m: Metricas }>();
   for (const l of linhas) {
     const [id, nome, pai] = chave(l);
@@ -177,7 +181,7 @@ function agrupar(linhas: LinhaAnuncio[], chave: (l: LinhaAnuncio) => [string, st
     mapa.set(id, g);
   }
   return [...mapa.entries()]
-    .map(([id, g]) => ({ id, nome: g.nome, pai: g.pai, tipo: tipoPrincipal(g.m), ...derivar(g.m) }))
+    .map(([id, g]) => ({ id, nome: g.nome, pai: g.pai, tipo: tipoPrincipal(g.m), status: status.get(id) ?? null, ...derivar(g.m) }))
     .sort((a, b) => b.gasto - a.gasto);
 }
 
@@ -197,6 +201,12 @@ export async function detalheCliente(clienteId: string, atual: Periodo, anterior
       )
     : [];
   const linhas = brutas.map(comTipos);
+  const statusRows = ids.length
+    ? await buscarTudo<{ id: string; status: string }>((de, ate) =>
+        banco.from("status_meta").select("id, status").in("conta_id", ids).range(de, ate),
+      )
+    : [];
+  const status = new Map(statusRows.map((r) => [r.id, r.status]));
 
   const doAtual = linhas.filter((l) => l.data >= atual.desde);
   const doAnterior = linhas.filter((l) => l.data <= anterior.ate);
@@ -216,9 +226,9 @@ export async function detalheCliente(clienteId: string, atual: Periodo, anterior
     atual: derivar(doAtual.reduce(somar, { ...ZERO })),
     anterior: derivar(doAnterior.reduce(somar, { ...ZERO })),
     serie,
-    campanhas: agrupar(doAtual, (l) => [l.campaign_id, l.campaign_nome]),
-    conjuntos: agrupar(doAtual, (l) => [l.adset_id, l.adset_nome, l.campaign_nome]),
-    anuncios: agrupar(doAtual, (l) => [l.ad_id, l.ad_nome, l.adset_nome]),
+    campanhas: agrupar(doAtual, (l) => [l.campaign_id, l.campaign_nome], status),
+    conjuntos: agrupar(doAtual, (l) => [l.adset_id, l.adset_nome, l.campaign_nome], status),
+    anuncios: agrupar(doAtual, (l) => [l.ad_id, l.ad_nome, l.adset_nome], status),
   };
 }
 

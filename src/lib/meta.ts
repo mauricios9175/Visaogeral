@@ -171,6 +171,7 @@ export function insightsDiagnostico(contaId: string, token: string, desde: strin
 
 export type ObjetivoConjunto = {
   id: string;
+  effective_status?: string;
   optimization_goal?: string;
   promoted_object?: { custom_event_type?: string; custom_conversion_id?: string; custom_event_str?: string };
 };
@@ -179,11 +180,18 @@ export type ObjetivoConjunto = {
 export async function objetivosDosConjuntos(contaId: string, token: string) {
   const conjuntos = await todasPaginas<ObjetivoConjunto>(
     montarUrl(`${contaId}/adsets`, token, {
-      fields: "id,optimization_goal,promoted_object",
+      fields: "id,effective_status,optimization_goal,promoted_object",
       limit: "500",
     }),
   );
   return new Map(conjuntos.map((c) => [c.id, c]));
+}
+
+/** Status atual (effective_status) de todas as campanhas ou anúncios da conta. */
+export function listarStatus(contaId: string, token: string, nivel: "campaigns" | "ads") {
+  return todasPaginas<{ id: string; effective_status: string }>(
+    montarUrl(`${contaId}/${nivel}`, token, { fields: "id,effective_status", limit: "500" }),
+  );
 }
 
 function valor(acoes: Acao[] | undefined, tipo: string): number | undefined {
