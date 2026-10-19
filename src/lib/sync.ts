@@ -1,7 +1,7 @@
 import "server-only";
 import { db, type ContaAnuncio, type TokenMeta } from "./db";
-import { dadosFinanceiros, extrairResultados, insightsPorAnuncio, listarContas } from "./meta";
-import { diasAtras, hojeISO } from "./datas";
+import { dadosFinanceiros, extrairResultados, insightsPorAnuncio, listarContas, MetaErro, type LinhaInsight } from "./meta";
+import { diasAtras, diasEntre, hojeISO, somarDias } from "./datas";
 
 /** Busca no Meta todas as contas que os tokens enxergam e cadastra/atualiza no banco. */
 export async function importarContas() {
@@ -48,8 +48,26 @@ function intervalo(modo: ModoSync) {
   return { desde: diasAtras(dias), ate };
 }
 
+// Códigos que o Meta devolve quando o pedido tem dados demais ("An unknown error occurred",
+// "Please reduce the amount of data you're asking for"): vale tentar com um período menor.
+const ERROS_VOLUME = [1, 2, 500];
+
+/** Busca os insights; se o Meta reclamar do volume, divide o período ao meio até chegar a 1 dia. */
+async function insightsEmPartes(contaId: string, token: string, desde: string, ate: string): Promise<LinhaInsight[]> {
+  try {
+    return await insightsPorAnuncio(contaId, token, desde, ate);
+  } catch (e) {
+    const dias = diasEntre(desde, ate);
+    if (!(e instanceof MetaErro) || !ERROS_VOLUME.includes(e.codigo ?? -1) || dias <= 1) throw e;
+    const meio = somarDias(desde, Math.floor(dias / 2) - 1);
+    const primeira = await insightsEmPartes(contaId, token, desde, meio);
+    const segunda = await insightsEmPartes(contaId, token, somarDias(meio, 1), ate);
+    return [...primeira, ...segunda];
+  }
+}
+
 async function sincronizarConta(conta: ContaAnuncio, token: string, desde: string, ate: string) {
-  const linhas = await insightsPorAnuncio(conta.id, token, desde, ate);
+  const linhas = await insightsEmPartes(conta.id, token, desde, ate);
   const registros = linhas.map((l) => {
     const r = extrairResultados(l);
     return {
