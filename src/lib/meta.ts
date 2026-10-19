@@ -119,23 +119,61 @@ export type LinhaInsight = {
   inline_link_clicks?: string;
   actions?: Acao[];
   action_values?: Acao[];
+  // "Resultados" exatamente como o Gerenciador de Anúncios mostra (segue o objetivo do conjunto)
+  results?: { indicator?: string; values?: { value?: string }[] }[];
 };
 
+const CAMPOS_INSIGHTS = [
+  "campaign_id", "campaign_name", "adset_id", "adset_name", "ad_id", "ad_name",
+  "spend", "impressions", "reach", "clicks", "inline_link_clicks",
+  "actions", "action_values",
+];
+
+// Se a versão da API não aceitar o campo "results", seguimos sem ele (e usamos o objetivo do conjunto).
+let aceitaResults = true;
+
 /** Métricas por anúncio e por dia, num intervalo de datas (formato AAAA-MM-DD). */
-export function insightsPorAnuncio(contaId: string, token: string, desde: string, ate: string) {
-  return todasPaginas<LinhaInsight>(
-    montarUrl(`${contaId}/insights`, token, {
-      level: "ad",
-      time_increment: "1",
-      time_range: JSON.stringify({ since: desde, until: ate }),
-      fields: [
-        "campaign_id", "campaign_name", "adset_id", "adset_name", "ad_id", "ad_name",
-        "spend", "impressions", "reach", "clicks", "inline_link_clicks",
-        "actions", "action_values",
-      ].join(","),
+export async function insightsPorAnuncio(contaId: string, token: string, desde: string, ate: string) {
+  const buscar = (campos: string[]) =>
+    todasPaginas<LinhaInsight>(
+      montarUrl(`${contaId}/insights`, token, {
+        level: "ad",
+        time_increment: "1",
+        time_range: JSON.stringify({ since: desde, until: ate }),
+        fields: campos.join(","),
+        limit: "500",
+      }),
+    );
+  if (!aceitaResults) return buscar(CAMPOS_INSIGHTS);
+  try {
+    return await buscar([...CAMPOS_INSIGHTS, "results"]);
+  } catch (e) {
+    if (e instanceof MetaErro && e.codigo === 100 && /results/i.test(e.message)) {
+      aceitaResults = false;
+      return buscar(CAMPOS_INSIGHTS);
+    }
+    throw e;
+  }
+}
+
+export type ObjetivoConjunto = {
+  id: string;
+  optimization_goal?: string;
+  promoted_object?: { custom_event_type?: string; custom_conversion_id?: string; custom_event_str?: string };
+};
+
+/** Objetivo de otimização de cada conjunto da conta (inclui pausados e arquivados). */
+export async function objetivosDosConjuntos(contaId: string, token: string) {
+  const conjuntos = await todasPaginas<ObjetivoConjunto>(
+    montarUrl(`${contaId}/adsets`, token, {
+      fields: "id,optimization_goal,promoted_object",
+      filtering: JSON.stringify([
+        { field: "effective_status", operator: "IN", value: ["ACTIVE", "PAUSED", "ARCHIVED", "CAMPAIGN_PAUSED", "ADSET_PAUSED", "IN_PROCESS", "WITH_ISSUES"] },
+      ]),
       limit: "500",
     }),
   );
+  return new Map(conjuntos.map((c) => [c.id, c]));
 }
 
 function valor(acoes: Acao[] | undefined, tipo: string): number | undefined {
@@ -143,8 +181,60 @@ function valor(acoes: Acao[] | undefined, tipo: string): number | undefined {
   return a ? Number(a.value) : undefined;
 }
 
-/** Converte a lista de "actions" do Meta nos números que o painel usa. */
-export function extrairResultados(linha: LinhaInsight) {
+/** Tipos de resultado que o painel separa. "outros" = cliques, engajamento, alcance etc. */
+export const TIPOS_RESULTADO = [
+  "conversas", "formulario", "lead_site", "conv_personalizada", "compras", "cadastro", "outros",
+] as const;
+export type TipoResultado = (typeof TIPOS_RESULTADO)[number];
+
+/** Classifica um action_type do Meta num tipo de resultado do painel. */
+export function classificarAcao(acao: string, actions?: Acao[]): TipoResultado {
+  const a = acao.replace(/^actions:/, "");
+  if (/messaging_conversation_started|messaging_first_reply|total_messaging_connection/.test(a)) return "conversas";
+  if (/lead_grouped|leadgen|^onsite_conversion\.lead/.test(a)) return "formulario";
+  if (a === "lead") return (valor(actions, "onsite_conversion.lead_grouped") ?? 0) > 0 ? "formulario" : "lead_site";
+  if (/fb_pixel_lead|offsite_conversion\.lead|^offline_conversion\.lead/.test(a)) return "lead_site";
+  if (/purchase/.test(a)) return "compras";
+  if (/complete_registration/.test(a)) return "cadastro";
+  if (/offsite_conversion\.custom\.|fb_pixel_custom|^offsite_conversion\.fb_pixel_/.test(a)) return "conv_personalizada";
+  return "outros";
+}
+
+/** Qual action_type conta como resultado para um conjunto, a partir do objetivo dele. */
+function acaoDoObjetivo(c: ObjetivoConjunto | undefined): string | null {
+  if (!c?.optimization_goal) return null;
+  const po = c.promoted_object ?? {};
+  switch (c.optimization_goal) {
+    case "CONVERSATIONS":
+    case "REPLIES":
+      return "onsite_conversion.messaging_conversation_started_7d";
+    case "LEAD_GENERATION":
+    case "QUALITY_LEAD":
+      return "onsite_conversion.lead_grouped";
+    case "OFFSITE_CONVERSIONS":
+    case "VALUE":
+      if (po.custom_conversion_id) return `offsite_conversion.custom.${po.custom_conversion_id}`;
+      if (po.custom_event_type === "LEAD") return "offsite_conversion.fb_pixel_lead";
+      if (po.custom_event_type === "PURCHASE") return "omni_purchase";
+      if (po.custom_event_type === "COMPLETE_REGISTRATION") return "offsite_conversion.fb_pixel_complete_registration";
+      if (po.custom_event_type === "OTHER" || po.custom_event_str) return "offsite_conversion.fb_pixel_custom";
+      if (po.custom_event_type) return `offsite_conversion.fb_pixel_${po.custom_event_type.toLowerCase()}`;
+      return null;
+    case "LINK_CLICKS":
+      return "link_click";
+    case "LANDING_PAGE_VIEWS":
+      return "landing_page_view";
+    case "THRUPLAY":
+      return "video_thruplay_watched_actions";
+    case "POST_ENGAGEMENT":
+      return "post_engagement";
+    default:
+      return null;
+  }
+}
+
+/** Converte a linha do Meta nos números que o painel usa, incluindo o "Resultado" do Gerenciador. */
+export function extrairResultados(linha: LinhaInsight, conjuntos?: Map<string, ObjetivoConjunto>) {
   const { actions, action_values } = linha;
   // "lead" já soma formulário nativo + pixel; os outros são fallback pra contas antigas.
   const leads =
@@ -154,7 +244,34 @@ export function extrairResultados(linha: LinhaInsight) {
   const conversas = valor(actions, "onsite_conversion.messaging_conversation_started_7d") ?? 0;
   const compras = valor(actions, "omni_purchase") ?? valor(actions, "purchase") ?? 0;
   const valorCompras = valor(action_values, "omni_purchase") ?? valor(action_values, "purchase") ?? 0;
-  return { leads, conversas, compras, valorCompras };
+
+  // 1º: o campo "results" do próprio Meta. 2º: o objetivo do conjunto. 3º: conversas/leads.
+  let acao: string | null = null;
+  let quantidade = 0;
+  const r = linha.results?.find((x) => x.indicator);
+  if (r?.indicator) {
+    acao = r.indicator.replace(/^actions:/, "");
+    quantidade = Number(r.values?.[0]?.value ?? 0);
+  } else {
+    acao = acaoDoObjetivo(conjuntos?.get(linha.adset_id));
+    if (acao) {
+      quantidade =
+        acao === "omni_purchase" ? compras
+        : acao === "offsite_conversion.fb_pixel_custom"
+          ? (valor(actions, acao) ?? (actions ?? [])
+              .filter((x) => x.action_type.startsWith("offsite_conversion.custom."))
+              .reduce((s, x) => s + Number(x.value), 0))
+          : (valor(actions, acao) ?? (acao === "onsite_conversion.lead_grouped" ? valor(actions, "lead") ?? 0 : 0));
+    } else if (conversas > 0) {
+      acao = "onsite_conversion.messaging_conversation_started_7d";
+      quantidade = conversas;
+    } else if (leads > 0) {
+      acao = "lead";
+      quantidade = leads;
+    }
+  }
+  const tipo: TipoResultado = acao ? classificarAcao(acao, actions) : "outros";
+  return { leads, conversas, compras, valorCompras, resultados: quantidade, tipo, acao };
 }
 
 // ---------- Login com Facebook (contas que ficam no BM do cliente) ----------

@@ -6,6 +6,23 @@ import { dinheiro as dinheiroBR } from "./formato";
 const ZERO: Metricas = {
   gasto: 0, impressoes: 0, alcance: 0, cliques: 0, cliques_link: 0,
   leads: 0, conversas: 0, compras: 0, valor_compras: 0,
+  res_conversas: 0, res_formulario: 0, res_lead_site: 0, res_conv_personalizada: 0,
+  res_compras: 0, res_cadastro: 0, res_outros: 0,
+};
+
+/** Tipos que contam como resultado no custo por resultado (cliques e engajamento ficam de fora). */
+export const TIPOS_CONVERSAO = [
+  "res_conversas", "res_formulario", "res_lead_site", "res_conv_personalizada", "res_compras", "res_cadastro",
+] as const;
+
+export const ROTULO_TIPO: Record<(typeof TIPOS_CONVERSAO)[number] | "res_outros", string> = {
+  res_conversas: "conversas",
+  res_formulario: "formulário",
+  res_lead_site: "leads no site",
+  res_conv_personalizada: "conv. personalizada",
+  res_compras: "compras",
+  res_cadastro: "cadastros",
+  res_outros: "outros (cliques/engajamento)",
 };
 
 /** O Supabase devolve no máximo 1000 linhas por chamada; isto pagina até o fim. */
@@ -29,7 +46,7 @@ function somar(alvo: Metricas, linha: Partial<Metricas>) {
 
 export type Derivadas = Metricas & {
   resultados: number;
-  cpr: number | null;   // custo por resultado (lead ou conversa)
+  cpr: number | null;   // custo por resultado (soma dos tipos de conversão)
   ctr: number | null;
   cpc: number | null;
   cpm: number | null;
@@ -38,7 +55,7 @@ export type Derivadas = Metricas & {
 };
 
 export function derivar(m: Metricas): Derivadas {
-  const resultados = m.leads + m.conversas;
+  const resultados = TIPOS_CONVERSAO.reduce((t, k) => t + m[k], 0);
   const div = (a: number, b: number) => (b > 0 ? a / b : null);
   return {
     ...m,
@@ -126,9 +143,30 @@ type LinhaAnuncio = Metricas & {
   ad_id: string; ad_nome: string;
   adset_id: string; adset_nome: string;
   campaign_id: string; campaign_nome: string;
+  resultados: number; resultado_tipo: string | null;
 };
 
-export type LinhaTabela = Derivadas & { id: string; nome: string; pai?: string };
+/** Espalha o "resultado" da linha na coluna res_* do tipo dela (linhas antigas sem tipo: conversas + leads). */
+function comTipos(l: LinhaAnuncio): LinhaAnuncio {
+  const m = { ...l, ...Object.fromEntries([...TIPOS_CONVERSAO, "res_outros"].map((k) => [k, 0])) } as LinhaAnuncio;
+  if (l.resultado_tipo) {
+    const k = `res_${l.resultado_tipo}` as keyof Metricas;
+    if (k in ZERO) m[k] = Number(l.resultados);
+  } else {
+    m.res_conversas = Number(l.conversas);
+    m.res_lead_site = Number(l.leads);
+  }
+  return m;
+}
+
+export type LinhaTabela = Derivadas & { id: string; nome: string; pai?: string; tipo: string | null };
+
+/** Rótulo do tipo de resultado que mais aparece (ex.: "conversas"), para mostrar ao lado do nome. */
+export function tipoPrincipal(m: Metricas): string | null {
+  const chaves = [...TIPOS_CONVERSAO, "res_outros"] as const;
+  const maior = chaves.reduce((a, b) => (m[b] > m[a] ? b : a));
+  return m[maior] > 0 ? ROTULO_TIPO[maior] : null;
+}
 
 function agrupar(linhas: LinhaAnuncio[], chave: (l: LinhaAnuncio) => [string, string, string?]): LinhaTabela[] {
   const mapa = new Map<string, { nome: string; pai?: string; m: Metricas }>();
@@ -139,7 +177,7 @@ function agrupar(linhas: LinhaAnuncio[], chave: (l: LinhaAnuncio) => [string, st
     mapa.set(id, g);
   }
   return [...mapa.entries()]
-    .map(([id, g]) => ({ id, nome: g.nome, pai: g.pai, ...derivar(g.m) }))
+    .map(([id, g]) => ({ id, nome: g.nome, pai: g.pai, tipo: tipoPrincipal(g.m), ...derivar(g.m) }))
     .sort((a, b) => b.gasto - a.gasto);
 }
 
@@ -151,13 +189,14 @@ export async function detalheCliente(clienteId: string, atual: Periodo, anterior
   const { data: contas } = await banco.from("contas_anuncio").select("*").eq("cliente_id", clienteId);
   const ids = ((contas ?? []) as ContaAnuncio[]).map((c) => c.id);
 
-  const linhas = ids.length
+  const brutas = ids.length
     ? await buscarTudo<LinhaAnuncio>((de, ate) =>
         banco.from("metricas_diarias").select("*")
           .in("conta_id", ids).gte("data", anterior.desde).lte("data", atual.ate)
           .order("data").range(de, ate),
       )
     : [];
+  const linhas = brutas.map(comTipos);
 
   const doAtual = linhas.filter((l) => l.data >= atual.desde);
   const doAnterior = linhas.filter((l) => l.data <= anterior.ate);
@@ -232,8 +271,6 @@ export async function alertasContas(): Promise<AlertaConta[]> {
     }
 
     const mediaDia = (gasto7d.get(c.id) ?? 0) / 7;
-    // Conta sem gasto nos últimos 7 dias = pausada de propósito; saldo zerado não é urgência.
-    if (mediaDia <= 0) continue;
 
     // Nas contas pré-pagas o Meta implementa o saldo como limite de gastos, então os dois
     // números são o mesmo dinheiro. Usa o saldo nelas e o limite só nas pós-pagas.
@@ -246,9 +283,12 @@ export async function alertasContas(): Promise<AlertaConta[]> {
     if (restante === null) continue;
 
     if (restante <= 0) {
-      alertas.push({ ...base, nivel: "critico", mensagem: `${oque} esgotado. Os anúncios param de rodar.` });
+      // Avisa mesmo com a conta parada há dias: muitas vezes é o cliente que ainda não pagou.
+      const parada = mediaDia <= 0 ? " Sem veiculação nos últimos 7 dias." : " Os anúncios param de rodar.";
+      alertas.push({ ...base, nivel: "critico", mensagem: `${oque} esgotado.${parada}` });
       continue;
     }
+    if (mediaDia <= 0) continue; // sem gasto recente não dá para estimar os dias restantes
     const dias = restante / mediaDia;
     if (dias <= DIAS_SALDO_ALERTA) {
       alertas.push({

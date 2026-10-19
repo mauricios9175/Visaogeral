@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { PERIODOS } from "@/lib/datas";
-import { variacao } from "@/lib/formato";
-import type { Saude } from "@/lib/consultas";
+import { inteiro, variacao } from "@/lib/formato";
+import { ROTULO_TIPO, TIPOS_CONVERSAO, type Saude } from "@/lib/consultas";
+import type { Metricas } from "@/lib/db";
 
 export function SeletorPeriodo({ atual, base }: { atual: string; base: string }) {
   return (
@@ -68,4 +69,18 @@ export function Kpi({ rotulo, valor, children }: { rotulo: string; valor: string
 
 export function Aviso({ children }: { children: React.ReactNode }) {
   return <div className="rounded-lg border border-borda bg-superficie px-4 py-3 text-sm text-texto-2">{children}</div>;
+}
+
+/** "12 conversas · 3 formulário · 5 conv. personalizada"; cliques/engajamento aparecem à parte. */
+export function TiposResultado({ m, compacto = false }: { m: Metricas; compacto?: boolean }) {
+  const partes = TIPOS_CONVERSAO.filter((k) => m[k] > 0).map((k) => `${inteiro(m[k])} ${ROTULO_TIPO[k]}`);
+  if (!partes.length && !m.res_outros) return null;
+  return (
+    <span className="block text-xs text-texto-3">
+      {partes.join(" · ") || "nenhuma conversão"}
+      {!compacto && m.res_outros > 0 && (
+        <span className="block">+ {inteiro(m.res_outros)} {ROTULO_TIPO.res_outros}, fora do custo por resultado</span>
+      )}
+    </span>
+  );
 }

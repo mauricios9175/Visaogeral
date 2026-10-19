@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { resolverPeriodo } from "@/lib/datas";
 import { detalheCliente, type LinhaTabela } from "@/lib/consultas";
 import { decimal, dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
-import { Kpi, SeletorPeriodo, Variacao } from "@/components/ui";
+import { Kpi, SeletorPeriodo, TiposResultado, Variacao } from "@/components/ui";
 import { BarrasDiarias } from "@/components/graficos";
 
 
@@ -42,7 +42,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi rotulo="Investido" valor={dinheiro(a.gasto)}><Variacao atual={a.gasto} anterior={b.gasto} neutro /></Kpi>
         <Kpi rotulo="Resultados" valor={inteiro(a.resultados)}>
-          <span className="text-xs text-texto-3">{inteiro(a.leads)} leads · {inteiro(a.conversas)} conversas</span>
+          <TiposResultado m={a} />
         </Kpi>
         <Kpi rotulo={`Custo/resultado${c.cpl_meta ? ` (meta ${dinheiro(c.cpl_meta)})` : ""}`} valor={dinheiro(a.cpr)}>
           <Variacao atual={a.cpr} anterior={b.cpr} menorMelhor />
@@ -111,7 +111,9 @@ function Tabela({ linhas, meta }: { linhas: LinhaTabela[]; meta: number | null }
               <tr key={l.id} className="border-t border-borda">
                 <td className="max-w-80 px-4 py-2">
                   <div className="truncate" title={l.nome}>{l.nome}</div>
-                  {l.pai && <div className="truncate text-xs text-texto-3">{l.pai}</div>}
+                  <div className="truncate text-xs text-texto-3">
+                    {[l.tipo, l.pai].filter(Boolean).join(" · ")}
+                  </div>
                 </td>
                 <td className="px-3 py-2 text-right">{dinheiro(l.gasto)}</td>
                 <td className="px-3 py-2 text-right">{inteiro(l.resultados)}</td>

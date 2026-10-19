@@ -66,4 +66,12 @@ export type Metricas = {
   conversas: number;
   compras: number;
   valor_compras: number;
+  // "Resultado" do Gerenciador de Anúncios, separado pelo objetivo da campanha
+  res_conversas: number;
+  res_formulario: number;
+  res_lead_site: number;
+  res_conv_personalizada: number;
+  res_compras: number;
+  res_cadastro: number;
+  res_outros: number;
 };

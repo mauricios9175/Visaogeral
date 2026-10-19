@@ -3,7 +3,7 @@ import { resolverPeriodo, progressoDoMes } from "@/lib/datas";
 import { alertasContas, resumoClientes, type AlertaConta, type ResumoCliente } from "@/lib/consultas";
 import { db } from "@/lib/db";
 import { dataCurta, dinheiro, inteiro, quandoFoi } from "@/lib/formato";
-import { Aviso, SeletorPeriodo, SeloSaude, Variacao } from "@/components/ui";
+import { Aviso, SeletorPeriodo, SeloSaude, TiposResultado, Variacao } from "@/components/ui";
 
 
 const ORDEM = { critico: 0, atencao: 1, ok: 2, sem_dados: 3 };
@@ -73,7 +73,7 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
         ))}
       </div>
       <p className="text-xs text-texto-3">
-        Resultados = leads (formulário/site) + conversas iniciadas. Variações comparam com {anterior.rotulo}.
+        Resultados = o “Resultado” do Gerenciador de Anúncios de cada campanha (conversas, formulários, leads no site, conversões personalizadas, compras e cadastros); cliques e engajamento ficam de fora. Variações comparam com {anterior.rotulo}.
       </p>
     </div>
   );
@@ -145,6 +145,8 @@ function CardCliente({ r, periodo, alertas }: { r: ResumoCliente; periodo: strin
           <Variacao atual={a.cpr} anterior={b.cpr} menorMelhor />
         </Metrica>
       </div>
+
+      <div className="mt-2"><TiposResultado m={a} compacto /></div>
 
       {c.cpl_meta && (
         <div className="mt-2 text-xs text-texto-3">

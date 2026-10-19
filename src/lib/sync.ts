@@ -1,6 +1,9 @@
 import "server-only";
 import { db, type ContaAnuncio, type TokenMeta } from "./db";
-import { dadosFinanceiros, extrairResultados, insightsPorAnuncio, listarContas, MetaErro, type LinhaInsight } from "./meta";
+import {
+  dadosFinanceiros, extrairResultados, insightsPorAnuncio, listarContas, MetaErro, objetivosDosConjuntos,
+  type LinhaInsight,
+} from "./meta";
 import { diasAtras, diasEntre, hojeISO, somarDias } from "./datas";
 
 /** Busca no Meta todas as contas que os tokens enxergam e cadastra/atualiza no banco. */
@@ -68,8 +71,10 @@ async function insightsEmPartes(contaId: string, token: string, desde: string, a
 
 async function sincronizarConta(conta: ContaAnuncio, token: string, desde: string, ate: string) {
   const linhas = await insightsEmPartes(conta.id, token, desde, ate);
+  // Objetivo de cada conjunto: define o que conta como "resultado" quando o Meta não manda o campo pronto.
+  const conjuntos = await objetivosDosConjuntos(conta.id, token).catch(() => undefined);
   const registros = linhas.map((l) => {
-    const r = extrairResultados(l);
+    const r = extrairResultados(l, conjuntos);
     return {
       conta_id: conta.id,
       data: l.date_start,
@@ -88,6 +93,9 @@ async function sincronizarConta(conta: ContaAnuncio, token: string, desde: strin
       conversas: r.conversas,
       compras: r.compras,
       valor_compras: r.valorCompras,
+      resultados: r.resultados,
+      resultado_tipo: r.tipo,
+      resultado_acao: r.acao,
       atualizado_em: new Date().toISOString(),
     };
   });
