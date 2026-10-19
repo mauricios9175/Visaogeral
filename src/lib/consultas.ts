@@ -232,23 +232,31 @@ export async function alertasContas(): Promise<AlertaConta[]> {
     }
 
     const mediaDia = (gasto7d.get(c.id) ?? 0) / 7;
-    const avaliar = (restante: number, oque: string) => {
-      if (restante <= 0) {
-        alertas.push({ ...base, nivel: "critico", mensagem: `${oque} esgotado. Os anúncios param de rodar.` });
-        return;
-      }
-      if (mediaDia <= 0) return;
-      const dias = restante / mediaDia;
-      if (dias <= DIAS_SALDO_ALERTA) {
-        alertas.push({
-          ...base,
-          nivel: dias <= 1 ? "critico" : "atencao",
-          mensagem: `${oque}: ${dinheiroBR(restante)}, dá para ~${dias < 1 ? "menos de 1 dia" : `${Math.floor(dias)} dia(s)`} no ritmo atual (${dinheiroBR(mediaDia)}/dia). Recarregue.`,
-        });
-      }
-    };
-    if (c.pre_paga && c.saldo != null) avaliar(c.saldo, "Saldo pré-pago");
-    if (c.limite_gasto != null && c.total_gasto != null) avaliar(c.limite_gasto - c.total_gasto, "Limite de gastos da conta");
+    // Conta sem gasto nos últimos 7 dias = pausada de propósito; saldo zerado não é urgência.
+    if (mediaDia <= 0) continue;
+
+    // Nas contas pré-pagas o Meta implementa o saldo como limite de gastos, então os dois
+    // números são o mesmo dinheiro. Usa o saldo nelas e o limite só nas pós-pagas.
+    const [restante, oque] =
+      c.pre_paga && c.saldo != null
+        ? [c.saldo, "Saldo pré-pago"]
+        : c.limite_gasto != null && c.total_gasto != null
+          ? [c.limite_gasto - c.total_gasto, "Limite de gastos da conta"]
+          : [null, ""];
+    if (restante === null) continue;
+
+    if (restante <= 0) {
+      alertas.push({ ...base, nivel: "critico", mensagem: `${oque} esgotado. Os anúncios param de rodar.` });
+      continue;
+    }
+    const dias = restante / mediaDia;
+    if (dias <= DIAS_SALDO_ALERTA) {
+      alertas.push({
+        ...base,
+        nivel: dias <= 1 ? "critico" : "atencao",
+        mensagem: `${oque}: ${dinheiroBR(restante)}, dá para ~${dias < 1 ? "menos de 1 dia" : `${Math.floor(dias)} dia(s)`} no ritmo atual (${dinheiroBR(mediaDia)}/dia). Recarregue.`,
+      });
+    }
   }
   return alertas.sort((a, b) => (a.nivel === b.nivel ? 0 : a.nivel === "critico" ? -1 : 1));
 }
