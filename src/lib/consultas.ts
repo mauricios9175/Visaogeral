@@ -19,7 +19,7 @@ export const ROTULO_TIPO: Record<(typeof TIPOS_CONVERSAO)[number] | "res_outros"
   res_conversas: "conversas",
   res_formulario: "formulário",
   res_lead_site: "leads no site",
-  res_conv_personalizada: "conv. personalizada",
+  res_conv_personalizada: "conversões no site",
   res_compras: "compras",
   res_cadastro: "cadastros",
   res_outros: "outros (cliques/engajamento)",

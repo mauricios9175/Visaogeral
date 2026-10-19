@@ -197,17 +197,25 @@ export const TIPOS_RESULTADO = [
 ] as const;
 export type TipoResultado = (typeof TIPOS_RESULTADO)[number];
 
-/** Classifica um action_type do Meta num tipo de resultado do painel. */
+/**
+ * Classifica um action_type / indicador do Meta num tipo de resultado do painel.
+ * Aceita "actions:lead", "conversions:contact_website", "offsite_conversion.custom.123" etc.
+ */
 export function classificarAcao(acao: string, actions?: Acao[]): TipoResultado {
-  const a = acao.replace(/^actions:/, "");
+  const [fonte, a] = acao.includes(":") ? (acao.split(":", 2) as [string, string]) : ["actions", acao];
   if (/messaging_conversation_started|messaging_first_reply|total_messaging_connection/.test(a)) return "conversas";
   if (/lead_grouped|leadgen|^onsite_conversion\.lead/.test(a)) return "formulario";
   if (a === "lead") return (valor(actions, "onsite_conversion.lead_grouped") ?? 0) > 0 ? "formulario" : "lead_site";
-  if (/fb_pixel_lead|offsite_conversion\.lead|^offline_conversion\.lead/.test(a)) return "lead_site";
+  if (/fb_pixel_lead|offsite_conversion\.lead|^offline_conversion\.lead|^lead_website|^lead_offline/.test(a)) return "lead_site";
   if (/purchase/.test(a)) return "compras";
   if (/complete_registration/.test(a)) return "cadastro";
   if (/offsite_conversion\.custom\.|fb_pixel_custom|^offsite_conversion\.fb_pixel_/.test(a)) return "conv_personalizada";
-  return "outros";
+  // Eventos padrão do pixel no campo "conversions": contato, agendamento, inscrição, etc.
+  if (/^(contact|schedule|submit_application|find_location|customize_product|donate|subscribe|start_trial|add_to_cart|initiate_checkout|add_payment_info|add_to_wishlist|search|view_content)/.test(a)) {
+    return "conv_personalizada";
+  }
+  // Qualquer outra coisa vinda do campo "conversions" é conversão; de "actions" é clique/engajamento.
+  return fonte === "conversions" ? "conv_personalizada" : "outros";
 }
 
 /** Qual action_type conta como resultado para um conjunto, a partir do objetivo dele. */
@@ -260,7 +268,7 @@ export function extrairResultados(linha: LinhaInsight, conjuntos?: Map<string, O
   let quantidade = 0;
   const r = linha.results?.find((x) => x.indicator);
   if (r?.indicator) {
-    acao = r.indicator.replace(/^actions:/, "");
+    acao = r.indicator.startsWith("actions:") ? r.indicator.slice("actions:".length) : r.indicator;
     quantidade = Number(r.values?.[0]?.value ?? 0);
   } else {
     acao = acaoDoObjetivo(
