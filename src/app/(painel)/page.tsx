@@ -9,8 +9,7 @@ import { Aviso, SeletorPeriodo, SeloSaude, TiposResultado, Variacao } from "@/co
 const ORDEM = { critico: 0, atencao: 1, ok: 2, sem_dados: 3 };
 
 export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
-  const { p } = (await searchParams) as { p?: string };
-  const { atual, anterior } = resolverPeriodo(p);
+  const { atual, anterior } = resolverPeriodo((await searchParams) as { p?: string; de?: string; ate?: string });
   const banco = db();
   const [resumos, alertas, { data: ultima }, { count: semCliente }, { data: primeiro }] = await Promise.all([
     resumoClientes(atual, anterior),
@@ -38,7 +37,7 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
             atualizado {quandoFoi(ultima?.finalizado_em ?? null)}
           </p>
         </div>
-        <SeletorPeriodo atual={atual.chave} base="/" />
+        <SeletorPeriodo atual={atual} base="/" />
       </div>
 
       {historicoDesde && historicoDesde > atual.desde && (
@@ -67,7 +66,7 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {resumos.map((r) => (
           <CardCliente
-            key={r.cliente.id} r={r} periodo={atual.chave}
+            key={r.cliente.id} r={r} periodo={atual.qs}
             alertas={alertas.filter((a) => a.clienteId === r.cliente.id).length}
           />
         ))}
@@ -116,7 +115,7 @@ function CardCliente({ r, periodo, alertas }: { r: ResumoCliente; periodo: strin
 
   return (
     <Link
-      href={`/clientes/${c.id}?p=${periodo}`}
+      href={`/clientes/${c.id}?${periodo}`}
       className="block rounded-xl border border-borda bg-superficie p-4 transition hover:border-destaque"
     >
       <div className="flex items-start justify-between gap-2">

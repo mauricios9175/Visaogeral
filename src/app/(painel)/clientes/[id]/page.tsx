@@ -15,8 +15,9 @@ const NIVEIS = [
 
 export default async function PaginaCliente({ params, searchParams }: PageProps<"/clientes/[id]">) {
   const { id } = await params;
-  const { p, nivel } = (await searchParams) as { p?: string; nivel?: string };
-  const { atual, anterior } = resolverPeriodo(p);
+  const busca = (await searchParams) as { p?: string; de?: string; ate?: string; nivel?: string };
+  const { nivel } = busca;
+  const { atual, anterior } = resolverPeriodo(busca);
   const d = await detalheCliente(id, atual, anterior);
   if (!d) notFound();
   const { cliente: c, atual: a, anterior: b } = d;
@@ -28,15 +29,17 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <Link href={`/?p=${atual.chave}`} className="text-sm text-texto-3 hover:text-texto">← Visão geral</Link>
+          <Link href={`/?${atual.qs}`} className="text-sm text-texto-3 hover:text-texto">← Visão geral</Link>
           <h1 className="text-xl font-semibold">{c.nome}</h1>
           <p className="text-sm text-texto-2">
             {d.contas.map((x) => x.nome + (x.pre_paga && x.saldo != null ? ` (saldo ${dinheiro(x.saldo)})` : "")).join(", ")
               || "Nenhuma conta vinculada"}
             {d.contas[0] && <> · atualizado {quandoFoi(d.contas[0].ultima_sync)}</>}
+            {" · "}
+            <Link href={`${base}/diagnostico`} className="text-destaque underline">Diagnóstico de resultados</Link>
           </p>
         </div>
-        <SeletorPeriodo atual={atual.chave} base={base} />
+        <SeletorPeriodo atual={atual} base={base} />
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
@@ -71,7 +74,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
           {NIVEIS.map((n) => (
             <Link
               key={n.chave}
-              href={`${base}?p=${atual.chave}&nivel=${n.chave}`}
+              href={`${base}?${atual.qs}&nivel=${n.chave}`}
               className={`rounded-md px-3 py-1 ${n.chave === nivelAtual.chave ? "bg-fundo font-medium" : "text-texto-2 hover:text-texto"}`}
             >
               {n.rotulo} <span className="text-texto-3">({d[n.chave].length})</span>

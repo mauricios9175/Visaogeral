@@ -1,23 +1,48 @@
 import Link from "next/link";
-import { PERIODOS } from "@/lib/datas";
+import { PERIODOS, type Periodo } from "@/lib/datas";
 import { inteiro, variacao } from "@/lib/formato";
 import { ROTULO_TIPO, TIPOS_CONVERSAO, type Saude } from "@/lib/consultas";
 import type { Metricas } from "@/lib/db";
 
-export function SeletorPeriodo({ atual, base }: { atual: string; base: string }) {
+export function SeletorPeriodo({ atual, base }: { atual: Periodo; base: string }) {
+  const campo = "rounded-md border border-borda bg-fundo px-2 py-1 text-sm";
   return (
-    <div className="inline-flex rounded-lg border border-borda bg-superficie p-0.5 text-sm">
-      {PERIODOS.map((p) => (
-        <Link
-          key={p.chave}
-          href={`${base}?p=${p.chave}`}
-          className={`rounded-md px-3 py-1 ${p.chave === atual ? "bg-fundo font-medium" : "text-texto-2 hover:text-texto"}`}
-        >
-          {p.rotulo}
-        </Link>
-      ))}
+    <div className="flex flex-col items-end gap-2">
+      <div className="flex flex-wrap justify-end rounded-lg border border-borda bg-superficie p-0.5 text-sm">
+        {PERIODOS.map((p) => (
+          <Link
+            key={p.chave}
+            href={`${base}?p=${p.chave}`}
+            className={`rounded-md px-3 py-1 ${p.chave === atual.chave ? "bg-fundo font-medium" : "text-texto-2 hover:text-texto"}`}
+          >
+            {p.rotulo}
+          </Link>
+        ))}
+      </div>
+      {/* período livre: formulário GET, funciona sem JavaScript */}
+      <form action={base} className="flex flex-wrap items-center justify-end gap-2 text-sm text-texto-2">
+        <input type="hidden" name="p" value="livre" />
+        <label className="flex items-center gap-1">
+          De <input type="date" name="de" required defaultValue={atual.desde} className={campo} />
+        </label>
+        <label className="flex items-center gap-1">
+          até <input type="date" name="ate" required defaultValue={atual.ate} className={campo} />
+        </label>
+        <button className={`rounded-md border px-3 py-1 ${atual.chave === "livre" ? "border-destaque text-texto" : "border-borda hover:border-destaque"}`}>
+          Aplicar
+        </button>
+      </form>
+      <span className="text-xs text-texto-3">
+        {atual.rotulo}
+        {atual.chave !== "livre" && ` · ${formatarData(atual.desde)} a ${formatarData(atual.ate)}`}
+      </span>
     </div>
   );
+}
+
+function formatarData(iso: string) {
+  const [a, m, d] = iso.split("-");
+  return `${d}/${m}/${a}`;
 }
 
 /**

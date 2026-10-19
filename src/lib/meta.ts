@@ -121,6 +121,7 @@ export type LinhaInsight = {
   action_values?: Acao[];
   // "Resultados" exatamente como o Gerenciador de Anúncios mostra (segue o objetivo do conjunto)
   results?: { indicator?: string; values?: { value?: string }[] }[];
+  optimization_goal?: string;
 };
 
 const CAMPOS_INSIGHTS = [
@@ -128,9 +129,9 @@ const CAMPOS_INSIGHTS = [
   "spend", "impressions", "reach", "clicks", "inline_link_clicks",
   "actions", "action_values",
 ];
-
-// Se a versão da API não aceitar o campo "results", seguimos sem ele (e usamos o objetivo do conjunto).
-let aceitaResults = true;
+// Campos que nem toda versão/conta aceita; se o Meta recusar, seguimos sem eles.
+const CAMPOS_EXTRAS = ["results", "optimization_goal"];
+let aceitaExtras = true;
 
 /** Métricas por anúncio e por dia, num intervalo de datas (formato AAAA-MM-DD). */
 export async function insightsPorAnuncio(contaId: string, token: string, desde: string, ate: string) {
@@ -144,16 +145,28 @@ export async function insightsPorAnuncio(contaId: string, token: string, desde: 
         limit: "500",
       }),
     );
-  if (!aceitaResults) return buscar(CAMPOS_INSIGHTS);
+  if (!aceitaExtras) return buscar(CAMPOS_INSIGHTS);
   try {
-    return await buscar([...CAMPOS_INSIGHTS, "results"]);
+    return await buscar([...CAMPOS_INSIGHTS, ...CAMPOS_EXTRAS]);
   } catch (e) {
-    if (e instanceof MetaErro && e.codigo === 100 && /results/i.test(e.message)) {
-      aceitaResults = false;
+    if (e instanceof MetaErro && e.codigo === 100) {
+      aceitaExtras = false;
       return buscar(CAMPOS_INSIGHTS);
     }
     throw e;
   }
+}
+
+/** Insights por campanha com os dados brutos, para a tela de diagnóstico. */
+export function insightsDiagnostico(contaId: string, token: string, desde: string, ate: string) {
+  return todasPaginas<LinhaInsight & { objective?: string; optimization_goal?: string }>(
+    montarUrl(`${contaId}/insights`, token, {
+      level: "adset",
+      time_range: JSON.stringify({ since: desde, until: ate }),
+      fields: ["campaign_name", "adset_id", "adset_name", "objective", "optimization_goal", "spend", "actions", "results"].join(","),
+      limit: "200",
+    }),
+  );
 }
 
 export type ObjetivoConjunto = {
@@ -167,9 +180,6 @@ export async function objetivosDosConjuntos(contaId: string, token: string) {
   const conjuntos = await todasPaginas<ObjetivoConjunto>(
     montarUrl(`${contaId}/adsets`, token, {
       fields: "id,optimization_goal,promoted_object",
-      filtering: JSON.stringify([
-        { field: "effective_status", operator: "IN", value: ["ACTIVE", "PAUSED", "ARCHIVED", "CAMPAIGN_PAUSED", "ADSET_PAUSED", "IN_PROCESS", "WITH_ISSUES"] },
-      ]),
       limit: "500",
     }),
   );
@@ -253,7 +263,10 @@ export function extrairResultados(linha: LinhaInsight, conjuntos?: Map<string, O
     acao = r.indicator.replace(/^actions:/, "");
     quantidade = Number(r.values?.[0]?.value ?? 0);
   } else {
-    acao = acaoDoObjetivo(conjuntos?.get(linha.adset_id));
+    acao = acaoDoObjetivo(
+      conjuntos?.get(linha.adset_id) ??
+        (linha.optimization_goal ? { id: linha.adset_id, optimization_goal: linha.optimization_goal } : undefined),
+    );
     if (acao) {
       quantidade =
         acao === "omni_purchase" ? compras
@@ -268,6 +281,17 @@ export function extrairResultados(linha: LinhaInsight, conjuntos?: Map<string, O
     } else if (leads > 0) {
       acao = "lead";
       quantidade = leads;
+    }
+    // Sem objetivo identificado (ou evento personalizado genérico): usa a conversão personalizada que aparecer.
+    if (quantidade === 0 && (!acao || acao === "offsite_conversion.fb_pixel_custom")) {
+      const custom = (actions ?? []).filter(
+        (x) => x.action_type.startsWith("offsite_conversion.custom.") || x.action_type === "offsite_conversion.fb_pixel_custom",
+      );
+      if (custom.length) {
+        const maior = custom.reduce((a, b) => (Number(b.value) > Number(a.value) ? b : a));
+        acao = maior.action_type;
+        quantidade = Number(maior.value);
+      }
     }
   }
   const tipo: TipoResultado = acao ? classificarAcao(acao, actions) : "outros";

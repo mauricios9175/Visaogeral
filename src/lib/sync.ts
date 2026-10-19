@@ -72,7 +72,10 @@ async function insightsEmPartes(contaId: string, token: string, desde: string, a
 async function sincronizarConta(conta: ContaAnuncio, token: string, desde: string, ate: string) {
   const linhas = await insightsEmPartes(conta.id, token, desde, ate);
   // Objetivo de cada conjunto: define o que conta como "resultado" quando o Meta não manda o campo pronto.
-  const conjuntos = await objetivosDosConjuntos(conta.id, token).catch(() => undefined);
+  const conjuntos = await objetivosDosConjuntos(conta.id, token).catch((e) => {
+    console.error(`Objetivos dos conjuntos de ${conta.nome}:`, e);
+    return undefined;
+  });
   const registros = linhas.map((l) => {
     const r = extrairResultados(l, conjuntos);
     return {
@@ -166,4 +169,12 @@ export async function sincronizar(modo: ModoSync) {
     }).eq("id", exec.id);
   }
   return resultado;
+}
+
+/** Token a usar para uma conta (BM ou o perfil conectado pelo Login com Facebook). */
+export async function tokenDaConta(conta: ContaAnuncio): Promise<string | undefined> {
+  if (conta.origem === "bm") return process.env.META_SYSTEM_USER_TOKEN;
+  if (!conta.token_id) return undefined;
+  const { data } = await db().from("tokens_meta").select("token").eq("id", conta.token_id).maybeSingle();
+  return data?.token as string | undefined;
 }
