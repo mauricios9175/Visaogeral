@@ -54,8 +54,21 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
   const { nivel } = busca;
   const filtro = FILTROS.find((f) => f.chave === busca.status) ?? FILTROS[0];
   const { atual, anterior } = resolverPeriodo(busca);
-  const [d, crm] = await Promise.all([detalheCliente(id, atual, anterior), detalheCrm(id, atual, anterior)]);
+  // O CRM não pode derrubar a tela do cliente: se falhar, mostra o erro só na seção dele.
+  const [d, crm] = await Promise.all([
+    detalheCliente(id, atual, anterior).catch((e: unknown) => ({ erroGeral: e instanceof Error ? e.message : String(e) })),
+    detalheCrm(id, atual, anterior).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })),
+  ]);
   if (!d) notFound();
+  // Em produção o Next esconde a mensagem do erro; mostramos aqui para facilitar o diagnóstico.
+  if ("erroGeral" in d) {
+    return (
+      <div className="space-y-3">
+        <Link href={`/?${atual.qs}`} className="text-sm text-texto-3 hover:text-texto">← Visão geral</Link>
+        <Aviso>Erro ao carregar o cliente: {d.erroGeral}</Aviso>
+      </div>
+    );
+  }
   const { cliente: c, atual: a, anterior: b } = d;
   const nivelAtual = NIVEIS.find((n) => n.chave === nivel) ?? NIVEIS[0];
   const linhas = d[nivelAtual.chave].filter((l) => filtro.aceita(l.status));
@@ -74,7 +87,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
             {" · "}
             <Link href={`${base}/diagnostico`} className="text-destaque underline">Diagnóstico de resultados</Link>
             {" · "}
-            <Link href={`${base}/crm`} className="text-destaque underline">{crm ? "Configurar CRM" : "Conectar CRM"}</Link>
+            <Link href={`${base}/crm`} className="text-destaque underline">{crm && !("erro" in crm) ? "Configurar CRM" : "Conectar CRM"}</Link>
           </p>
         </div>
         <SeletorPeriodo atual={atual} base={base} />
@@ -194,12 +207,13 @@ function Tabela({ linhas, meta }: { linhas: LinhaTabela[]; meta: number | null }
 }
 
 function SecaoCrm({ crm, gasto, gastoAnterior, base }: {
-  crm: Awaited<ReturnType<typeof detalheCrm>>;
+  crm: Awaited<ReturnType<typeof detalheCrm>> | { erro: string };
   gasto: number;
   gastoAnterior: number;
   base: string;
 }) {
   if (!crm) return null;
+  if ("erro" in crm) return <Aviso>Erro ao carregar o CRM: {crm.erro}</Aviso>;
   const { atual: x, anterior: y, conexao } = crm;
   const div = (a: number, b: number | null) => (b ? a / b : null);
   if (conexao.ultimo_erro) {

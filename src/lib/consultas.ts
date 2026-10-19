@@ -201,10 +201,14 @@ export async function detalheCliente(clienteId: string, atual: Periodo, anterior
       )
     : [];
   const linhas = brutas.map(comTipos);
+  // Status é informativo: se a tabela ainda não existir ou falhar, a tela abre sem os selos.
   const statusRows = ids.length
     ? await buscarTudo<{ id: string; status: string }>((de, ate) =>
         banco.from("status_meta").select("id, status").in("conta_id", ids).range(de, ate),
-      )
+      ).catch((e) => {
+        console.error("status_meta:", e);
+        return [];
+      })
     : [];
   const status = new Map(statusRows.map((r) => [r.id, r.status]));
 
