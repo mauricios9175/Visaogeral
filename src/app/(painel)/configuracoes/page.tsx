@@ -1,6 +1,7 @@
 import { db, type Cliente, type ContaAnuncio, type TokenMeta } from "@/lib/db";
 import { diasAte, dinheiro, quandoFoi } from "@/lib/formato";
 import { Aviso } from "@/components/ui";
+import { BotaoEnviar } from "@/components/botao";
 import { alternarSyncConta, importar, salvarCliente, sincronizarAgora, vincularConta } from "../../acoes";
 
 export const maxDuration = 300;
@@ -54,11 +55,14 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
         <h2 className="font-medium">1. Conexões com o Meta</h2>
         <div className="grid gap-3 md:grid-cols-2">
           <div className="rounded-xl border border-borda bg-superficie p-4 text-sm">
-            <div className="font-medium">Seu Business Manager (Usuário do Sistema)</div>
+            <div className="font-medium">
+              Seu Business Manager (Usuário do Sistema){" "}
+              <span className="text-xs font-normal text-texto-3">· opcional</span>
+            </div>
             <p className="mt-1 text-texto-2">
               {temTokenBm
-                ? "Token configurado. Puxa todas as contas atribuídas ao usuário do sistema."
-                : "Falta configurar META_SYSTEM_USER_TOKEN nas variáveis de ambiente."}
+                ? "Token configurado. Puxa todas as contas atribuídas ao usuário do sistema, sem precisar reconectar."
+                : "Não usado. Só é necessário se os clientes compartilharem as contas com um BM seu como parceiro; aí o acesso não expira. Suas contas já entram pelo Login com Facebook ao lado."}
             </p>
           </div>
           <div className="rounded-xl border border-borda bg-superficie p-4 text-sm">
@@ -82,15 +86,21 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
             )}
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <form action={importar}><button className={botaoPrimario}>Buscar contas no Meta</button></form>
+        <div className="flex flex-wrap items-start gap-2">
+          <form action={importar}>
+            <BotaoEnviar className={botaoPrimario} aguardando="Buscando contas…">Buscar contas no Meta</BotaoEnviar>
+          </form>
           <form action={sincronizarAgora}>
             <input type="hidden" name="modo" value="semana" />
-            <button className={botao}>Sincronizar últimos 7 dias</button>
+            <BotaoEnviar className={botao} aguardando="Sincronizando 7 dias…" aviso="Pode levar 1 a 2 minutos. Não feche a página.">
+              Sincronizar últimos 7 dias
+            </BotaoEnviar>
           </form>
           <form action={sincronizarAgora}>
             <input type="hidden" name="modo" value="mes" />
-            <button className={botao}>Recarregar últimos 30 dias</button>
+            <BotaoEnviar className={botao} aguardando="Recarregando 30 dias…" aviso="Pode levar até 5 minutos. Não feche a página.">
+              Recarregar últimos 30 dias
+            </BotaoEnviar>
           </form>
         </div>
       </section>
@@ -117,7 +127,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
               <select name="ativo" defaultValue={c?.ativo === false ? "off" : "on"} className={campo}>
                 <option value="on">Sim</option><option value="off">Não</option>
               </select>
-              <button className={c ? botao : botaoPrimario}>{c ? "Salvar" : "Adicionar"}</button>
+              <BotaoEnviar className={c ? botao : botaoPrimario}>{c ? "Salvar" : "Adicionar"}</BotaoEnviar>
             </form>
           ))}
         </div>
@@ -170,14 +180,14 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                           <option value="">— sem cliente —</option>
                           {listaClientes.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
                         </select>
-                        <button className={botao}>OK</button>
+                        <BotaoEnviar className={botao} aguardando="…">OK</BotaoEnviar>
                       </form>
                     </td>
                     <td className="px-3 py-2">
                       <form action={alternarSyncConta}>
                         <input type="hidden" name="conta_id" value={conta.id} />
                         <input type="hidden" name="ativa" value={conta.ativa_sync ? "0" : "1"} />
-                        <button className={botao}>{conta.ativa_sync ? "Ativa · pausar" : "Pausada · ativar"}</button>
+                        <BotaoEnviar className={botao} aguardando="…">{conta.ativa_sync ? "Ativa · pausar" : "Pausada · ativar"}</BotaoEnviar>
                       </form>
                     </td>
                   </tr>
