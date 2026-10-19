@@ -12,11 +12,12 @@ const botaoPrimario = "rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium te
 export default async function Configuracoes({ searchParams }: PageProps<"/configuracoes">) {
   const { msg } = (await searchParams) as { msg?: string };
   const banco = db();
-  const [{ data: clientes }, { data: contas }, { data: tokens }] = await Promise.all([
+  const [{ data: clientes }, { data: contas }, { data: tokens }, { data: execucoes }] = await Promise.all([
     banco.from("clientes").select("*").order("nome"),
     banco.from("contas_anuncio").select("*")
       .order("cliente_id", { nullsFirst: false }).order("status").order("nome"),
     banco.from("tokens_meta").select("id, fb_user_id, nome, expira_em"),
+    banco.from("sync_execucoes").select("*").order("id", { ascending: false }).limit(3),
   ]);
   const listaClientes = (clientes ?? []) as Cliente[];
   const listaContas = (contas ?? []) as ContaAnuncio[];
@@ -27,6 +28,26 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
     <div className="space-y-8">
       <h1 className="text-xl font-semibold">Configurações</h1>
       {msg && <Aviso>{msg}</Aviso>}
+
+      {!!execucoes?.length && (
+        <section className="rounded-xl border border-borda bg-superficie p-4 text-sm">
+          <div className="font-medium">Últimas sincronizações</div>
+          <ul className="mt-2 space-y-2">
+            {execucoes.map((e) => (
+              <li key={e.id}>
+                <span className="text-texto-2">
+                  {new Date(e.iniciado_em).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} · {e.modo} ·{" "}
+                </span>
+                <span className={e.status === "ok" ? "text-bom" : e.status === "rodando" ? "text-atencao" : "text-critico"}>
+                  {e.status === "rodando" ? (e.finalizado_em ? "" : "não terminou (provável tempo esgotado)") : e.status}
+                </span>
+                <span className="text-texto-2"> · {e.contas ?? 0} contas · {e.linhas ?? 0} linhas</span>
+                {e.erros && <pre className="mt-1 whitespace-pre-wrap text-xs text-critico">{e.erros}</pre>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* ---------- Conexões ---------- */}
       <section className="space-y-3">
