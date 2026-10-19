@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "../db";
 import { diasAtras, hojeISO } from "../datas";
-import { campanhaDoNegocio, idNegocio, listarFunis, listarNegocios } from "./rd";
+import { camposDoNegocio, campanhaDoNegocio, idNegocio, listarFunis, listarNegocios } from "./rd";
 
 export type ConexaoCrm = {
   cliente_id: string;
@@ -13,6 +13,7 @@ export type ConexaoCrm = {
   etapa_qualificado: string | null;
   etapa_qualificado_nome: string | null;
   etapa_qualificado_ordem: number | null;
+  fontes_anuncio: string[] | null;
   ultima_sync: string | null;
   ultimo_erro: string | null;
 };
@@ -23,19 +24,26 @@ export async function sincronizarCrmCliente(c: ConexaoCrm, dias: number) {
   try {
     if (c.tipo !== "rd_crm") throw new Error("Por enquanto só o RD Station CRM está disponível.");
     const funis = await listarFunis(c.token);
-    const ordem = new Map(funis.flatMap((f) => f.etapas.map((e) => [e.id, e.ordem] as const)));
-    const negocios = await listarNegocios(c.token, diasAtras(dias), hojeISO(), c.pipeline_id);
+    // etapa → funil e ordem (o negócio nem sempre informa o funil diretamente)
+    const etapas = new Map(
+      funis.flatMap((f) => f.etapas.map((e) => [e.id, { ordem: e.ordem, funilId: f.id, funilNome: f.nome }] as const)),
+    );
+    // Sempre todos os funis: leads entram por um funil (ex.: SDR) e podem passar para outro (consultores).
+    const negocios = await listarNegocios(c.token, diasAtras(dias), hojeISO(), null);
     const agora = new Date().toISOString();
     const linhas = negocios.map((d) => ({
       id: `rd_crm:${idNegocio(d)}`,
       cliente_id: c.cliente_id,
-      pipeline_id: idNegocio(d.deal_pipeline) || c.pipeline_id,
+      pipeline_id: etapas.get(idNegocio(d.deal_stage))?.funilId ?? (idNegocio(d.deal_pipeline) || null),
+      pipeline_nome: etapas.get(idNegocio(d.deal_stage))?.funilNome ?? null,
+      responsavel: d.user?.name ?? null,
+      campos: camposDoNegocio(d),
       nome: d.name ?? null,
       criado_em: d.created_at,
       fechado_em: d.closed_at ?? null,
       etapa_id: idNegocio(d.deal_stage) || null,
       etapa_nome: d.deal_stage?.name ?? null,
-      etapa_ordem: ordem.get(idNegocio(d.deal_stage)) ?? null,
+      etapa_ordem: etapas.get(idNegocio(d.deal_stage))?.ordem ?? null,
       ganho: d.win ?? null,
       valor: Number(d.amount_total ?? 0) || 0,
       origem: d.deal_source?.name ?? null,

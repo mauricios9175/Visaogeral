@@ -318,42 +318,64 @@ export async function alertasContas(): Promise<AlertaConta[]> {
 // ---------- CRM ----------
 
 type NegocioCrm = {
-  cliente_id: string; pipeline_id: string | null; criado_em: string; fechado_em: string | null;
-  etapa_ordem: number | null; ganho: boolean | null; valor: number; campanha: string | null; origem: string | null;
+  id: string; cliente_id: string; nome: string | null;
+  pipeline_id: string | null; pipeline_nome: string | null; etapa_nome: string | null;
+  criado_em: string; fechado_em: string | null; etapa_ordem: number | null;
+  ganho: boolean | null; valor: number; campanha: string | null; origem: string | null;
+  responsavel: string | null; campos: Record<string, string> | null;
 };
 type ConexaoResumo = {
   cliente_id: string; pipeline_id: string | null; etapa_qualificado_ordem: number | null;
-  ultima_sync: string | null; ultimo_erro: string | null;
+  fontes_anuncio: string[] | null; ultima_sync: string | null; ultimo_erro: string | null;
 };
+
+/** Fontes que parecem de anúncio, usadas enquanto o usuário não escolhe as fontes manualmente. */
+const FONTE_ANUNCIO_AUTO = /facebook|meta|instagram|google|tiktok|linkedin|\bads?\b|an[uú]ncio|tr[aá]fego|pago|paid|cpc/i;
+
+export function ehFonteAnuncio(fonte: string | null, escolhidas: string[] | null) {
+  if (!fonte) return false;
+  return escolhidas ? escolhidas.includes(fonte) : FONTE_ANUNCIO_AUTO.test(fonte);
+}
 
 export type NumerosCrm = {
   leads: number;
-  qualificados: number | null;   // null = etapa de qualificação não configurada
+  leadsAnuncio: number;
+  qualificados: number | null;        // null = etapa de qualificação não configurada
+  qualificadosAnuncio: number | null;
   vendas: number;
+  vendasAnuncio: number;
   faturamento: number;
+  faturamentoAnuncio: number;
+  emNegociacao: number;               // valor dos negócios em aberto criados no período
 };
 
 const diaSP = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date(iso));
+const noPeriodo = (iso: string | null, p: Periodo) => { if (!iso) return false; const d = diaSP(iso); return d >= p.desde && d <= p.ate; };
 
 /**
- * Leads e qualificados: negócios CRIADOS no período (coorte).
+ * Leads e qualificados: negócios CRIADOS no período, em qualquer funil.
+ * Qualificado: chegou no funil de qualificação (na etapa escolhida ou depois) ou foi ganho.
  * Vendas e faturamento: negócios GANHOS com data de fechamento no período.
  */
 function numerosCrm(negocios: NegocioCrm[], cx: ConexaoResumo, p: Periodo): NumerosCrm {
-  const doFunil = negocios.filter((n) => !cx.pipeline_id || n.pipeline_id === cx.pipeline_id);
-  const criados = doFunil.filter((n) => { const d = diaSP(n.criado_em); return d >= p.desde && d <= p.ate; });
-  const ganhos = doFunil.filter((n) => {
-    if (n.ganho !== true || !n.fechado_em) return false;
-    const d = diaSP(n.fechado_em);
-    return d >= p.desde && d <= p.ate;
-  });
+  const anuncio = (n: NegocioCrm) => ehFonteAnuncio(n.origem, cx.fontes_anuncio);
   const qualificado = (n: NegocioCrm) =>
-    n.ganho === true || (cx.etapa_qualificado_ordem != null && (n.etapa_ordem ?? -1) >= cx.etapa_qualificado_ordem);
+    n.ganho === true ||
+    (cx.etapa_qualificado_ordem != null && (!cx.pipeline_id || n.pipeline_id === cx.pipeline_id) &&
+      (n.etapa_ordem ?? -1) >= cx.etapa_qualificado_ordem);
+  const criados = negocios.filter((n) => noPeriodo(n.criado_em, p));
+  const ganhos = negocios.filter((n) => n.ganho === true && noPeriodo(n.fechado_em, p));
+  const semEtapa = cx.etapa_qualificado_ordem == null;
   return {
     leads: criados.length,
-    qualificados: cx.etapa_qualificado_ordem == null ? null : criados.filter(qualificado).length,
+    leadsAnuncio: criados.filter(anuncio).length,
+    qualificados: semEtapa ? null : criados.filter(qualificado).length,
+    qualificadosAnuncio: semEtapa ? null : criados.filter((n) => anuncio(n) && qualificado(n)).length,
     vendas: ganhos.length,
+    vendasAnuncio: ganhos.filter(anuncio).length,
     faturamento: ganhos.reduce((s, n) => s + Number(n.valor), 0),
+    faturamentoAnuncio: ganhos.filter(anuncio).reduce((s, n) => s + Number(n.valor), 0),
+    emNegociacao: criados.filter((n) => n.ganho == null).reduce((s, n) => s + Number(n.valor), 0),
   };
 }
 
@@ -363,17 +385,18 @@ async function negociosDe(clienteIds: string[], desde: string) {
   const limite = `${somarDiasISO(desde, -1)}T00:00:00Z`;
   return buscarTudo<NegocioCrm>((de, ate) =>
     db().from("crm_negocios")
-      .select("cliente_id, pipeline_id, criado_em, fechado_em, etapa_ordem, ganho, valor, campanha, origem")
+      .select("id, cliente_id, nome, pipeline_id, pipeline_nome, etapa_nome, criado_em, fechado_em, etapa_ordem, ganho, valor, campanha, origem, responsavel, campos")
       .in("cliente_id", clienteIds)
       .or(`criado_em.gte.${limite},fechado_em.gte.${limite}`)
       .range(de, ate),
   );
 }
 
+const COLUNAS_CONEXAO = "cliente_id, pipeline_id, etapa_qualificado_ordem, fontes_anuncio, ultima_sync, ultimo_erro";
+
 /** Números do CRM por cliente para a visão geral (só clientes com CRM conectado). */
 export async function resumoCrm(atual: Periodo, anterior: Periodo) {
-  const { data: conexoes } = await db().from("crm_conexoes")
-    .select("cliente_id, pipeline_id, etapa_qualificado_ordem, ultima_sync, ultimo_erro");
+  const { data: conexoes } = await db().from("crm_conexoes").select(COLUNAS_CONEXAO);
   const lista = (conexoes ?? []) as ConexaoResumo[];
   const negocios = await negociosDe(lista.map((c) => c.cliente_id), anterior.desde);
   return new Map(lista.map((cx) => {
@@ -382,30 +405,52 @@ export async function resumoCrm(atual: Periodo, anterior: Periodo) {
   }));
 }
 
-/** CRM na tela do cliente: totais do período e quebra por campanha/origem. */
+/** Campos personalizados que parecem valor/orçamento, para destacar na lista de negócios. */
+const CAMPO_VALOR = /or[cç]amento|valor|ticket|budget|investimento|pre[cç]o/i;
+
+/** CRM na tela do cliente: totais, quebra por fonte e lista de negócios do período. */
 export async function detalheCrm(clienteId: string, atual: Periodo, anterior: Periodo) {
-  const { data } = await db().from("crm_conexoes")
-    .select("cliente_id, pipeline_id, pipeline_nome, etapa_qualificado_ordem, etapa_qualificado_nome, ultima_sync, ultimo_erro")
-    .eq("cliente_id", clienteId).maybeSingle();
+  const { data } = await db().from("crm_conexoes").select(COLUNAS_CONEXAO).eq("cliente_id", clienteId).maybeSingle();
   if (!data) return null;
-  const cx = data as ConexaoResumo & { pipeline_nome: string | null; etapa_qualificado_nome: string | null };
+  const cx = data as ConexaoResumo;
   const negocios = await negociosDe([clienteId], anterior.desde);
 
-  // agrupa por campanha (UTM) ou, na falta, pela fonte do negócio
   const grupos = new Map<string, NegocioCrm[]>();
   for (const n of negocios) {
-    const chave = n.campanha || (n.origem ? `Fonte: ${n.origem}` : "Sem origem identificada");
+    const chave = n.origem || "Sem fonte";
     grupos.set(chave, [...(grupos.get(chave) ?? []), n]);
   }
-  const porOrigem = [...grupos.entries()]
-    .map(([nome, ns]) => ({ nome, ...numerosCrm(ns, cx, atual) }))
+  const porFonte = [...grupos.entries()]
+    .map(([nome, ns]) => ({ nome, anuncio: ehFonteAnuncio(nome === "Sem fonte" ? null : nome, cx.fontes_anuncio), ...numerosCrm(ns, cx, atual) }))
     .filter((g) => g.leads || g.vendas)
-    .sort((a, b) => b.faturamento - a.faturamento || b.leads - a.leads);
+    .sort((a, b) => Number(b.anuncio) - Number(a.anuncio) || b.leads - a.leads);
+
+  const lista = negocios
+    .filter((n) => noPeriodo(n.criado_em, atual) || (n.ganho === true && noPeriodo(n.fechado_em, atual)))
+    .sort((a, b) => b.criado_em.localeCompare(a.criado_em))
+    .slice(0, 100)
+    .map((n) => ({
+      ...n,
+      anuncio: ehFonteAnuncio(n.origem, cx.fontes_anuncio),
+      destaques: Object.entries(n.campos ?? {}).filter(([k]) => CAMPO_VALOR.test(k)),
+    }));
 
   return {
     conexao: cx,
+    fontesManuais: cx.fontes_anuncio != null,
     atual: numerosCrm(negocios, cx, atual),
     anterior: numerosCrm(negocios, cx, anterior),
-    porOrigem,
+    porFonte,
+    negocios: lista,
   };
+}
+
+/** Fontes distintas dos negócios do cliente (para escolher quais são de anúncio). */
+export async function fontesDoCliente(clienteId: string) {
+  const linhas = await buscarTudo<{ origem: string | null }>((de, ate) =>
+    db().from("crm_negocios").select("origem").eq("cliente_id", clienteId).range(de, ate),
+  );
+  const contagem = new Map<string, number>();
+  for (const l of linhas) if (l.origem) contagem.set(l.origem, (contagem.get(l.origem) ?? 0) + 1);
+  return [...contagem.entries()].sort((a, b) => b[1] - a[1]).map(([nome, total]) => ({ nome, total }));
 }

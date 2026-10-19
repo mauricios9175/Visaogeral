@@ -134,10 +134,8 @@ export async function salvarFunilCrm(form: FormData) {
     etapa_qualificado_ordem: etapaOrdem ? Number(etapaOrdem) : null,
   }).eq("cliente_id", clienteId);
   if (error) avisoCrm(clienteId, `Erro: ${error.message}`);
-  // Funil mudou: limpa os negócios antigos para não misturar funis.
-  await db().from("crm_negocios").delete().eq("cliente_id", clienteId);
   revalidatePath("/", "layout");
-  avisoCrm(clienteId, "Configuração salva. Clique em “Sincronizar CRM agora” para trazer os negócios.");
+  avisoCrm(clienteId, "Etapa de qualificação salva.");
 }
 
 export async function sincronizarCrmAgora(form: FormData) {
@@ -161,4 +159,14 @@ export async function removerConexaoCrm(form: FormData) {
   await db().from("crm_conexoes").delete().eq("cliente_id", clienteId);
   revalidatePath("/", "layout");
   avisoCrm(clienteId, "Conexão com o CRM removida.");
+}
+
+export async function salvarFontesCrm(form: FormData) {
+  const clienteId = String(form.get("cliente_id"));
+  const fontes = form.getAll("fonte").map(String);
+  const { error } = await db().from("crm_conexoes")
+    .update({ fontes_anuncio: fontes }).eq("cliente_id", clienteId);
+  if (error) avisoCrm(clienteId, `Erro: ${error.message}`);
+  revalidatePath("/", "layout");
+  avisoCrm(clienteId, `Fontes de anúncio salvas (${fontes.length}).`);
 }

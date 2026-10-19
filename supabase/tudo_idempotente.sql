@@ -1,4 +1,4 @@
--- Todas as migrações (0001 a 0005) num script só, seguro para rodar mais de uma vez:
+-- Todas as migrações (0001 a 0006) num script só, seguro para rodar mais de uma vez:
 -- cria apenas o que estiver faltando e não apaga dados.
 
 create extension if not exists pgcrypto;
@@ -162,6 +162,12 @@ create table if not exists crm_negocios (
 );
 create index if not exists crm_negocios_criado_idx  on crm_negocios (cliente_id, criado_em);
 create index if not exists crm_negocios_fechado_idx on crm_negocios (cliente_id, fechado_em);
+
+-- 0006: CRM com todos os funis, fontes de anúncio e campos dos negócios
+alter table crm_conexoes add column if not exists fontes_anuncio text[];
+alter table crm_negocios add column if not exists pipeline_nome text;
+alter table crm_negocios add column if not exists responsavel   text;
+alter table crm_negocios add column if not exists campos        jsonb;
 
 -- Segurança: só o servidor (chave secreta) acessa as tabelas.
 alter table clientes          enable row level security;

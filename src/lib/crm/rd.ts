@@ -15,7 +15,11 @@ async function get<T>(caminho: string, token: string, params: Record<string, str
   for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
   u.searchParams.set("token", token);
   for (let tentativa = 0; ; tentativa++) {
-    const res = await fetch(u, { cache: "no-store" });
+    const res = await fetch(u, { cache: "no-store", signal: AbortSignal.timeout(25_000) }).catch((e: unknown) => {
+      throw new Error(
+        e instanceof Error && e.name === "TimeoutError" ? "RD Station CRM não respondeu a tempo." : `Falha ao acessar o RD Station CRM: ${e}`,
+      );
+    });
     // limite de requisições: espera e tenta de novo
     if (res.status === 429 && tentativa < 4) {
       await new Promise((r) => setTimeout(r, 2000 * 2 ** tentativa));
@@ -56,7 +60,19 @@ export type NegocioApi = Id & {
   deal_source?: { name?: string } | null;
   campaign?: { name?: string } | null;
   deal_custom_fields?: { value?: unknown; custom_field?: { label?: string } }[];
+  user?: { name?: string } | null;
 };
+
+/** Campos personalizados preenchidos do negócio, como {rótulo: valor}. */
+export function camposDoNegocio(d: NegocioApi): Record<string, string> | null {
+  const campos: Record<string, string> = {};
+  for (const c of d.deal_custom_fields ?? []) {
+    const rotulo = c.custom_field?.label;
+    if (!rotulo || c.value == null || c.value === "") continue;
+    campos[rotulo] = Array.isArray(c.value) ? c.value.join(", ") : String(c.value);
+  }
+  return Object.keys(campos).length ? campos : null;
+}
 
 type PaginaNegocios = { deals: NegocioApi[]; has_more?: boolean; total?: number };
 

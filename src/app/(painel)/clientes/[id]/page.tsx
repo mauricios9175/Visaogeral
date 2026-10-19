@@ -223,62 +223,123 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base }: {
       </Aviso>
     );
   }
+  const statusNegocio = (g: boolean | null) =>
+    g === true ? <span className="text-bom">● Ganho</span>
+    : g === false ? <span className="text-critico">■ Perdido</span>
+    : <span className="text-texto-2">◐ Em aberto</span>;
   return (
     <section className="space-y-3">
       <h2 className="text-sm font-medium">
-        CRM <span className="font-normal text-texto-3">· atualizado {quandoFoi(conexao.ultima_sync)}</span>
+        CRM <span className="font-normal text-texto-3">
+          · atualizado {quandoFoi(conexao.ultima_sync)} · fontes de anúncio {crm.fontesManuais ? "escolhidas por você" : "detectadas automaticamente"}
+          {" · "}<Link href={`${base}/crm`} className="text-destaque underline">ajustar</Link>
+        </span>
       </h2>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <Kpi rotulo="Leads no CRM" valor={inteiro(x.leads)}>
-          <Variacao atual={x.leads} anterior={y.leads} />
+          <span className="block text-xs text-texto-3">{inteiro(x.leadsAnuncio)} de anúncio · {inteiro(x.leads - x.leadsAnuncio)} outras fontes</span>
+          <span className="block text-xs text-texto-3">{dinheiro(div(gasto, x.leadsAnuncio))} por lead de anúncio</span>
+          <Variacao atual={x.leadsAnuncio} anterior={y.leadsAnuncio} />
         </Kpi>
         <Kpi rotulo="Qualificados" valor={x.qualificados == null ? "—" : inteiro(x.qualificados)}>
-          {x.qualificados == null ? (
+          {x.qualificados == null || x.qualificadosAnuncio == null ? (
             <Link href={`${base}/crm`} className="text-xs text-destaque underline">definir etapa</Link>
           ) : (
-            <span className="text-xs text-texto-3">
-              {dinheiro(div(gasto, x.qualificados))} por qualificado
-              {x.leads > 0 && ` · ${pct((x.qualificados / x.leads) * 100)} dos leads`}
+            <span className="block text-xs text-texto-3">
+              {inteiro(x.qualificadosAnuncio)} de anúncio · {dinheiro(div(gasto, x.qualificadosAnuncio))} cada
+              {x.leadsAnuncio > 0 && ` · ${pct((x.qualificadosAnuncio / x.leadsAnuncio) * 100)} dos leads de anúncio`}
             </span>
           )}
         </Kpi>
         <Kpi rotulo="Vendas" valor={inteiro(x.vendas)}>
-          <span className="text-xs text-texto-3">{dinheiro(div(gasto, x.vendas))} por venda</span>
+          <span className="block text-xs text-texto-3">
+            {inteiro(x.vendasAnuncio)} de anúncio · {dinheiro(div(gasto, x.vendasAnuncio))} por venda
+          </span>
         </Kpi>
         <Kpi rotulo="Faturamento" valor={dinheiro(x.faturamento)}>
-          <span className="block text-xs text-texto-3">ROAS real {decimal(div(x.faturamento, gasto))}</span>
-          <Variacao atual={div(x.faturamento, gasto)} anterior={div(y.faturamento, gastoAnterior)} />
+          <span className="block text-xs text-texto-3">
+            {dinheiro(x.faturamentoAnuncio)} de anúncio · ROAS real {decimal(div(x.faturamentoAnuncio, gasto))}
+          </span>
+          <Variacao atual={div(x.faturamentoAnuncio, gasto)} anterior={div(y.faturamentoAnuncio, gastoAnterior)} />
+        </Kpi>
+        <Kpi rotulo="Em negociação" valor={dinheiro(x.emNegociacao)}>
+          <span className="block text-xs text-texto-3">valor dos negócios em aberto criados no período</span>
         </Kpi>
       </div>
-      {crm.porOrigem.length > 0 && (
+
+      {crm.porFonte.length > 0 && (
         <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
           <table className="w-full text-sm">
             <thead className="text-left text-xs text-texto-3">
               <tr>
-                <th className="px-4 py-2 font-normal">Campanha / origem no CRM</th>
-                {["Leads", "Qualificados", "Vendas", "Faturamento"].map((h) => (
+                <th className="px-4 py-2 font-normal">Fonte no CRM</th>
+                {["Leads", "Qualificados", "Vendas", "Faturamento", "Em negociação"].map((h) => (
                   <th key={h} className="px-3 py-2 text-right font-normal">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="num">
-              {crm.porOrigem.map((o) => (
+              {crm.porFonte.map((o) => (
                 <tr key={o.nome} className="border-t border-borda">
-                  <td className="max-w-96 truncate px-4 py-2" title={o.nome}>{o.nome}</td>
+                  <td className="px-4 py-2">
+                    {o.nome}{" "}
+                    {o.anuncio && <span className="rounded-full bg-fundo px-2 py-0.5 text-[11px] text-destaque">anúncio</span>}
+                  </td>
                   <td className="px-3 py-2 text-right">{inteiro(o.leads)}</td>
                   <td className="px-3 py-2 text-right">{o.qualificados == null ? "—" : inteiro(o.qualificados)}</td>
                   <td className="px-3 py-2 text-right">{inteiro(o.vendas)}</td>
                   <td className="px-3 py-2 text-right">{dinheiro(o.faturamento)}</td>
+                  <td className="px-3 py-2 text-right">{dinheiro(o.emNegociacao)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="px-4 py-2 text-xs text-texto-3">
-            Leads e qualificados: negócios criados no período. Vendas: negócios ganhos com fechamento no período.
-            A campanha vem do campo Campanha (ou UTM) do negócio no RD; sem ela, aparece a Fonte.
-          </p>
         </div>
       )}
+
+      {crm.negocios.length > 0 && (
+        <details className="rounded-xl border border-borda bg-superficie">
+          <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
+            Negócios do período ({crm.negocios.length})
+          </summary>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="text-left text-xs text-texto-3">
+                <tr>
+                  {["Negócio", "Criado", "Fonte", "Funil · etapa", "Status", "Valor", "Orçamento / campos"].map((h) => (
+                    <th key={h} className="px-3 py-2 font-normal first:px-4">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="align-top">
+                {crm.negocios.map((n) => (
+                  <tr key={n.id} className="border-t border-borda">
+                    <td className="px-4 py-2">
+                      <div>{n.nome ?? "—"}</div>
+                      {n.responsavel && <div className="text-xs text-texto-3">{n.responsavel}</div>}
+                    </td>
+                    <td className="num px-3 py-2 text-texto-2">{new Date(n.criado_em).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}</td>
+                    <td className="px-3 py-2">
+                      {n.origem ?? <span className="text-texto-3">sem fonte</span>}
+                      {n.anuncio && <span className="ml-1 text-[11px] text-destaque">anúncio</span>}
+                    </td>
+                    <td className="px-3 py-2 text-texto-2">{[n.pipeline_nome, n.etapa_nome].filter(Boolean).join(" · ")}</td>
+                    <td className="px-3 py-2">{statusNegocio(n.ganho)}</td>
+                    <td className="num px-3 py-2">{n.valor ? dinheiro(n.valor) : "—"}</td>
+                    <td className="px-3 py-2 text-xs text-texto-2">
+                      {n.destaques.map(([k, v]) => <div key={k}><span className="text-texto-3">{k}:</span> {v}</div>)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+      <p className="text-xs text-texto-3">
+        Leads e qualificados: negócios criados no período, em todos os funis. Vendas: negócios ganhos com fechamento no período.
+        Custos e ROAS usam só os negócios de fontes de anúncio.
+      </p>
     </section>
   );
 }

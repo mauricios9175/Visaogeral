@@ -6,7 +6,8 @@ import { listarFunis, type FunilRd } from "@/lib/crm/rd";
 import type { ConexaoCrm } from "@/lib/crm/sync";
 import { Aviso } from "@/components/ui";
 import { BotaoEnviar } from "@/components/botao";
-import { removerConexaoCrm, salvarConexaoCrm, salvarFunilCrm, sincronizarCrmAgora } from "../../../../acoes";
+import { removerConexaoCrm, salvarConexaoCrm, salvarFontesCrm, salvarFunilCrm, sincronizarCrmAgora } from "../../../../acoes";
+import { ehFonteAnuncio, fontesDoCliente } from "@/lib/consultas";
 
 export const maxDuration = 300;
 
@@ -25,6 +26,7 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
   if (!cliente) notFound();
   const c = conexao as ConexaoCrm | null;
 
+  const fontes = c ? await fontesDoCliente(id).catch(() => []) : [];
   let funis: FunilRd[] = [];
   let erroFunis: string | null = null;
   if (c) {
@@ -114,8 +116,10 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
                 </select>
               </label>
               <p className="text-xs text-texto-3">
-                Conta como qualificado todo negócio desse funil que estiver nessa etapa ou em uma etapa depois dela,
-                além dos negócios ganhos. <b>Venda</b> = negócio marcado como ganho no RD, com o valor dele.
+                O painel sempre traz <b>todos os funis</b> (leads = todos os negócios criados). Conta como qualificado
+                o negócio que estiver nesse funil, nessa etapa ou depois dela, além dos negócios ganhos. Ex.: funil de
+                SDR + funil de consultores → escolha a 1ª etapa do funil de consultores. <b>Venda</b> = negócio ganho,
+                com o valor dele.
               </p>
               <BotaoEnviar className={botaoPrimario}>Salvar</BotaoEnviar>
             </form>
@@ -128,7 +132,42 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
         </section>
       )}
 
-      {/* 3. Sincronizar / remover */}
+      {/* 3. Fontes de anúncio */}
+      {c && (
+        <section className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+          <h2 className="font-medium">3. Quais fontes são de anúncio?</h2>
+          {fontes.length === 0 ? (
+            <p className="text-sm text-texto-3">
+              Nenhuma fonte encontrada ainda. Clique em “Sincronizar CRM agora” e volte aqui.
+            </p>
+          ) : (
+            <form action={salvarFontesCrm} className="space-y-3">
+              <input type="hidden" name="cliente_id" value={id} />
+              <div className="grid gap-1 sm:grid-cols-2">
+                {fontes.map((f) => (
+                  <label key={f.nome} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox" name="fonte" value={f.nome}
+                      defaultChecked={ehFonteAnuncio(f.nome, c.fontes_anuncio)}
+                    />
+                    {f.nome} <span className="text-xs text-texto-3">({f.total})</span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-texto-3">
+                {c.fontes_anuncio
+                  ? "Seleção salva por você."
+                  : "Pré-marcadas automaticamente (Facebook, Meta, Google, Ads…). Confira e salve."}
+                {" "}Leads das outras fontes (orgânico, porta, indicação…) continuam aparecendo, mas os custos e o ROAS
+                usam só as fontes marcadas.
+              </p>
+              <BotaoEnviar className={botaoPrimario}>Salvar fontes</BotaoEnviar>
+            </form>
+          )}
+        </section>
+      )}
+
+      {/* 4. Sincronizar / remover */}
       {c && (
         <section className="flex flex-wrap items-start gap-3">
           <form action={sincronizarCrmAgora}>

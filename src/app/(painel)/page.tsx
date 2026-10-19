@@ -152,9 +152,10 @@ function CardCliente({ r, periodo, alertas, crm }: {
       <div className="mt-2"><TiposResultado m={a} compacto /></div>
       {crm && (
         <div className="mt-2 rounded-lg bg-fundo px-2 py-1 text-xs text-texto-2">
-          CRM: {crm.qualificados != null && <>{inteiro(crm.qualificados)} qualificados · </>}
-          {inteiro(crm.vendas)} vendas · {dinheiro(crm.faturamento)}
-          {a.gasto > 0 && crm.faturamento > 0 && <> · ROAS {(crm.faturamento / a.gasto).toFixed(1).replace(".", ",")}</>}
+          CRM: {inteiro(crm.leads)} leads ({inteiro(crm.leadsAnuncio)} de anúncio)
+          {crm.qualificados != null && <> · {inteiro(crm.qualificados)} qualificados</>}
+          {" · "}{inteiro(crm.vendas)} vendas · {dinheiro(crm.faturamento)}
+          {a.gasto > 0 && crm.faturamentoAnuncio > 0 && <> · ROAS {(crm.faturamentoAnuncio / a.gasto).toFixed(1).replace(".", ",")}</>}
         </div>
       )}
 
