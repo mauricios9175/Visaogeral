@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { resolverPeriodo, progressoDoMes } from "@/lib/datas";
 import { alertasContas, resumoClientes, resumoCrm, type AlertaConta, type NumerosCrm, type ResumoCliente } from "@/lib/consultas";
-import { db } from "@/lib/db";
+import { db, EMPRESA_PADRAO } from "@/lib/db";
 import { dataCurta, dinheiro, inteiro, quandoFoi } from "@/lib/formato";
 import { Aviso, SeletorPeriodo, SeloSaude, TiposResultado, Variacao } from "@/components/ui";
 
@@ -9,9 +9,10 @@ import { Aviso, SeletorPeriodo, SeloSaude, TiposResultado, Variacao } from "@/co
 const ORDEM = { critico: 0, atencao: 1, ok: 2, sem_dados: 3 };
 
 export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
-  const { atual, anterior } = resolverPeriodo((await searchParams) as { p?: string; de?: string; ate?: string });
+  const busca = (await searchParams) as { p?: string; de?: string; ate?: string; empresa?: string };
+  const { atual, anterior } = resolverPeriodo(busca);
   const banco = db();
-  const [resumos, alertas, { data: ultima }, { count: semCliente }, { data: primeiro }, crm] = await Promise.all([
+  const [todosResumos, todosAlertas, { data: ultima }, { count: semCliente }, { data: primeiro }, crm] = await Promise.all([
     resumoClientes(atual, anterior),
     alertasContas(),
     banco.from("sync_execucoes").select("finalizado_em, status").not("finalizado_em", "is", null)
@@ -21,24 +22,59 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
     resumoCrm(atual, anterior),
   ]);
   const historicoDesde: string | null = primeiro?.data ?? null;
-  resumos.sort((a, b) => ORDEM[a.saude] - ORDEM[b.saude] || b.atual.gasto - a.atual.gasto);
+  todosResumos.sort((a, b) => ORDEM[a.saude] - ORDEM[b.saude] || b.atual.gasto - a.atual.gasto);
+
+  // ---- empresas ----
+  const empresaDe = (r: ResumoCliente) => r.cliente.empresa || EMPRESA_PADRAO;
+  const empresas = [...new Set(todosResumos.map(empresaDe))].sort((a, b) =>
+    a === EMPRESA_PADRAO ? 1 : b === EMPRESA_PADRAO ? -1 : a.localeCompare(b),
+  );
+  const empresa = busca.empresa && empresas.includes(busca.empresa) ? busca.empresa : null;
+  const resumos = empresa ? todosResumos.filter((r) => empresaDe(r) === empresa) : todosResumos;
+  const idsVisiveis = new Set(resumos.map((r) => r.cliente.id));
+  const alertas = todosAlertas.filter((a) => idsVisiveis.has(a.clienteId));
+  const resumoEmpresas = empresas
+    .filter((e) => !empresa || e === empresa)
+    .map((e) => resumirEmpresa(e, todosResumos.filter((r) => empresaDe(r) === e), todosAlertas, crm));
+  const linkEmpresa = (e: string | null) => `/?${atual.qs}${e ? `&empresa=${encodeURIComponent(e)}` : ""}`;
 
   const total = resumos.reduce(
     (t, r) => ({ gasto: t.gasto + r.atual.gasto, resultados: t.resultados + r.atual.resultados }),
     { gasto: 0, resultados: 0 },
   );
 
+  // sem filtro: cards agrupados por empresa; com filtro: só a empresa escolhida
+  const grupos = (empresa ? [empresa] : empresas).map((e) => ({ empresa: e, itens: resumos.filter((r) => empresaDe(r) === e) }));
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Visão geral</h1>
+          <h1 className="text-xl font-semibold">{empresa ?? "Visão geral"}</h1>
           <p className="text-sm text-texto-2">
             {resumos.length} clientes · {dinheiro(total.gasto)} investidos · {inteiro(total.resultados)} resultados ·
             atualizado {quandoFoi(ultima?.finalizado_em ?? null)}
           </p>
         </div>
-        <SeletorPeriodo atual={atual} base="/" />
+        <SeletorPeriodo atual={atual} base="/" extra={empresa ? { empresa } : {}} />
+      </div>
+
+      {/* filtro por empresa */}
+      <nav className="flex flex-wrap gap-1 text-sm">
+        {[null, ...empresas].map((e) => (
+          <Link
+            key={e ?? "todas"} href={linkEmpresa(e)}
+            className={`rounded-full border px-3 py-1 ${e === empresa ? "border-destaque bg-superficie font-medium" : "border-borda text-texto-2 hover:text-texto"}`}
+          >
+            {e ?? "Todas as empresas"}{" "}
+            <span className="text-texto-3">({e ? todosResumos.filter((r) => empresaDe(r) === e).length : todosResumos.length})</span>
+          </Link>
+        ))}
+      </nav>
+
+      {/* resumo de cada empresa */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {resumoEmpresas.map((e) => <CardEmpresa key={e.nome} e={e} href={linkEmpresa(e.nome)} ativo={e.nome === empresa} />)}
       </div>
 
       {historicoDesde && historicoDesde > atual.desde && (
@@ -51,32 +87,100 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
 
       {alertas.length > 0 && <PainelAlertas alertas={alertas} />}
 
-      {!!semCliente && (
+      {!!semCliente && !empresa && (
         <Aviso>
           {semCliente} conta(s) ativa(s) de anúncio ainda sem cliente vinculado.{" "}
           <Link href="/configuracoes" className="text-destaque underline">Vincular agora</Link>
         </Aviso>
       )}
-      {resumos.length === 0 && (
+      {todosResumos.length === 0 && (
         <Aviso>
           Nenhum cliente cadastrado. Vá em <Link href="/configuracoes" className="text-destaque underline">Configurações</Link>,
           importe as contas do Meta e cadastre seus clientes.
         </Aviso>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {resumos.map((r) => (
-          <CardCliente
-            key={r.cliente.id} r={r} periodo={atual.qs}
-            alertas={alertas.filter((a) => a.clienteId === r.cliente.id).length}
-            crm={crm.get(r.cliente.id)?.atual}
-          />
-        ))}
-      </div>
+      {grupos.map((g) => (
+        <section key={g.empresa} className="space-y-3">
+          {!empresa && <h2 className="text-sm font-medium text-texto-2">{g.empresa}</h2>}
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {g.itens.map((r) => (
+              <CardCliente
+                key={r.cliente.id} r={r} periodo={atual.qs}
+                alertas={alertas.filter((a) => a.clienteId === r.cliente.id).length}
+                crm={crm.get(r.cliente.id)?.atual}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
       <p className="text-xs text-texto-3">
         Resultados = o “Resultado” do Gerenciador de Anúncios de cada campanha (conversas, formulários, leads no site, conversões personalizadas, compras e cadastros); cliques e engajamento ficam de fora. Variações comparam com {anterior.rotulo}.
       </p>
     </div>
+  );
+}
+
+type ResumoEmpresa = ReturnType<typeof resumirEmpresa>;
+
+function resumirEmpresa(
+  nome: string,
+  rs: ResumoCliente[],
+  alertas: AlertaConta[],
+  crm: Map<string, { atual: NumerosCrm }>,
+) {
+  const soma = (f: (r: ResumoCliente) => number) => rs.reduce((t, r) => t + f(r), 0);
+  const ids = new Set(rs.map((r) => r.cliente.id));
+  const crms = rs.map((r) => crm.get(r.cliente.id)?.atual).filter((x): x is NumerosCrm => !!x);
+  const gasto = soma((r) => r.atual.gasto);
+  const resultados = soma((r) => r.atual.resultados);
+  return {
+    nome,
+    clientes: rs.length,
+    criticos: rs.filter((r) => r.saude === "critico").length,
+    gasto,
+    gastoAnterior: soma((r) => r.anterior.gasto),
+    resultados,
+    resultadosAnterior: soma((r) => r.anterior.resultados),
+    cpr: resultados ? gasto / resultados : null,
+    cprAnterior: (() => { const g = soma((r) => r.anterior.gasto), n = soma((r) => r.anterior.resultados); return n ? g / n : null; })(),
+    alertas: alertas.filter((a) => ids.has(a.clienteId)).length,
+    crm: crms.length
+      ? {
+          clientes: crms.length,
+          leads: crms.reduce((t, x) => t + x.leads, 0),
+          vendas: crms.reduce((t, x) => t + x.vendas, 0),
+          faturamento: crms.reduce((t, x) => t + x.faturamento, 0),
+        }
+      : null,
+  };
+}
+
+function CardEmpresa({ e, href, ativo }: { e: ResumoEmpresa; href: string; ativo: boolean }) {
+  return (
+    <Link
+      href={href}
+      className={`block rounded-xl border bg-superficie p-4 transition hover:border-destaque ${ativo ? "border-destaque" : "border-borda"}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="font-medium">{e.nome}</div>
+        <div className="text-xs text-texto-3">
+          {e.clientes} cliente(s)
+          {e.criticos > 0 && <span className="text-critico"> · ■ {e.criticos} crítico(s)</span>}
+          {e.alertas > 0 && <span className="text-atencao"> · ▲ {e.alertas} alerta(s)</span>}
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <Metrica rotulo="Investido" valor={dinheiro(e.gasto)}><Variacao atual={e.gasto} anterior={e.gastoAnterior} neutro /></Metrica>
+        <Metrica rotulo="Resultados" valor={inteiro(e.resultados)}><Variacao atual={e.resultados} anterior={e.resultadosAnterior} /></Metrica>
+        <Metrica rotulo="Custo/result." valor={dinheiro(e.cpr)}><Variacao atual={e.cpr} anterior={e.cprAnterior} menorMelhor /></Metrica>
+      </div>
+      {e.crm && (
+        <div className="mt-3 rounded-lg bg-fundo px-2 py-1 text-xs text-texto-2">
+          CRM ({e.crm.clientes} cliente(s)): {inteiro(e.crm.leads)} leads · {inteiro(e.crm.vendas)} vendas · {dinheiro(e.crm.faturamento)}
+        </div>
+      )}
+    </Link>
   );
 }
 

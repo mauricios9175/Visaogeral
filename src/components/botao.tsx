@@ -1,6 +1,7 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
+import { encerrarCliente } from "@/app/acoes";
 
 /**
  * Botão de formulário que mostra que está trabalhando enquanto a ação roda no servidor.
@@ -30,5 +31,29 @@ export function BotaoEnviar({ children, aguardando, aviso, className }: {
       </button>
       {pending && aviso && <span className="mt-1 text-xs text-texto-3">{aviso}</span>}
     </span>
+  );
+}
+
+/**
+ * Botão "Churn" dentro do formulário do cliente: envia o mesmo formulário (com o id) para a ação
+ * de encerrar, depois de confirmar.
+ */
+export function BotaoChurn() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      formAction={encerrarCliente}
+      formNoValidate
+      disabled={pending}
+      onClick={(e) => {
+        if (!confirm("Encerrar este cliente (churn)? Ele sai da visão geral, dos alertas e da sincronização. Dá para reativar depois.")) {
+          e.preventDefault();
+        }
+      }}
+      className="rounded-lg border border-borda bg-superficie px-3 py-1.5 text-sm text-critico hover:border-critico disabled:opacity-60"
+      title="Encerrar cliente (churn)"
+    >
+      Churn
+    </button>
   );
 }

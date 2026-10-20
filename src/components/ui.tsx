@@ -4,7 +4,9 @@ import { inteiro, variacao } from "@/lib/formato";
 import { ROTULO_TIPO, TIPOS_CONVERSAO, type Saude } from "@/lib/consultas";
 import type { Metricas } from "@/lib/db";
 
-export function SeletorPeriodo({ atual, base }: { atual: Periodo; base: string }) {
+/** `extra`: filtros a manter ao trocar de período (ex.: { empresa: "Viccon" }). */
+export function SeletorPeriodo({ atual, base, extra = {} }: { atual: Periodo; base: string; extra?: Record<string, string> }) {
+  const qsExtra = Object.entries(extra).map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join("");
   const campo = "rounded-md border border-borda bg-fundo px-2 py-1 text-sm";
   return (
     <div className="flex flex-col items-end gap-2">
@@ -12,7 +14,7 @@ export function SeletorPeriodo({ atual, base }: { atual: Periodo; base: string }
         {PERIODOS.map((p) => (
           <Link
             key={p.chave}
-            href={`${base}?p=${p.chave}`}
+            href={`${base}?p=${p.chave}${qsExtra}`}
             className={`rounded-md px-3 py-1 ${p.chave === atual.chave ? "bg-fundo font-medium" : "text-texto-2 hover:text-texto"}`}
           >
             {p.rotulo}
@@ -22,6 +24,7 @@ export function SeletorPeriodo({ atual, base }: { atual: Periodo; base: string }
       {/* período livre: formulário GET, funciona sem JavaScript */}
       <form action={base} className="flex flex-wrap items-center justify-end gap-2 text-sm text-texto-2">
         <input type="hidden" name="p" value="livre" />
+        {Object.entries(extra).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
         <label className="flex items-center gap-1">
           De <input type="date" name="de" required defaultValue={atual.desde} className={campo} />
         </label>

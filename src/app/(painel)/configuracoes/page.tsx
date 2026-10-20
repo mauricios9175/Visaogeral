@@ -1,12 +1,13 @@
-import { db, type Cliente, type ContaAnuncio, type TokenMeta } from "@/lib/db";
+import { db, EMPRESA_PADRAO, type Cliente, type ContaAnuncio, type TokenMeta } from "@/lib/db";
 import { diasAte, dinheiro, quandoFoi } from "@/lib/formato";
 import { Aviso } from "@/components/ui";
-import { BotaoEnviar } from "@/components/botao";
-import { alternarSyncConta, importar, salvarCliente, sincronizarAgora, vincularConta } from "../../acoes";
+import { BotaoChurn, BotaoEnviar } from "@/components/botao";
+import { alternarSyncConta, importar, reativarCliente, salvarCliente, sincronizarAgora, vincularConta } from "../../acoes";
 
 export const maxDuration = 300;
 
 const campo = "rounded-lg border border-borda bg-fundo px-2 py-1.5 text-sm outline-none focus:border-destaque";
+const campoGrade = `${campo} w-full min-w-0`;
 const botao = "rounded-lg border border-borda bg-superficie px-3 py-1.5 text-sm hover:border-destaque";
 const botaoPrimario = "rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium text-white";
 
@@ -21,6 +22,9 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
     banco.from("sync_execucoes").select("*").order("id", { ascending: false }).limit(3),
   ]);
   const listaClientes = (clientes ?? []) as Cliente[];
+  const ativos = listaClientes.filter((c) => c.ativo);
+  const encerrados = listaClientes.filter((c) => !c.ativo);
+  const empresas = [...new Set([EMPRESA_PADRAO, ...listaClientes.map((c) => c.empresa).filter((e): e is string => !!e)])].sort();
   const listaContas = (contas ?? []) as ContaAnuncio[];
   const temTokenBm = Boolean(process.env.META_SYSTEM_USER_TOKEN);
   const temApp = Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET);
@@ -107,30 +111,60 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
 
       {/* ---------- Clientes ---------- */}
       <section className="space-y-3">
-        <h2 className="font-medium">2. Clientes e metas</h2>
+        <h2 className="font-medium">2. Clientes, empresas e metas</h2>
+        <p className="text-xs text-texto-3">
+          Empresa = para quem você atende o cliente (ex.: Propulsão, Viccon, Clientes próprios). Para criar uma empresa
+          nova, é só digitar o nome dela no cliente.
+        </p>
+        <datalist id="empresas">
+          {empresas.map((e) => <option key={e} value={e} />)}
+        </datalist>
         <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
-          <div className="grid min-w-[760px] grid-cols-[2fr_1.5fr_1fr_1fr_1fr_80px_100px] gap-2 px-4 py-2 text-xs text-texto-3">
-            <span>Nome</span><span>Nicho</span><span>Custo/result. meta (R$)</span>
-            <span>Orçamento mensal (R$)</span><span>ROAS meta</span><span>Ativo</span><span />
+          <div className="grid min-w-[980px] grid-cols-[1.5fr_1.2fr_1.1fr_0.9fr_0.9fr_0.7fr_auto] gap-2 px-4 py-2 text-xs text-texto-3">
+            <span>Nome</span><span>Empresa</span><span>Nicho</span><span>Custo/result. meta (R$)</span>
+            <span>Orçamento mensal (R$)</span><span>ROAS meta</span><span className="w-[190px]" />
           </div>
-          {[...listaClientes, null].map((c) => (
+          {[...ativos, null].map((c) => (
             <form
               key={c?.id ?? "novo"} action={salvarCliente}
-              className="grid min-w-[760px] grid-cols-[2fr_1.5fr_1fr_1fr_1fr_80px_100px] items-center gap-2 border-t border-borda px-4 py-2"
+              className="grid min-w-[980px] grid-cols-[1.5fr_1.2fr_1.1fr_0.9fr_0.9fr_0.7fr_auto] items-center gap-2 border-t border-borda px-4 py-2"
             >
               <input type="hidden" name="id" value={c?.id ?? ""} />
-              <input name="nome" defaultValue={c?.nome} placeholder="Novo cliente" className={campo} required />
-              <input name="nicho" defaultValue={c?.nicho ?? ""} placeholder="ex.: odontologia" className={campo} />
-              <input name="cpl_meta" defaultValue={c?.cpl_meta ?? ""} inputMode="decimal" className={campo} />
-              <input name="orcamento_mensal" defaultValue={c?.orcamento_mensal ?? ""} inputMode="decimal" className={campo} />
-              <input name="roas_meta" defaultValue={c?.roas_meta ?? ""} inputMode="decimal" className={campo} />
-              <select name="ativo" defaultValue={c?.ativo === false ? "off" : "on"} className={campo}>
-                <option value="on">Sim</option><option value="off">Não</option>
-              </select>
-              <BotaoEnviar className={c ? botao : botaoPrimario}>{c ? "Salvar" : "Adicionar"}</BotaoEnviar>
+              <input name="nome" defaultValue={c?.nome} placeholder="Novo cliente" className={campoGrade} required />
+              <input name="empresa" list="empresas" defaultValue={c?.empresa ?? ""} placeholder="Clientes próprios" className={campoGrade} />
+              <input name="nicho" defaultValue={c?.nicho ?? ""} placeholder="ex.: odontologia" className={campoGrade} />
+              <input name="cpl_meta" defaultValue={c?.cpl_meta ?? ""} inputMode="decimal" className={campoGrade} />
+              <input name="orcamento_mensal" defaultValue={c?.orcamento_mensal ?? ""} inputMode="decimal" className={campoGrade} />
+              <input name="roas_meta" defaultValue={c?.roas_meta ?? ""} inputMode="decimal" className={campoGrade} />
+              <span className="flex w-[190px] gap-2">
+                <BotaoEnviar className={c ? botao : botaoPrimario}>{c ? "Salvar" : "Adicionar"}</BotaoEnviar>
+                {c && <BotaoChurn />}
+              </span>
             </form>
           ))}
         </div>
+
+        {encerrados.length > 0 && (
+          <details className="rounded-xl border border-borda bg-superficie">
+            <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
+              Clientes encerrados / churn ({encerrados.length})
+            </summary>
+            <ul className="divide-y divide-borda text-sm">
+              {encerrados.map((c) => (
+                <li key={c.id} className="flex flex-wrap items-center gap-3 px-4 py-2">
+                  <span className="font-medium">{c.nome}</span>
+                  <span className="text-texto-3">
+                    {c.empresa ?? "—"} · encerrado em {c.churn_em ? c.churn_em.split("-").reverse().join("/") : "—"}
+                  </span>
+                  <form action={reativarCliente} className="ml-auto">
+                    <input type="hidden" name="id" value={c.id} />
+                    <BotaoEnviar className={botao} aguardando="Reativando…">Reativar</BotaoEnviar>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
       </section>
 
       {/* ---------- Contas ---------- */}
@@ -178,7 +212,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                         <input type="hidden" name="conta_id" value={conta.id} />
                         <select name="cliente_id" defaultValue={conta.cliente_id ?? ""} className={campo}>
                           <option value="">— sem cliente —</option>
-                          {listaClientes.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                          {listaClientes.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.ativo ? "" : " (encerrado)"}</option>)}
                         </select>
                         <BotaoEnviar className={botao} aguardando="…">OK</BotaoEnviar>
                       </form>

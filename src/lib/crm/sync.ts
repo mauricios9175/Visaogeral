@@ -148,7 +148,8 @@ export async function sincronizarCrmCliente(c: ConexaoCrm, dias: number) {
 /** Sincroniza o CRM de todos os clientes conectados. Devolve os erros por cliente. */
 export async function sincronizarCrms(dias: number) {
   const banco = db();
-  const { data: conexoes } = await banco.from("crm_conexoes").select("*, clientes(nome)");
+  const { data: conexoes } = await banco.from("crm_conexoes")
+    .select("*, clientes!inner(nome, ativo)").eq("clientes.ativo", true);
   const erros: string[] = [];
   let negocios = 0;
   for (const c of (conexoes ?? []) as (ConexaoCrm & { clientes: { nome: string } | null })[]) {

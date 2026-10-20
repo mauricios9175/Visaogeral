@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { COOKIE_SESSAO, criarSessao, senhaCorreta } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db, EMPRESA_PADRAO } from "@/lib/db";
 import { importarContas, sincronizar } from "@/lib/sync";
 import { listarFunisCrm, NOME_CRM, sincronizarCrmCliente, type ConexaoCrm, type TipoCrm } from "@/lib/crm/sync";
 
@@ -39,7 +39,7 @@ export async function salvarCliente(form: FormData) {
     cpl_meta: numero(form.get("cpl_meta")),
     orcamento_mensal: numero(form.get("orcamento_mensal")),
     roas_meta: numero(form.get("roas_meta")),
-    ativo: form.get("ativo") !== "off",
+    empresa: String(form.get("empresa") ?? "").trim() || EMPRESA_PADRAO,
   };
   if (!dados.nome) aviso("Informe o nome do cliente.");
   const banco = db();
@@ -49,6 +49,24 @@ export async function salvarCliente(form: FormData) {
   if (error) aviso(`Erro: ${error.message}`);
   revalidatePath("/", "layout");
   aviso(id ? "Cliente atualizado." : "Cliente criado.");
+}
+
+/** Churn: tira o cliente da visão geral, dos alertas e da sincronização. O histórico fica guardado. */
+export async function encerrarCliente(form: FormData) {
+  const id = String(form.get("id"));
+  const { error } = await db().from("clientes")
+    .update({ ativo: false, churn_em: new Date().toISOString().slice(0, 10) }).eq("id", id);
+  if (error) aviso(`Erro: ${error.message}`);
+  revalidatePath("/", "layout");
+  aviso("Cliente encerrado (churn). Ele saiu da visão geral; dá para reativar na lista de encerrados.");
+}
+
+export async function reativarCliente(form: FormData) {
+  const id = String(form.get("id"));
+  const { error } = await db().from("clientes").update({ ativo: true, churn_em: null }).eq("id", id);
+  if (error) aviso(`Erro: ${error.message}`);
+  revalidatePath("/", "layout");
+  aviso("Cliente reativado.");
 }
 
 export async function vincularConta(form: FormData) {

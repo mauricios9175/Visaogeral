@@ -25,7 +25,11 @@ export type Cliente = {
   orcamento_mensal: number | null;
   roas_meta: number | null;
   ativo: boolean;
+  empresa: string | null;
+  churn_em: string | null;
 };
+
+export const EMPRESA_PADRAO = "Clientes próprios";
 
 export type ContaAnuncio = {
   id: string;

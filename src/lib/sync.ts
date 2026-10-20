@@ -152,8 +152,9 @@ export async function sincronizar(modo: ModoSync) {
   }
 
   // Métricas só das contas vinculadas a um cliente: as outras não aparecem no painel.
-  const { data: contas } = await banco.from("contas_anuncio").select("*")
-    .eq("ativa_sync", true).not("cliente_id", "is", null);
+  // Só contas de clientes ativos (cliente em churn para de sincronizar).
+  const { data: contas } = await banco.from("contas_anuncio").select("*, clientes!inner(ativo)")
+    .eq("ativa_sync", true).eq("clientes.ativo", true);
   const { data: tokens } = await banco.from("tokens_meta").select("id, token");
   const tokenPorId = new Map((tokens ?? []).map((t) => [t.id as string, t.token as string]));
 
