@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { COOKIE_SESSAO, criarSessao, senhaCorreta } from "@/lib/auth";
 import { db, EMPRESA_PADRAO } from "@/lib/db";
 import { importarContas, sincronizar } from "@/lib/sync";
-import { listarFunisCrm, NOME_CRM, sincronizarCrmCliente, type ConexaoCrm, type TipoCrm } from "@/lib/crm/sync";
+import { listarFunisCrm, NOME_CRM, sincronizarCrmCliente, sincronizarCrms, type ConexaoCrm, type TipoCrm } from "@/lib/crm/sync";
 
 export async function entrar(_: unknown, form: FormData) {
   if (!senhaCorreta(String(form.get("senha") ?? ""))) return { erro: "Senha incorreta." };
@@ -194,4 +194,17 @@ export async function salvarFontesCrm(form: FormData) {
   if (error) avisoCrm(clienteId, `Erro: ${error.message}`);
   revalidatePath("/", "layout");
   avisoCrm(clienteId, `Fontes de anúncio salvas (${fontes.length}).`);
+}
+
+export async function sincronizarCrmsAgora() {
+  let msg: string;
+  try {
+    const r = await sincronizarCrms(30);
+    msg = `CRMs sincronizados: ${r.negocios} negócio(s) dos últimos 30 dias.` +
+      (r.erros.length ? ` Erros: ${r.erros.join(" | ")}` : "");
+  } catch (e) {
+    msg = `Erro ao sincronizar os CRMs: ${e instanceof Error ? e.message : e}`;
+  }
+  revalidatePath("/", "layout");
+  aviso(msg);
 }

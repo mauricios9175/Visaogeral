@@ -2,7 +2,7 @@ import { db, EMPRESA_PADRAO, type Cliente, type ContaAnuncio, type TokenMeta } f
 import { diasAte, dinheiro, quandoFoi } from "@/lib/formato";
 import { Aviso } from "@/components/ui";
 import { BotaoChurn, BotaoEnviar } from "@/components/botao";
-import { alternarSyncConta, importar, reativarCliente, salvarCliente, sincronizarAgora, vincularConta } from "../../acoes";
+import { alternarSyncConta, importar, reativarCliente, salvarCliente, sincronizarAgora, sincronizarCrmsAgora, vincularConta } from "../../acoes";
 
 export const maxDuration = 300;
 
@@ -104,6 +104,11 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
             <input type="hidden" name="modo" value="mes" />
             <BotaoEnviar className={botao} aguardando="Recarregando 30 dias…" aviso="Pode levar até 5 minutos. Não feche a página.">
               Recarregar últimos 30 dias
+            </BotaoEnviar>
+          </form>
+          <form action={sincronizarCrmsAgora}>
+            <BotaoEnviar className={botao} aguardando="Sincronizando CRMs…" aviso="Pode levar alguns minutos.">
+              Sincronizar CRMs
             </BotaoEnviar>
           </form>
         </div>

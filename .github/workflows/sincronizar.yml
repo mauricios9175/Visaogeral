@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Chamar sincronização
+      - name: Sincronizar Meta Ads
         env:
           APP_URL: ${{ secrets.APP_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
@@ -28,3 +28,14 @@ jobs:
           curl -sS --fail-with-body --max-time 300 \
             -H "Authorization: Bearer $CRON_SECRET" \
             "$APP_URL/api/cron/sync?modo=$MODO"
+
+      - name: Sincronizar CRMs
+        if: always()
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          DIAS: ${{ (github.event.schedule == '17 6 * * *' && '90') || '30' }}
+        run: |
+          curl -sS --fail-with-body --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/sync?modo=crm&dias=$DIAS"

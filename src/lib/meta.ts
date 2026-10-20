@@ -187,6 +187,29 @@ export async function objetivosDosConjuntos(contaId: string, token: string) {
   return new Map(conjuntos.map((c) => [c.id, c]));
 }
 
+/**
+ * Lê vários objetos (campanhas, conjuntos, anúncios) de uma vez pelo id, 50 por chamada.
+ * Bem mais leve que listar tudo da conta, que inclui anos de itens arquivados.
+ */
+export async function buscarPorIds<T>(ids: string[], token: string, campos: string): Promise<Map<string, T>> {
+  const mapa = new Map<string, T>();
+  const unicos = [...new Set(ids.filter(Boolean))];
+  for (let i = 0; i < unicos.length; i += 50) {
+    const lote = unicos.slice(i, i + 50);
+    try {
+      const r = await get<Record<string, T>>(montarUrl("", token, { ids: lote.join(","), fields: campos }));
+      for (const [id, obj] of Object.entries(r)) mapa.set(id, obj);
+    } catch {
+      // Um item excluído derruba o lote inteiro; nesse caso busca um por um e pula os que falharem.
+      for (const id of lote) {
+        const obj = await get<T>(montarUrl(id, token, { fields: campos })).catch(() => null);
+        if (obj) mapa.set(id, obj);
+      }
+    }
+  }
+  return mapa;
+}
+
 /** Status atual (effective_status) de todas as campanhas ou anúncios da conta. */
 export function listarStatus(contaId: string, token: string, nivel: "campaigns" | "ads") {
   return todasPaginas<{ id: string; effective_status: string }>(

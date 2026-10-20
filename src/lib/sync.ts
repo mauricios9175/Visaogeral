@@ -1,11 +1,10 @@
 import "server-only";
 import { db, type ContaAnuncio, type TokenMeta } from "./db";
 import {
-  dadosFinanceiros, extrairResultados, insightsPorAnuncio, listarContas, listarStatus, MetaErro,
-  objetivosDosConjuntos, type LinhaInsight, type ObjetivoConjunto,
+  buscarPorIds, dadosFinanceiros, extrairResultados, insightsPorAnuncio, listarContas, MetaErro,
+  type LinhaInsight, type ObjetivoConjunto,
 } from "./meta";
 import { diasAtras, diasEntre, hojeISO, somarDias } from "./datas";
-import { sincronizarCrms } from "./crm/sync";
 
 /** Busca no Meta todas as contas que os tokens enxergam e cadastra/atualiza no banco. */
 export async function importarContas() {
@@ -71,20 +70,14 @@ async function insightsEmPartes(contaId: string, token: string, desde: string, a
 }
 
 /** Guarda o status atual (ativo, pausado, reprovado...) de campanhas, conjuntos e anúncios. */
-async function salvarStatus(conta: ContaAnuncio, token: string, conjuntos?: Map<string, ObjetivoConjunto>) {
+async function salvarStatus(conta: ContaAnuncio, linhas: { id: string; nivel: string; status?: string }[]) {
   try {
-    const [campanhas, anuncios] = await Promise.all([
-      listarStatus(conta.id, token, "campaigns"),
-      listarStatus(conta.id, token, "ads"),
-    ]);
     const agora = new Date().toISOString();
-    const linhas = [
-      ...campanhas.map((c) => ({ id: c.id, nivel: "campanha", status: c.effective_status })),
-      ...[...(conjuntos?.values() ?? [])].map((c) => ({ id: c.id, nivel: "conjunto", status: c.effective_status ?? "UNKNOWN" })),
-      ...anuncios.map((a) => ({ id: a.id, nivel: "anuncio", status: a.effective_status })),
-    ].map((l) => ({ ...l, conta_id: conta.id, atualizado_em: agora }));
-    for (let i = 0; i < linhas.length; i += 500) {
-      const { error } = await db().from("status_meta").upsert(linhas.slice(i, i + 500), { onConflict: "id" });
+    const registros = linhas
+      .filter((l) => l.status)
+      .map((l) => ({ id: l.id, nivel: l.nivel, status: l.status!, conta_id: conta.id, atualizado_em: agora }));
+    for (let i = 0; i < registros.length; i += 500) {
+      const { error } = await db().from("status_meta").upsert(registros.slice(i, i + 500), { onConflict: "id" });
       if (error) throw new Error(error.message);
     }
   } catch (e) {
@@ -95,12 +88,21 @@ async function salvarStatus(conta: ContaAnuncio, token: string, conjuntos?: Map<
 
 async function sincronizarConta(conta: ContaAnuncio, token: string, desde: string, ate: string) {
   const linhas = await insightsEmPartes(conta.id, token, desde, ate);
-  // Objetivo de cada conjunto: define o que conta como "resultado" quando o Meta não manda o campo pronto.
-  const conjuntos = await objetivosDosConjuntos(conta.id, token).catch((e) => {
-    console.error(`Objetivos dos conjuntos de ${conta.nome}:`, e);
-    return undefined;
+  // Objetivo e status só dos itens que veicularam no período (pelo id, 50 por chamada).
+  type Obj = { id: string; effective_status?: string };
+  const [conjuntos, campanhas, anuncios] = await Promise.all([
+    buscarPorIds<ObjetivoConjunto>(linhas.map((l) => l.adset_id), token, "id,effective_status,optimization_goal,promoted_object"),
+    buscarPorIds<Obj>(linhas.map((l) => l.campaign_id), token, "id,effective_status"),
+    buscarPorIds<Obj>(linhas.map((l) => l.ad_id), token, "id,effective_status"),
+  ]).catch((e) => {
+    console.error(`Objetivos/status de ${conta.nome}:`, e);
+    return [undefined, undefined, undefined] as const;
   });
-  await salvarStatus(conta, token, conjuntos);
+  await salvarStatus(conta, [
+    ...[...(campanhas?.values() ?? [])].map((c) => ({ id: c.id, nivel: "campanha", status: c.effective_status })),
+    ...[...(conjuntos?.values() ?? [])].map((c) => ({ id: c.id, nivel: "conjunto", status: c.effective_status })),
+    ...[...(anuncios?.values() ?? [])].map((a) => ({ id: a.id, nivel: "anuncio", status: a.effective_status })),
+  ]);
   const registros = linhas.map((l) => {
     const r = extrairResultados(l, conjuntos);
     return {
@@ -180,13 +182,6 @@ export async function sincronizar(modo: ModoSync) {
   }
   await Promise.all([trabalhador(), trabalhador(), trabalhador()]);
 
-  // CRM dos clientes: a cada hora olha 30 dias (pega mudanças de etapa); de madrugada, 90.
-  try {
-    const crm = await sincronizarCrms(modo === "hoje" ? 30 : 90);
-    erros.push(...crm.erros);
-  } catch (e) {
-    erros.push(`CRM: ${e instanceof Error ? e.message : e}`);
-  }
 
   const resultado = {
     contas: contas?.length ?? 0,
