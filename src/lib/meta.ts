@@ -370,3 +370,26 @@ export async function trocarCodigoPorTokenLongo(code: string, redirectUri: strin
     expiraEm: longo.expires_in ? new Date(Date.now() + longo.expires_in * 1000) : null,
   };
 }
+
+/** Alcance real da conta no período (o alcance somado por anúncio/dia conta a mesma pessoa várias vezes). */
+export async function alcanceDaConta(contaId: string, token: string, desde: string, ate: string) {
+  const r = await get<Pagina<{ reach?: string }>>(
+    montarUrl(`${contaId}/insights`, token, {
+      level: "account",
+      fields: "reach",
+      time_range: JSON.stringify({ since: desde, until: ate }),
+    }),
+  );
+  return Number(r.data[0]?.reach ?? 0);
+}
+
+/** Link do criativo de um anúncio: post do Instagram, se houver; senão o post do Facebook. */
+export async function linkDoCriativo(adId: string, token: string): Promise<string | null> {
+  const r = await get<{ creative?: { instagram_permalink_url?: string; effective_object_story_id?: string } }>(
+    montarUrl(adId, token, { fields: "creative{instagram_permalink_url,effective_object_story_id}" }),
+  ).catch(() => null);
+  const c = r?.creative;
+  if (c?.instagram_permalink_url) return c.instagram_permalink_url;
+  if (c?.effective_object_story_id) return `https://www.facebook.com/${c.effective_object_story_id}`;
+  return null;
+}

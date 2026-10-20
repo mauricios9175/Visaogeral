@@ -112,3 +112,36 @@ export function progressoDoMes() {
   const total = new Date(Date.UTC(a, m, 0)).getUTCDate();
   return { diaAtual: d, totalDias: total };
 }
+
+/** Segunda-feira da semana da data (AAAA-MM-DD). */
+export function segundaDaSemana(iso: string): string {
+  const dow = new Date(`${iso}T12:00:00Z`).getUTCDay(); // 0 = domingo
+  return somarDias(iso, -((dow + 6) % 7));
+}
+
+export function dataBRCurta(iso: string) {
+  const [, m, d] = iso.split("-");
+  return `${d}/${m}`;
+}
+
+/**
+ * Períodos dos relatórios para clientes:
+ *  - semanal: semana anterior completa (segunda a domingo), comparada com a semana antes dela;
+ *  - parcial: segunda desta semana até hoje, comparada com os mesmos dias da semana passada.
+ */
+export function periodoRelatorio(tipo: "semanal" | "parcial") {
+  const hoje = hojeISO();
+  const segunda = segundaDaSemana(hoje);
+  if (tipo === "parcial") {
+    const dias = diasEntre(segunda, hoje);
+    return {
+      atual: { desde: segunda, ate: hoje },
+      anterior: { desde: somarDias(segunda, -7), ate: somarDias(segunda, dias - 8) },
+    };
+  }
+  const desde = somarDias(segunda, -7);
+  return {
+    atual: { desde, ate: somarDias(segunda, -1) },
+    anterior: { desde: somarDias(desde, -7), ate: somarDias(desde, -1) },
+  };
+}

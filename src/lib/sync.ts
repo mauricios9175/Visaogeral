@@ -207,3 +207,45 @@ export async function tokenDaConta(conta: ContaAnuncio): Promise<string | undefi
   const { data } = await db().from("tokens_meta").select("token").eq("id", conta.token_id).maybeSingle();
   return data?.token as string | undefined;
 }
+
+// ---------- Sincronização conta a conta (usada pela tela, com barra de progresso) ----------
+
+/** Contas que entram na sincronização: ativas e de clientes ativos. */
+export async function contasParaSincronizar() {
+  const { data } = await db().from("contas_anuncio").select("id, nome, clientes!inner(nome, ativo)")
+    .eq("ativa_sync", true).eq("clientes.ativo", true).order("nome");
+  return ((data ?? []) as unknown as { id: string; nome: string; clientes: { nome: string } }[])
+    .map((c) => ({ id: c.id, nome: c.nome, cliente: c.clientes.nome }));
+}
+
+/** Sincroniza uma conta só. Lança o erro com uma mensagem legível. */
+export async function sincronizarContaPorId(contaId: string, modo: ModoSync) {
+  const banco = db();
+  const { data } = await banco.from("contas_anuncio").select("*").eq("id", contaId).maybeSingle();
+  if (!data) throw new Error("Conta não encontrada");
+  const conta = data as ContaAnuncio;
+  const { desde, ate } = intervalo(modo);
+  try {
+    const token = await tokenDaConta(conta);
+    if (!token) throw new Error("Sem token para esta conta (reconecte o Facebook em Configurações)");
+    const linhas = await sincronizarConta(conta, token, desde, ate);
+    await banco.from("contas_anuncio").update({ ultima_sync: new Date().toISOString(), ultimo_erro: null }).eq("id", conta.id);
+    return linhas;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await banco.from("contas_anuncio").update({ ultimo_erro: msg }).eq("id", conta.id);
+    throw new Error(msg);
+  }
+}
+
+/** Registra no histórico ("Últimas sincronizações") uma sincronização feita pela tela. */
+export async function registrarExecucao(modo: string, contas: number, linhas: number, erros: string[]) {
+  await db().from("sync_execucoes").insert({
+    modo,
+    finalizado_em: new Date().toISOString(),
+    status: erros.length ? "com_erros" : "ok",
+    contas,
+    linhas,
+    erros: erros.join("\n") || null,
+  });
+}

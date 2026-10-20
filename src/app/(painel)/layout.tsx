@@ -7,6 +7,7 @@ export default function PainelLayout({ children }: LayoutProps<"/">) {
       <header className="border-b border-borda bg-superficie">
         <nav className="mx-auto flex max-w-7xl items-center gap-6 px-4 py-3 text-sm">
           <Link href="/" className="font-semibold">Visão Geral</Link>
+          <Link href="/relatorios" className="text-texto-2 hover:text-texto">Relatórios</Link>
           <Link href="/configuracoes" className="text-texto-2 hover:text-texto">Configurações</Link>
           <form action={sair} className="ml-auto">
             <button className="text-texto-3 hover:text-texto">Sair</button>

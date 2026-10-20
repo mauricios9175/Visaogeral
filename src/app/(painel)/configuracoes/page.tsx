@@ -2,7 +2,8 @@ import { db, EMPRESA_PADRAO, type Cliente, type ContaAnuncio, type TokenMeta } f
 import { diasAte, dinheiro, quandoFoi } from "@/lib/formato";
 import { Aviso } from "@/components/ui";
 import { BotaoChurn, BotaoEnviar } from "@/components/botao";
-import { alternarSyncConta, importar, reativarCliente, salvarCliente, sincronizarAgora, sincronizarCrmsAgora, vincularConta } from "../../acoes";
+import { alternarSyncConta, importar, reativarCliente, salvarCliente, vincularConta } from "../../acoes";
+import { PainelSincronizacao } from "@/components/sincronizacao";
 
 export const maxDuration = 300;
 
@@ -94,24 +95,8 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
           <form action={importar}>
             <BotaoEnviar className={botaoPrimario} aguardando="Buscando contas…">Buscar contas no Meta</BotaoEnviar>
           </form>
-          <form action={sincronizarAgora}>
-            <input type="hidden" name="modo" value="semana" />
-            <BotaoEnviar className={botao} aguardando="Sincronizando 7 dias…" aviso="Pode levar 1 a 2 minutos. Não feche a página.">
-              Sincronizar últimos 7 dias
-            </BotaoEnviar>
-          </form>
-          <form action={sincronizarAgora}>
-            <input type="hidden" name="modo" value="mes" />
-            <BotaoEnviar className={botao} aguardando="Recarregando 30 dias…" aviso="Pode levar até 5 minutos. Não feche a página.">
-              Recarregar últimos 30 dias
-            </BotaoEnviar>
-          </form>
-          <form action={sincronizarCrmsAgora}>
-            <BotaoEnviar className={botao} aguardando="Sincronizando CRMs…" aviso="Pode levar alguns minutos.">
-              Sincronizar CRMs
-            </BotaoEnviar>
-          </form>
         </div>
+        <PainelSincronizacao />
       </section>
 
       {/* ---------- Clientes ---------- */}

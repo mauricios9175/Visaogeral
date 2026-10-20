@@ -26,7 +26,7 @@ export const ROTULO_TIPO: Record<(typeof TIPOS_CONVERSAO)[number] | "res_outros"
 };
 
 /** O Supabase devolve no máximo 1000 linhas por chamada; isto pagina até o fim. */
-async function buscarTudo<T>(
+export async function buscarTudo<T>(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   consulta: (de: number, ate: number) => PromiseLike<{ data: any[] | null; error: { message: string } | null }>,
 ): Promise<T[]> {

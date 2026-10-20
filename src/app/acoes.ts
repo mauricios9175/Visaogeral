@@ -5,8 +5,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { COOKIE_SESSAO, criarSessao, senhaCorreta } from "@/lib/auth";
 import { db, EMPRESA_PADRAO } from "@/lib/db";
-import { importarContas, sincronizar } from "@/lib/sync";
-import { listarFunisCrm, NOME_CRM, sincronizarCrmCliente, sincronizarCrms, type ConexaoCrm, type TipoCrm } from "@/lib/crm/sync";
+import { importarContas } from "@/lib/sync";
+import { listarFunisCrm, NOME_CRM, sincronizarCrmCliente, type ConexaoCrm, type TipoCrm } from "@/lib/crm/sync";
 
 export async function entrar(_: unknown, form: FormData) {
   if (!senhaCorreta(String(form.get("senha") ?? ""))) return { erro: "Senha incorreta." };
@@ -90,20 +90,6 @@ export async function importar() {
     msg = `${await importarContas()} contas encontradas no Meta.`;
   } catch (e) {
     msg = `Erro ao buscar contas: ${e instanceof Error ? e.message : e}`;
-  }
-  revalidatePath("/", "layout");
-  aviso(msg);
-}
-
-export async function sincronizarAgora(form: FormData) {
-  const modo = form.get("modo") === "mes" ? "mes" : "semana";
-  let msg: string;
-  try {
-    const r = await sincronizar(modo);
-    msg = `Sincronizado: ${r.contas} contas, ${r.linhas} linhas.` +
-      (r.erros.length ? ` ${r.erros.length} com erro (veja na lista).` : "");
-  } catch (e) {
-    msg = `Erro na sincronização: ${e instanceof Error ? e.message : e}`;
   }
   revalidatePath("/", "layout");
   aviso(msg);
@@ -196,15 +182,3 @@ export async function salvarFontesCrm(form: FormData) {
   avisoCrm(clienteId, `Fontes de anúncio salvas (${fontes.length}).`);
 }
 
-export async function sincronizarCrmsAgora() {
-  let msg: string;
-  try {
-    const r = await sincronizarCrms(30);
-    msg = `CRMs sincronizados: ${r.negocios} negócio(s) dos últimos 30 dias.` +
-      (r.erros.length ? ` Erros: ${r.erros.join(" | ")}` : "");
-  } catch (e) {
-    msg = `Erro ao sincronizar os CRMs: ${e instanceof Error ? e.message : e}`;
-  }
-  revalidatePath("/", "layout");
-  aviso(msg);
-}
