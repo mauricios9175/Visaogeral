@@ -1,4 +1,4 @@
--- Todas as migrações (0001 a 0006) num script só, seguro para rodar mais de uma vez:
+-- Todas as migrações (0001 a 0007) num script só, seguro para rodar mais de uma vez:
 -- cria apenas o que estiver faltando e não apaga dados.
 
 create extension if not exists pgcrypto;
@@ -168,6 +168,11 @@ alter table crm_conexoes add column if not exists fontes_anuncio text[];
 alter table crm_negocios add column if not exists pipeline_nome text;
 alter table crm_negocios add column if not exists responsavel   text;
 alter table crm_negocios add column if not exists campos        jsonb;
+
+-- 0007: HighLevel / Ávora
+alter table crm_conexoes drop constraint if exists crm_conexoes_tipo_check;
+alter table crm_conexoes add constraint crm_conexoes_tipo_check check (tipo in ('rd_crm', 'highlevel', 'kommo'));
+alter table crm_conexoes add column if not exists location_id text;
 
 -- Segurança: só o servidor (chave secreta) acessa as tabelas.
 alter table clientes          enable row level security;

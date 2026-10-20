@@ -6,8 +6,7 @@ import { revalidatePath } from "next/cache";
 import { COOKIE_SESSAO, criarSessao, senhaCorreta } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { importarContas, sincronizar } from "@/lib/sync";
-import { listarFunis } from "@/lib/crm/rd";
-import { sincronizarCrmCliente, type ConexaoCrm } from "@/lib/crm/sync";
+import { listarFunisCrm, NOME_CRM, sincronizarCrmCliente, type ConexaoCrm, type TipoCrm } from "@/lib/crm/sync";
 
 export async function entrar(_: unknown, form: FormData) {
   if (!senhaCorreta(String(form.get("senha") ?? ""))) return { erro: "Senha incorreta." };
@@ -100,21 +99,29 @@ function avisoCrm(clienteId: string, msg: string): never {
 
 export async function salvarConexaoCrm(form: FormData) {
   const clienteId = String(form.get("cliente_id"));
-  const tipo = String(form.get("tipo") ?? "rd_crm");
+  const tipo = (String(form.get("tipo") ?? "rd_crm") as TipoCrm);
   const token = String(form.get("token") ?? "").trim();
+  const locationId = String(form.get("location_id") ?? "").trim() || null;
   const banco = db();
-  const { data: atual } = await banco.from("crm_conexoes").select("token").eq("cliente_id", clienteId).maybeSingle();
-  const tokenFinal = token || atual?.token;
+  const { data: atual } = await banco.from("crm_conexoes").select("token, tipo").eq("cliente_id", clienteId).maybeSingle();
+  // token em branco = manter o atual (só se for o mesmo CRM)
+  const tokenFinal = token || (atual?.tipo === tipo ? atual?.token : undefined);
   if (!tokenFinal) avisoCrm(clienteId, "Informe o token do CRM.");
+  if (tipo === "highlevel" && !locationId) avisoCrm(clienteId, "Informe o ID da subconta do Ávora.");
   let msg: string;
   try {
-    const funis = await listarFunis(tokenFinal);
+    const funis = await listarFunisCrm({ tipo, token: tokenFinal, location_id: locationId });
+    if (atual && atual.tipo !== tipo) {
+      // trocou de CRM: zera configuração e negócios antigos
+      await banco.from("crm_negocios").delete().eq("cliente_id", clienteId);
+      await banco.from("crm_conexoes").delete().eq("cliente_id", clienteId);
+    }
     const { error } = await banco.from("crm_conexoes").upsert(
-      { cliente_id: clienteId, tipo, token: tokenFinal, ultimo_erro: null },
+      { cliente_id: clienteId, tipo, token: tokenFinal, location_id: locationId, ultimo_erro: null },
       { onConflict: "cliente_id" },
     );
     if (error) throw new Error(error.message);
-    msg = `Conectado! ${funis.length} funil(is) encontrado(s). Agora escolha o funil e a etapa de qualificação.`;
+    msg = `${NOME_CRM[tipo]} conectado! ${funis.length} funil(is) encontrado(s). Agora escolha o funil e a etapa de qualificação.`;
   } catch (e) {
     msg = `Não foi possível conectar: ${e instanceof Error ? e.message : e}`;
   }

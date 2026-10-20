@@ -2,8 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { quandoFoi } from "@/lib/formato";
-import { listarFunis, type FunilRd } from "@/lib/crm/rd";
-import type { ConexaoCrm } from "@/lib/crm/sync";
+import type { FunilRd } from "@/lib/crm/rd";
+import { listarFunisCrm, NOME_CRM, type ConexaoCrm } from "@/lib/crm/sync";
 import { Aviso } from "@/components/ui";
 import { BotaoEnviar } from "@/components/botao";
 import { removerConexaoCrm, salvarConexaoCrm, salvarFontesCrm, salvarFunilCrm, sincronizarCrmAgora } from "../../../../acoes";
@@ -31,7 +31,7 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
   let erroFunis: string | null = null;
   if (c) {
     try {
-      funis = await listarFunis(c.token);
+      funis = await listarFunisCrm(c);
     } catch (e) {
       erroFunis = e instanceof Error ? e.message : String(e);
     }
@@ -59,33 +59,50 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
       {/* 1. Conexão */}
       <section className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
         <h2 className="font-medium">1. Conexão</h2>
-        <form action={salvarConexaoCrm} className="flex flex-wrap items-end gap-3">
+        <form action={salvarConexaoCrm} className="space-y-3">
           <input type="hidden" name="cliente_id" value={id} />
-          <label className="flex flex-col gap-1 text-sm">
-            CRM
-            <select name="tipo" defaultValue={c?.tipo ?? "rd_crm"} className={campo}>
-              <option value="rd_crm">RD Station CRM</option>
-              <option value="kommo" disabled>Kommo (em breve)</option>
-            </select>
-          </label>
-          <label className="flex min-w-64 flex-1 flex-col gap-1 text-sm">
-            Token da API
-            <input
-              type="password" name="token" autoComplete="off" className={campo}
-              placeholder={c ? "•••••••• (deixe vazio para manter o atual)" : "Cole aqui o token do RD Station CRM"}
-            />
-          </label>
-          <BotaoEnviar className={botaoPrimario} aguardando="Testando…">
-            {c ? "Atualizar e testar" : "Conectar"}
-          </BotaoEnviar>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-sm">
+              CRM
+              <select name="tipo" defaultValue={c?.tipo ?? "rd_crm"} className={campo}>
+                <option value="rd_crm">RD Station CRM</option>
+                <option value="highlevel">Ávora (HighLevel)</option>
+                <option value="kommo" disabled>Kommo (em breve)</option>
+              </select>
+            </label>
+            <label className="flex min-w-64 flex-1 flex-col gap-1 text-sm">
+              Token
+              <input
+                type="password" name="token" autoComplete="off" className={campo}
+                placeholder={c ? "•••••••• (deixe vazio para manter o atual)" : "Cole aqui o token"}
+              />
+            </label>
+            <label className="flex min-w-56 flex-col gap-1 text-sm">
+              ID da subconta <span className="text-xs text-texto-3">(só Ávora)</span>
+              <input name="location_id" defaultValue={c?.location_id ?? ""} className={campo} placeholder="ex.: aBcD1234EfGh" />
+            </label>
+            <BotaoEnviar className={botaoPrimario} aguardando="Testando…">
+              {c ? "Atualizar e testar" : "Conectar"}
+            </BotaoEnviar>
+          </div>
         </form>
-        <p className="text-xs text-texto-3">
-          Onde achar o token no RD Station CRM: clique no seu nome (canto superior direito) → Perfil → aba
-          Integrações (ou “Token da instância”) → copie o token.
-        </p>
+        <details className="text-xs text-texto-3">
+          <summary className="cursor-pointer">Onde achar o token</summary>
+          <p className="mt-2">
+            <b>RD Station CRM:</b> clique no seu nome (canto superior direito) → Perfil → copie o Token. Use um usuário
+            que veja todas as negociações.
+          </p>
+          <p className="mt-2">
+            <b>Ávora:</b> Configurações → <b>Integrações Privado</b> → Criar nova integração → dê um nome (ex.: Painel) →
+            marque as permissões <i>Ver oportunidades</i> (opportunities.readonly), <i>Ver contatos</i>
+            (contacts.readonly), <i>Ver locais</i> (locations.readonly) e <i>Ver campos personalizados</i>
+            (locations/customFields.readonly) → crie e copie o token. O <b>ID da subconta</b> aparece no endereço do
+            navegador, depois de <code>/location/</code> (ex.: app.avoracrm.com.br/v2/location/<b>aBcD1234EfGh</b>/…).
+          </p>
+        </details>
         {c && (
           <p className="text-sm text-texto-2">
-            Conectado · última sincronização {quandoFoi(c.ultima_sync)}
+            {NOME_CRM[c.tipo]} conectado · última sincronização {quandoFoi(c.ultima_sync)}
             {c.ultimo_erro && <span className="block text-critico">Erro: {c.ultimo_erro}</span>}
           </p>
         )}
