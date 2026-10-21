@@ -86,6 +86,11 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
       )}
 
       {alertas.length > 0 && <PainelAlertas alertas={alertas} />}
+      <p className="text-sm">
+        <Link href={empresa ? `/alertas?empresa=${encodeURIComponent(empresa)}` : "/alertas"} className="text-destaque underline">
+          Ver alertas de desempenho (custo subindo, anúncios sem resultado, criativos saturando, oportunidades)
+        </Link>
+      </p>
 
       {!!semCliente && !empresa && (
         <Aviso>
