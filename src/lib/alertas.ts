@@ -3,6 +3,7 @@ import { db, EMPRESA_PADRAO, type Cliente, type ContaAnuncio } from "./db";
 import { alertasContas, buscarTudo } from "./consultas";
 import { diasAtras, somarDias } from "./datas";
 import { dinheiro, inteiro } from "./formato";
+import { somarGoogle, type LinhaGoogle } from "./consultas-google";
 
 export type Nivel = "critico" | "atencao" | "oportunidade";
 
@@ -64,7 +65,23 @@ export async function calcularAlertas(): Promise<Alerta[]> {
       )
     : [];
 
+  // Google Ads (se o SQL do Google não rodou, segue sem ele)
+  const { data: contasGRaw } = await banco.from("contas_google").select("id, cliente_id").in("cliente_id", clientes.map((c) => c.id));
+  const contasG = (contasGRaw ?? []) as { id: string; cliente_id: string }[];
+  const linhasG = contasG.length
+    ? await buscarTudo<LinhaGoogle>((de, ate) =>
+        banco.from("metricas_google").select("*")
+          .in("conta_id", contasG.map((c) => c.id)).gte("data", ini14).lte("data", ontem).range(de, ate),
+      ).catch(() => [])
+    : [];
+
   const alertas: Alerta[] = [];
+  for (const c of clientes) {
+    const base = { clienteId: c.id, clienteNome: c.nome, empresa: c.empresa || EMPRESA_PADRAO };
+    const idsG = new Set(contasG.filter((x) => x.cliente_id === c.id).map((x) => x.id));
+    if (idsG.size) alertas.push(...alertasGoogle(base, linhasG.filter((l) => idsG.has(l.conta_id)), { ontem, ini7, ini3 }));
+  }
+
   for (const c of clientes) {
     const base = { clienteId: c.id, clienteNome: c.nome, empresa: c.empresa || EMPRESA_PADRAO };
     const ids = new Set(contas.filter((x) => x.cliente_id === c.id).map((x) => x.id));
@@ -144,7 +161,7 @@ export async function calcularAlertas(): Promise<Alerta[]> {
     }
   }
 
-  // Saldo, limite de gastos e status das contas (já existentes)
+  // Saldo, limite de gastos e status das contas do Meta
   const contasAlertas = await alertasContas().catch(() => []);
   const empresaPorCliente = new Map(clientes.map((c) => [c.id, c.empresa || EMPRESA_PADRAO]));
   for (const a of contasAlertas) {
@@ -156,4 +173,53 @@ export async function calcularAlertas(): Promise<Alerta[]> {
 
   const ordem: Record<Nivel, number> = { critico: 0, atencao: 1, oportunidade: 2 };
   return alertas.sort((a, b) => ordem[a.nivel] - ordem[b.nivel] || a.clienteNome.localeCompare(b.clienteNome));
+}
+
+/** Mesmas ideias do Meta, por campanha do Google: parou, custo subiu, gastando sem converter, campanha vencedora. */
+function alertasGoogle(
+  base: Pick<Alerta, "clienteId" | "clienteNome" | "empresa">,
+  linhas: LinhaGoogle[],
+  { ontem, ini7, ini3 }: { ontem: string; ini7: string; ini3: string },
+): Alerta[] {
+  const alertas: Alerta[] = [];
+  if (!linhas.length) return alertas;
+  const conv = (v: number) => inteiro(Math.round(v));
+  const rec = somarGoogle(linhas.filter((l) => l.data >= ini7));
+  const ant = somarGoogle(linhas.filter((l) => l.data < ini7));
+
+  const gastoOntem = somarGoogle(linhas.filter((l) => l.data === ontem)).gasto;
+  if (ant.gasto > 50 && gastoOntem === 0 && rec.gasto > 0) {
+    alertas.push({ ...base, nivel: "critico", titulo: "Google · campanhas sem veicular ontem",
+      detalhe: `Nenhum gasto no Google ontem; nos 7 dias anteriores a média era ${dinheiro(ant.gasto / 7)}/dia.`,
+      sugestao: "Confira pagamento da conta, reprovações e se as campanhas foram pausadas." });
+  }
+
+  if (rec.cpa != null && ant.cpa != null && rec.conversoes >= 3 && rec.cpa > ant.cpa * 1.3) {
+    const alta = (rec.cpa / ant.cpa - 1) * 100;
+    alertas.push({ ...base, nivel: alta >= 50 ? "critico" : "atencao",
+      titulo: `Google · custo por conversão subiu ${alta.toFixed(0)}%`,
+      detalhe: `${dinheiro(rec.cpa)} nos últimos 7 dias contra ${dinheiro(ant.cpa)} na semana anterior.`,
+      sugestao: "Revise termos de pesquisa, palavras-chave negativas e lances das campanhas que encareceram." });
+  }
+
+  const porCampanha = new Map<string, LinhaGoogle[]>();
+  for (const l of linhas) if (l.data >= ini7) porCampanha.set(l.campaign_id, [...(porCampanha.get(l.campaign_id) ?? []), l]);
+  for (const ls of porCampanha.values()) {
+    const nome = ls[0].campaign_nome ?? "Campanha";
+    const s7 = somarGoogle(ls);
+    const s3 = somarGoogle(ls.filter((l) => l.data >= ini3));
+    const limite = Math.max(30, (rec.cpa ?? 30) * 2);
+    if (s3.gasto >= limite && s3.conversoes === 0) {
+      alertas.push({ ...base, nivel: s3.gasto >= limite * 2 ? "critico" : "atencao",
+        titulo: "Google · campanha gastando sem conversão",
+        detalhe: `“${nome}” gastou ${dinheiro(s3.gasto)} nos últimos 3 dias sem nenhuma conversão.`,
+        sugestao: "Veja os termos de pesquisa, o rastreamento de conversões e a página de destino dessa campanha." });
+    }
+    if (s7.cpa != null && rec.cpa != null && s7.conversoes >= 3 && s7.cpa <= rec.cpa * 0.6 && porCampanha.size > 1) {
+      alertas.push({ ...base, nivel: "oportunidade", titulo: "Google · campanha com ótimo desempenho",
+        detalhe: `“${nome}”: ${conv(s7.conversoes)} conversões a ${dinheiro(s7.cpa)} cada (média do cliente no Google: ${dinheiro(rec.cpa)}).`,
+        sugestao: "Considere aumentar o orçamento dessa campanha." });
+    }
+  }
+  return alertas;
 }

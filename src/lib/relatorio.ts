@@ -1,6 +1,7 @@
 import "server-only";
 import { db, EMPRESA_PADRAO, type Cliente, type ContaAnuncio } from "./db";
 import { buscarTudo, resumoCrm } from "./consultas";
+import { somarGoogle, type LinhaGoogle } from "./consultas-google";
 import { dataBRCurta, periodoRelatorio } from "./datas";
 import { dinheiro, inteiro, pct } from "./formato";
 import { alcanceDaConta, linkDoCriativo } from "./meta";
@@ -66,6 +67,26 @@ function resumir(linhas: Linha[]) {
 
 const custo = (t?: { qtd: number; gasto: number }) => (t && t.qtd ? t.gasto / t.qtd : null);
 
+/** Google Ads do período: totais, conversões por ação e campanhas gastando sem conversão. */
+function resumirGoogle(linhas: LinhaGoogle[]) {
+  const n = somarGoogle(linhas);
+  const porAcao = new Map<string, number>();
+  const porCampanha = new Map<string, { nome: string; gasto: number; conv: number }>();
+  for (const l of linhas) {
+    for (const [nome, qtd] of Object.entries(l.conversoes_acao ?? {})) porAcao.set(nome, (porAcao.get(nome) ?? 0) + Number(qtd));
+    const c = porCampanha.get(l.campaign_id) ?? { nome: l.campaign_nome ?? "Campanha", gasto: 0, conv: 0 };
+    c.gasto += Number(l.gasto); c.conv += Number(l.conversoes);
+    porCampanha.set(l.campaign_id, c);
+  }
+  const campanhas = [...porCampanha.values()];
+  const semConversao = campanhas.filter((c) => c.conv === 0 && c.gasto >= Math.max(30, (n.cpa ?? 30) * 1.5));
+  const destaque = campanhas.filter((c) => c.conv > 0).sort((x, y) => y.conv - x.conv || x.gasto - y.gasto)[0] ?? null;
+  return { ...n, porAcao: [...porAcao.entries()].sort((x, y) => y[1] - x[1]), semConversao, destaque };
+}
+
+/** "3" para inteiro, "2,5" para fração (o Google pode atribuir conversões fracionadas). */
+const conv = (v: number) => (Number.isInteger(Math.round(v * 10) / 10) ? inteiro(v) : (Math.round(v * 10) / 10).toString().replace(".", ","));
+
 function montarTexto(p: {
   tipo: TipoRelatorio;
   periodo: { desde: string; ate: string };
@@ -74,8 +95,12 @@ function montarTexto(p: {
   alcance: number | null;
   link: string | null;
   crm: { leads: number; qualificados: number | null; vendas: number; faturamento: number } | null;
+  google: { atual: ReturnType<typeof resumirGoogle>; anterior: ReturnType<typeof resumirGoogle> } | null;
 }) {
   const { atual: a, anterior: b } = p;
+  // só mostra o Google se teve gasto em algum dos dois períodos
+  const g = p.google && (p.google.atual.gasto > 0 || p.google.anterior.gasto > 0) ? p.google : null;
+  const ga = g?.atual;
   const linhas: string[] = [];
   const semanal = p.tipo === "semanal";
   const comparacao = {
@@ -89,20 +114,46 @@ function montarTexto(p: {
       : `Olá! Segue a parcial da semana, de segunda (${dataBRCurta(p.periodo.desde)}) até agora:`,
     "",
   );
-  if (a.gasto === 0) {
+  if (a.gasto === 0 && !ga?.gasto) {
     linhas.push("Não houve veiculação de anúncios neste período.");
     return linhas.join("\n");
   }
-  linhas.push(`💰 Investimento: ${dinheiro(a.gasto)}`);
-  linhas.push(`👁️ Impressões: ${inteiro(a.impressoes)}`);
-  if (p.alcance) linhas.push(`📈 Alcance: ${inteiro(p.alcance)}`);
-  const tipos = [...a.porTipo.entries()].filter(([, t]) => t.qtd > 0).sort((x, y) => y[1].qtd - x[1].qtd);
-  for (const [tipo, t] of tipos) {
-    linhas.push(`${TIPOS[tipo].emoji} ${TIPOS[tipo].nome}: ${inteiro(t.qtd)}`);
-    linhas.push(`${TIPOS[tipo].custo}: ${dinheiro(custo(t))}`);
+  // cliente só de Google: sem bloco do Meta nem total somado
+  const temMeta = a.gasto > 0 || b.gasto > 0;
+  if (ga && temMeta) {
+    const total = a.gasto + ga.gasto;
+    const totalRes = a.resultados + ga.conversoes;
+    linhas.push(`💰 Investimento total: ${dinheiro(total)} (Meta ${dinheiro(a.gasto)} + Google ${dinheiro(ga.gasto)})`);
+    if (totalRes > 0) linhas.push(`🏆 Resultados totais: ${conv(totalRes)} · ${dinheiro(total / totalRes)} cada`);
+    linhas.push("", "📘 Meta Ads");
   }
-  linhas.push(`👆 Cliques no link: ${inteiro(a.cliques)}`);
-  linhas.push(`📊 CTR (link): ${pct(a.ctr)}`);
+  const tipos = [...a.porTipo.entries()].filter(([, t]) => t.qtd > 0).sort((x, y) => y[1].qtd - x[1].qtd);
+  if (a.gasto > 0) {
+    linhas.push(`💰 Investimento: ${dinheiro(a.gasto)}`);
+    linhas.push(`👁️ Impressões: ${inteiro(a.impressoes)}`);
+    if (p.alcance) linhas.push(`📈 Alcance: ${inteiro(p.alcance)}`);
+    for (const [tipo, t] of tipos) {
+      linhas.push(`${TIPOS[tipo].emoji} ${TIPOS[tipo].nome}: ${inteiro(t.qtd)}`);
+      linhas.push(`${TIPOS[tipo].custo}: ${dinheiro(custo(t))}`);
+    }
+    linhas.push(`👆 Cliques no link: ${inteiro(a.cliques)}`);
+    linhas.push(`📊 CTR (link): ${pct(a.ctr)}`);
+  } else if (temMeta) {
+    linhas.push("Sem veiculação no Meta neste período.");
+  }
+  if (ga) {
+    if (temMeta) linhas.push("");
+    linhas.push("🔎 Google Ads");
+    if (ga.gasto === 0) {
+      linhas.push("Sem veiculação no Google neste período.");
+    } else {
+      linhas.push(`💰 Investimento: ${dinheiro(ga.gasto)}`);
+      linhas.push(`👆 Cliques: ${inteiro(ga.cliques)} · CTR ${pct(ga.ctr)}`);
+      linhas.push(`✅ Conversões: ${conv(ga.conversoes)}`);
+      for (const [nome, qtd] of ga.porAcao.slice(0, 5)) linhas.push(`   • ${nome}: ${conv(qtd)}`);
+      if (ga.cpa != null) linhas.push(`💎 Custo por conversão: ${dinheiro(ga.cpa)}`);
+    }
+  }
   if (p.crm) {
     linhas.push("", `🗂️ Leads no CRM: ${inteiro(p.crm.leads)}`);
     if (p.crm.qualificados != null) linhas.push(`⭐ Qualificados: ${inteiro(p.crm.qualificados)}`);
@@ -126,8 +177,22 @@ function montarTexto(p: {
     if (outros.length) {
       fb.push(`Também ${p.tipo === "semanal" ? "na semana" : "no período"}: ${outros.map(([tp, x]) => `${inteiro(x.qtd)} ${TIPOS[tp].curto}, a ${dinheiro(custo(x))} cada`).join("; ")}.`);
     }
-  } else {
-    fb.push("O período ainda não gerou resultados; vamos acompanhar de perto.");
+  } else if (a.gasto > 0) {
+    fb.push(`O período ainda não gerou resultados${ga ? " no Meta" : ""}; vamos acompanhar de perto.`);
+  }
+  if (ga && ga.gasto > 0) {
+    const gb = g!.anterior;
+    if (ga.cpa != null) {
+      let comp = "";
+      if (gb.cpa != null) {
+        const chave = ga.cpa < gb.cpa * 0.97 ? "melhor" : ga.cpa > gb.cpa * 1.03 ? "pior" : "igual";
+        comp = `, ${comparacao[chave]} (${dinheiro(gb.cpa)})`;
+      }
+      fb.push(`No Google, foram ${conv(ga.conversoes)} conversão(ões) a ${dinheiro(ga.cpa)} cada${comp}.`);
+      if (ga.destaque) fb.push(`A campanha de destaque no Google foi “${ga.destaque.nome}”, com ${conv(ga.destaque.conv)} conversão(ões).`);
+    } else {
+      fb.push("No Google, o período ainda não gerou conversões; vamos acompanhar de perto.");
+    }
   }
   if (a.revisar.length) fb.push(`${a.revisar.length === 1 ? "Um anúncio está" : `${a.revisar.length} anúncios estão`} abaixo do esperado e ${a.revisar.length === 1 ? "precisa" : "precisam"} de revisão.`);
   linhas.push(fb.join(" "));
@@ -141,7 +206,14 @@ function montarTexto(p: {
   if (a.revisar.length) passos.push("🟡 Vamos ajustar os anúncios que perderam eficiência para melhorar o custo dos próximos resultados.");
   if (cprA != null && cprB != null && cprA < cprB * 0.9) passos.push("🟢 Os resultados melhoraram; vamos reforçar o investimento nos anúncios com melhor desempenho.");
   if (cprA != null && cprB != null && cprA > cprB * 1.15 && !a.revisar.length) passos.push("🟡 O custo subiu; vamos testar novos criativos e públicos para recuperar a eficiência.");
-  if (!principal) passos.push("🟡 Vamos revisar a configuração das campanhas para destravar os resultados.");
+  if (!principal && a.gasto > 0) passos.push("🟡 Vamos revisar a configuração das campanhas para destravar os resultados.");
+  if (ga && ga.gasto > 0) {
+    const gb = g!.anterior;
+    if (ga.semConversao.length) passos.push("🟡 No Google, vamos revisar termos de pesquisa e palavras-chave das campanhas que gastaram sem converter.");
+    else if (ga.cpa != null && gb.cpa != null && ga.cpa > gb.cpa * 1.15) passos.push("🟡 No Google, o custo por conversão subiu; vamos ajustar lances, palavras-chave negativas e anúncios.");
+    else if (ga.cpa != null && gb.cpa != null && ga.cpa < gb.cpa * 0.9) passos.push("🟢 No Google, os resultados melhoraram; vamos reforçar o orçamento das campanhas que mais convertem.");
+    else if (ga.conversoes === 0) passos.push("🟡 No Google, vamos revisar a configuração e o rastreamento de conversões para destravar os resultados.");
+  }
   if (!passos.length) passos.push("🟢 Vamos manter a estratégia e seguir testando novos criativos para buscar resultados ainda melhores.");
   linhas.push("", "Próximos passos", ...passos);
   return linhas.join("\n");
@@ -161,6 +233,15 @@ export async function gerarRelatorios(tipo: TipoRelatorio, empresa: string | nul
           .select("conta_id, data, ad_id, ad_nome, gasto, impressoes, cliques_link, resultados, resultado_tipo, leads, conversas, valor_compras")
           .in("conta_id", contas.map((c) => c.id)).gte("data", anterior.desde).lte("data", atual.ate).range(de, ate),
       )
+    : [];
+  // Google Ads (se o SQL do Google não rodou, segue sem ele)
+  const { data: contasG } = await banco.from("contas_google").select("id, cliente_id").in("cliente_id", clientes.map((c) => c.id));
+  const contasGoogle = (contasG ?? []) as { id: string; cliente_id: string }[];
+  const linhasGoogle = contasGoogle.length
+    ? await buscarTudo<LinhaGoogle>((de, ate) =>
+        banco.from("metricas_google").select("*")
+          .in("conta_id", contasGoogle.map((c) => c.id)).gte("data", anterior.desde).lte("data", atual.ate).range(de, ate),
+      ).catch(() => [])
     : [];
   const crm = await resumoCrm(
     { chave: "r", rotulo: "", qs: "", ...atual },
@@ -191,10 +272,14 @@ export async function gerarRelatorios(tipo: TipoRelatorio, empresa: string | nul
     }
 
     const numerosCrm = crm.get(c.id)?.atual ?? null;
+    const idsG = new Set(contasGoogle.filter((x) => x.cliente_id === c.id).map((x) => x.id));
+    const doGoogle = (p: { desde: string; ate: string }) =>
+      linhasGoogle.filter((l) => idsG.has(l.conta_id) && l.data >= p.desde && l.data <= p.ate);
+    const google = idsG.size ? { atual: resumirGoogle(doGoogle(atual)), anterior: resumirGoogle(doGoogle(anterior)) } : null;
     return {
       cliente: c,
       periodo: atual,
-      texto: montarTexto({ tipo, periodo: atual, atual: ra, anterior: rb, alcance, link, crm: numerosCrm }),
+      texto: montarTexto({ tipo, periodo: atual, atual: ra, anterior: rb, alcance, link, crm: numerosCrm, google }),
     };
   }));
 }
