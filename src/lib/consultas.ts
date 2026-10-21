@@ -2,6 +2,7 @@ import "server-only";
 import { db, type Cliente, type ContaAnuncio, type Metricas } from "./db";
 import { progressoDoMes, hojeISO, somarDias as somarDiasISO, type Periodo } from "./datas";
 import { dinheiro as dinheiroBR } from "./formato";
+import { somarGoogle, type LinhaGoogle, type NumerosGoogle } from "./consultas-google";
 
 const ZERO: Metricas = {
   gasto: 0, impressoes: 0, alcance: 0, cliques: 0, cliques_link: 0,
@@ -74,17 +75,30 @@ type LinhaDia = Metricas & { cliente_id: string; data: string };
 
 export type Saude = "ok" | "atencao" | "critico" | "sem_dados";
 
+/** Meta + Google somados: o que aparece como número principal. */
+export type Geral = { gasto: number; resultados: number; cpr: number | null };
+
+export function somarGeral(meta: { gasto: number; resultados: number }, google?: NumerosGoogle | null): Geral {
+  const gasto = meta.gasto + (google?.gasto ?? 0);
+  const resultados = meta.resultados + (google?.conversoes ?? 0);
+  return { gasto, resultados, cpr: resultados > 0 ? gasto / resultados : null };
+}
+
 export type ResumoCliente = {
   cliente: Cliente;
+  /** Meta Ads */
   atual: Derivadas;
   anterior: Derivadas;
+  /** Google Ads (null se o cliente não tem conta do Google vinculada) */
+  google: { atual: NumerosGoogle; anterior: NumerosGoogle } | null;
+  geral: { atual: Geral; anterior: Geral };
   mes: { gasto: number; projecao: number; ritmo: number | null };
   serie: { data: string; gasto: number; resultados: number }[];
   contas: number;
   saude: Saude;
 };
 
-function avaliarSaude(c: Cliente, atual: Derivadas, ritmo: number | null): Saude {
+function avaliarSaude(c: Cliente, atual: Geral, ritmo: number | null): Saude {
   if (atual.gasto === 0) return "sem_dados";
   let pontos = 0;
   if (c.cpl_meta && atual.cpr !== null) {
@@ -103,13 +117,22 @@ export async function resumoClientes(atual: Periodo, anterior: Periodo): Promise
   const inicioMes = `${hoje.slice(0, 8)}01`;
   const desde = [anterior.desde, inicioMes].sort()[0];
 
-  const [{ data: clientes }, { data: contas }, dias] = await Promise.all([
+  const [{ data: clientes }, { data: contas }, dias, { data: contasG }] = await Promise.all([
     banco.from("clientes").select("*").eq("ativo", true).order("nome"),
     banco.from("contas_anuncio").select("id, cliente_id"),
     buscarTudo<LinhaDia>((de, ate) =>
       banco.from("vw_cliente_dia").select("*").gte("data", desde).lte("data", hoje).range(de, ate),
     ),
+    // se o SQL do Google ainda não rodou, vem erro e seguimos só com o Meta
+    banco.from("contas_google").select("id, cliente_id").not("cliente_id", "is", null),
   ]);
+  const clienteDaContaG = new Map(((contasG ?? []) as { id: string; cliente_id: string }[]).map((c) => [c.id, c.cliente_id]));
+  const diasG = clienteDaContaG.size
+    ? await buscarTudo<LinhaGoogle>((de, ate) =>
+        banco.from("metricas_google").select("conta_id, data, gasto, impressoes, cliques, conversoes, valor_conversoes")
+          .in("conta_id", [...clienteDaContaG.keys()]).gte("data", desde).lte("data", hoje).range(de, ate),
+      ).catch(() => [])
+    : [];
 
   const { diaAtual, totalDias } = progressoDoMes();
 
@@ -119,21 +142,34 @@ export async function resumoClientes(atual: Periodo, anterior: Periodo): Promise
       meus.filter((d) => d.data >= p.desde && d.data <= p.ate).reduce(somar, { ...ZERO });
     const a = derivar(noPeriodo(atual));
     const b = derivar(noPeriodo(anterior));
-    const gastoMes = meus.filter((d) => d.data >= inicioMes).reduce((s, d) => s + Number(d.gasto), 0);
+    const temGoogle = [...clienteDaContaG.values()].includes(c.id);
+    const meusG = temGoogle ? diasG.filter((d) => clienteDaContaG.get(d.conta_id) === c.id) : [];
+    const googleDe = (p: Periodo) => somarGoogle(meusG.filter((d) => d.data >= p.desde && d.data <= p.ate));
+    const google = temGoogle ? { atual: googleDe(atual), anterior: googleDe(anterior) } : null;
+    const geral = { atual: somarGeral(a, google?.atual), anterior: somarGeral(b, google?.anterior) };
+    const gastoMes = meus.filter((d) => d.data >= inicioMes).reduce((s, d) => s + Number(d.gasto), 0)
+      + meusG.filter((d) => d.data >= inicioMes).reduce((s, d) => s + Number(d.gasto), 0);
     const projecao = (gastoMes / diaAtual) * totalDias;
     const ritmo = c.orcamento_mensal ? projecao / c.orcamento_mensal : null;
-    const serie = meus
-      .filter((d) => d.data >= atual.desde && d.data <= atual.ate)
-      .sort((x, y) => x.data.localeCompare(y.data))
-      .map((d) => ({ data: d.data, gasto: Number(d.gasto), resultados: Number(d.leads) + Number(d.conversas) }));
+    // série diária do período com Meta + Google
+    const porDia = new Map<string, { gasto: number; resultados: number }>();
+    const somarDia = (data: string, gasto: number, resultados: number) => {
+      const x = porDia.get(data) ?? { gasto: 0, resultados: 0 };
+      porDia.set(data, { gasto: x.gasto + gasto, resultados: x.resultados + resultados });
+    };
+    for (const d of meus) if (d.data >= atual.desde && d.data <= atual.ate) somarDia(d.data, Number(d.gasto), Number(d.leads) + Number(d.conversas));
+    for (const d of meusG) if (d.data >= atual.desde && d.data <= atual.ate) somarDia(d.data, Number(d.gasto), Number(d.conversoes));
+    const serie = [...porDia.entries()].sort(([x], [y]) => x.localeCompare(y)).map(([data, v]) => ({ data, ...v }));
     return {
       cliente: c,
       atual: a,
       anterior: b,
+      google,
+      geral,
       mes: { gasto: gastoMes, projecao, ritmo },
       serie,
       contas: (contas ?? []).filter((x) => x.cliente_id === c.id).length,
-      saude: avaliarSaude(c, a, ritmo),
+      saude: avaliarSaude(c, geral.atual, ritmo),
     };
   });
 }

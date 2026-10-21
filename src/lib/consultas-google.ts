@@ -15,13 +15,13 @@ export type NumerosGoogle = {
   roas: number | null;
 };
 
-type LinhaGoogle = {
+export type LinhaGoogle = {
   conta_id: string; data: string; campaign_id: string; campaign_nome: string | null; campaign_status: string | null;
   canal: string | null; gasto: number; impressoes: number; cliques: number; conversoes: number; valor_conversoes: number;
   conversoes_acao: Record<string, number> | null;
 };
 
-export function somarGoogle(ls: LinhaGoogle[]): NumerosGoogle {
+export function somarGoogle(ls: Pick<LinhaGoogle, "gasto" | "impressoes" | "cliques" | "conversoes" | "valor_conversoes">[]): NumerosGoogle {
   const s = ls.reduce(
     (t, l) => ({
       gasto: t.gasto + Number(l.gasto), impressoes: t.impressoes + Number(l.impressoes), cliques: t.cliques + Number(l.cliques),

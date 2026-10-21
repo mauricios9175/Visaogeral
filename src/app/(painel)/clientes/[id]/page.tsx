@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { resolverPeriodo } from "@/lib/datas";
-import { detalheCliente, detalheCrm, type LinhaTabela } from "@/lib/consultas";
+import { detalheCliente, detalheCrm, somarGeral, type LinhaTabela } from "@/lib/consultas";
 import { detalheGoogle } from "@/lib/consultas-google";
 import { formatarIdGoogle } from "@/lib/google";
 import { decimal, dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
@@ -100,6 +100,9 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
         <SeletorPeriodo atual={atual} base={base} />
       </div>
 
+      {g && <ResumoGeral meta={a} metaAnt={b} g={g} metaCpl={c.cpl_meta} />}
+
+      <h2 className="text-sm font-medium">Meta Ads</h2>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi rotulo="Investido" valor={dinheiro(a.gasto)}><Variacao atual={a.gasto} anterior={b.gasto} neutro /></Kpi>
         <Kpi rotulo="Resultados" valor={inteiro(a.resultados)}>
@@ -120,8 +123,6 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
           </Kpi>
         )}
       </div>
-
-      <SecaoCrm crm={crm} gasto={gastoTotal} gastoAnterior={gastoTotalAnterior} base={base} comGoogle={!!g} />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <BarrasDiarias dados={d.serie} campo="gasto" titulo="Investido por dia" formato="dinheiro" />
@@ -156,7 +157,42 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
       </div>
 
       {google && ("erro" in google ? <Aviso>Erro ao carregar o Google Ads: {google.erro}</Aviso> : <SecaoGoogle g={google} />)}
+
+      <SecaoCrm crm={crm} gasto={gastoTotal} gastoAnterior={gastoTotalAnterior} base={base} comGoogle={!!g} />
     </div>
+  );
+}
+
+/** Números principais com Meta + Google somados, e de onde veio cada parte. */
+function ResumoGeral({ meta, metaAnt, g, metaCpl }: {
+  meta: { gasto: number; resultados: number; cpr: number | null };
+  metaAnt: { gasto: number; resultados: number };
+  g: NonNullable<Awaited<ReturnType<typeof detalheGoogle>>>;
+  metaCpl: number | null;
+}) {
+  const at = somarGeral(meta, g.atual);
+  const an = somarGeral(metaAnt, g.anterior);
+  const parte = (m: string, gg: string) => (
+    <span className="block text-xs text-texto-3">Meta {m} · Google {gg}</span>
+  );
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-medium">Resumo geral <span className="font-normal text-texto-3">· Meta + Google</span></h2>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+        <Kpi rotulo="Investido" valor={dinheiro(at.gasto)}>
+          {parte(dinheiro(meta.gasto), dinheiro(g.atual.gasto))}
+          <Variacao atual={at.gasto} anterior={an.gasto} neutro />
+        </Kpi>
+        <Kpi rotulo="Resultados" valor={inteiro(at.resultados)}>
+          {parte(inteiro(meta.resultados), inteiro(g.atual.conversoes))}
+          <Variacao atual={at.resultados} anterior={an.resultados} />
+        </Kpi>
+        <Kpi rotulo={`Custo/resultado${metaCpl ? ` (meta ${dinheiro(metaCpl)})` : ""}`} valor={dinheiro(at.cpr)}>
+          {parte(dinheiro(meta.cpr), dinheiro(g.atual.cpa))}
+          <Variacao atual={at.cpr} anterior={an.cpr} menorMelhor />
+        </Kpi>
+      </div>
+    </section>
   );
 }
 
