@@ -29,6 +29,21 @@ jobs:
             -H "Authorization: Bearer $CRON_SECRET" \
             "$APP_URL/api/cron/sync?modo=$MODO"
 
+      # Google Ads: a cada 3 horas (cota do nível Explorer) e 30 dias de madrugada.
+      - name: Sincronizar Google Ads
+        if: always()
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          NOITE: ${{ github.event.schedule == '17 6 * * *' }}
+        run: |
+          if [ "$NOITE" = "true" ]; then DIAS=30
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ $((10#$(date -u +%H) % 3)) -eq 0 ]; then DIAS=2
+          else echo "Fora da janela de 3 horas, pulando."; exit 0; fi
+          curl -sS --fail-with-body --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/sync?modo=google&dias=$DIAS"
+
       - name: Sincronizar CRMs
         if: always()
         env:

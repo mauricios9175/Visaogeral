@@ -2,7 +2,12 @@ import { db, EMPRESA_PADRAO, type Cliente, type ContaAnuncio, type TokenMeta } f
 import { diasAte, dinheiro, quandoFoi } from "@/lib/formato";
 import { Aviso } from "@/components/ui";
 import { BotaoChurn, BotaoEnviar } from "@/components/botao";
-import { alternarSyncConta, importar, reativarCliente, salvarCliente, vincularConta } from "../../acoes";
+import {
+  alternarSyncConta, alternarSyncContaGoogle, desconectarGoogle, importar, importarGoogle, reativarCliente,
+  salvarCliente, sincronizarGoogleAgora, vincularConta, vincularContaGoogle,
+} from "../../acoes";
+import { formatarIdGoogle, googleConfigurado } from "@/lib/google";
+import type { ContaGoogle } from "@/lib/sync-google";
 import { PainelSincronizacao } from "@/components/sincronizacao";
 
 export const maxDuration = 300;
@@ -15,12 +20,15 @@ const botaoPrimario = "rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium te
 export default async function Configuracoes({ searchParams }: PageProps<"/configuracoes">) {
   const { msg } = (await searchParams) as { msg?: string };
   const banco = db();
-  const [{ data: clientes }, { data: contas }, { data: tokens }, { data: execucoes }] = await Promise.all([
+  const [{ data: clientes }, { data: contas }, { data: tokens }, { data: execucoes }, { data: tokensGoogle }, { data: contasGoogle }] = await Promise.all([
     banco.from("clientes").select("*").order("nome"),
     banco.from("contas_anuncio").select("*")
       .order("cliente_id", { nullsFirst: false }).order("status").order("nome"),
     banco.from("tokens_meta").select("id, fb_user_id, nome, expira_em"),
     banco.from("sync_execucoes").select("*").order("id", { ascending: false }).limit(3),
+    // tabelas do Google podem não existir ainda (SQL 0009 não rodado): o erro vira lista vazia
+    banco.from("tokens_google").select("id, email, atualizado_em").order("email"),
+    banco.from("contas_google").select("*").order("cliente_id", { nullsFirst: false }).order("nome"),
   ]);
   const listaClientes = (clientes ?? []) as Cliente[];
   const ativos = listaClientes.filter((c) => c.ativo);
@@ -209,6 +217,95 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                     </td>
                     <td className="px-3 py-2">
                       <form action={alternarSyncConta}>
+                        <input type="hidden" name="conta_id" value={conta.id} />
+                        <input type="hidden" name="ativa" value={conta.ativa_sync ? "0" : "1"} />
+                        <BotaoEnviar className={botao} aguardando="…">{conta.ativa_sync ? "Ativa · pausar" : "Pausada · ativar"}</BotaoEnviar>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* ---------- Google Ads ---------- */}
+      <section id="google" className="space-y-3">
+        <h2 className="font-medium">4. Google Ads</h2>
+        <div className="rounded-xl border border-borda bg-superficie p-4 text-sm">
+          <div className="font-medium">Login com Google</div>
+          <p className="mt-1 text-texto-2">
+            Puxa as contas em que seu e-mail é administrador e as que estão nos MCCs das agências (Propulsão, Viccon…).
+            Só leitura: o painel não altera nada nas campanhas.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {((tokensGoogle ?? []) as { id: string; email: string; atualizado_em: string }[]).map((t) => (
+              <li key={t.id} className="flex flex-wrap items-center gap-2">
+                <span>{t.email}</span>
+                <span className="text-texto-3">· conectado {quandoFoi(t.atualizado_em)}</span>
+                <form action={desconectarGoogle}>
+                  <input type="hidden" name="id" value={t.id} />
+                  <BotaoEnviar className="text-xs text-texto-3 underline hover:text-critico" aguardando="…">desconectar</BotaoEnviar>
+                </form>
+              </li>
+            ))}
+          </ul>
+          {googleConfigurado() ? (
+            <a href="/api/google/conectar" className={`${botao} mt-2 inline-block`}>Conectar / reconectar Google</a>
+          ) : (
+            <p className="mt-1 text-texto-3">Configure GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET na Vercel para habilitar.</p>
+          )}
+        </div>
+        {!!tokensGoogle?.length && (
+          <div className="flex flex-wrap items-start gap-2">
+            <form action={importarGoogle}>
+              <BotaoEnviar className={botaoPrimario} aguardando="Buscando contas…">Buscar contas no Google</BotaoEnviar>
+            </form>
+            <form action={sincronizarGoogleAgora}>
+              <input type="hidden" name="dias" value="30" />
+              <BotaoEnviar className={botao} aguardando="Sincronizando o Google… (pode levar alguns minutos)">
+                Sincronizar Google (últimos 30 dias)
+              </BotaoEnviar>
+            </form>
+          </div>
+        )}
+        {!!contasGoogle?.length && (
+          <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="text-left text-xs text-texto-3">
+                <tr>
+                  <th className="px-4 py-2 font-normal">Conta</th>
+                  <th className="px-3 py-2 font-normal">Acesso</th>
+                  <th className="px-3 py-2 font-normal">Última sync</th>
+                  <th className="px-3 py-2 font-normal">Cliente</th>
+                  <th className="px-3 py-2 font-normal">Sincronizar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(contasGoogle as ContaGoogle[]).map((conta) => (
+                  <tr key={conta.id} className="border-t border-borda align-top">
+                    <td className="px-4 py-2">
+                      <div>{conta.nome}</div>
+                      <div className="text-xs text-texto-3">
+                        {formatarIdGoogle(conta.id)}{conta.status && conta.status !== "ENABLED" && ` · ${conta.status === "CANCELED" ? "cancelada" : conta.status === "SUSPENDED" ? "suspensa" : conta.status.toLowerCase()}`}
+                      </div>
+                      {conta.ultimo_erro && <div className="text-xs text-critico">Erro: {conta.ultimo_erro}</div>}
+                    </td>
+                    <td className="px-3 py-2 text-texto-2">{conta.gerente_nome ?? "—"}</td>
+                    <td className="px-3 py-2 text-texto-2">{quandoFoi(conta.ultima_sync)}</td>
+                    <td className="px-3 py-2">
+                      <form action={vincularContaGoogle} className="flex gap-2">
+                        <input type="hidden" name="conta_id" value={conta.id} />
+                        <select name="cliente_id" defaultValue={conta.cliente_id ?? ""} className={campo}>
+                          <option value="">— sem cliente —</option>
+                          {listaClientes.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.ativo ? "" : " (encerrado)"}</option>)}
+                        </select>
+                        <BotaoEnviar className={botao} aguardando="…">OK</BotaoEnviar>
+                      </form>
+                    </td>
+                    <td className="px-3 py-2">
+                      <form action={alternarSyncContaGoogle}>
                         <input type="hidden" name="conta_id" value={conta.id} />
                         <input type="hidden" name="ativa" value={conta.ativa_sync ? "0" : "1"} />
                         <BotaoEnviar className={botao} aguardando="…">{conta.ativa_sync ? "Ativa · pausar" : "Pausada · ativar"}</BotaoEnviar>

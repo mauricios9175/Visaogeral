@@ -51,6 +51,18 @@ Pronto: a cada hora o painel puxa os dados de hoje e de ontem, e toda madrugada 
 
 ---
 
+## Google Ads
+
+1. No Google Cloud: crie um projeto, ative a **Google Ads API** e peça o nível **Explorer** (ou Basic) na página da API.
+   Desde set/2026 não existe mais token de desenvolvedor: o nível de acesso fica no projeto.
+2. Em **Google Auth Platform**: preencha o Branding (página inicial `/login`, política `/privacidade`), publique o app
+   e crie um cliente OAuth do tipo *Aplicativo da Web* com o redirecionamento `https://SEU-PAINEL/api/google/callback`.
+3. Na Vercel: `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET`. No Supabase: rode `supabase/migrations/0009_google_ads.sql`.
+4. Em Configurações → 4. Google Ads: **Conectar Google**, vincule cada conta a um cliente e clique em
+   **Sincronizar Google (últimos 30 dias)**. Depois o GitHub Actions atualiza a cada 3 horas (cota do Explorer).
+
+Contas de MCC de agência são lidas com o MCC como `login-customer-id`; contas em que seu e-mail é admin direto têm prioridade.
+
 ## Como os números são calculados
 - **Resultados** = leads (formulário nativo + pixel) + conversas iniciadas (WhatsApp/Direct/Messenger).
 - **Custo por resultado** = investido ÷ resultados.

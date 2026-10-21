@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { COOKIE_SESSAO, criarSessao, senhaCorreta } from "@/lib/auth";
 import { db, EMPRESA_PADRAO } from "@/lib/db";
 import { importarContas } from "@/lib/sync";
+import { importarContasGoogle, sincronizarGoogle } from "@/lib/sync-google";
 import { listarFunisCrm, NOME_CRM, sincronizarCrmCliente, type ConexaoCrm, type TipoCrm } from "@/lib/crm/sync";
 
 export async function entrar(_: unknown, form: FormData) {
@@ -93,6 +94,60 @@ export async function importar() {
   }
   revalidatePath("/", "layout");
   aviso(msg);
+}
+
+// ---------- Google Ads ----------
+
+function avisoGoogle(msg: string): never {
+  redirect(`/configuracoes?msg=${encodeURIComponent(msg)}#google`);
+}
+
+export async function importarGoogle() {
+  let msg: string;
+  try {
+    const r = await importarContasGoogle();
+    msg = `${r.contas} contas encontradas no Google Ads.${r.erros.length ? ` Avisos: ${r.erros.slice(0, 3).join(" | ")}` : ""}`;
+  } catch (e) {
+    msg = `Erro ao buscar contas do Google: ${e instanceof Error ? e.message : e}`;
+  }
+  revalidatePath("/", "layout");
+  avisoGoogle(msg);
+}
+
+export async function sincronizarGoogleAgora(form: FormData) {
+  const dias = Number(form.get("dias")) || 7;
+  let msg: string;
+  try {
+    const r = await sincronizarGoogle(dias);
+    msg = `Google Ads: ${r.contas} conta(s), ${r.linhas} linha(s) dos últimos ${dias} dias.` +
+      (r.erros.length ? ` Erros: ${r.erros.join(" | ")}` : "");
+  } catch (e) {
+    msg = `Erro ao sincronizar o Google: ${e instanceof Error ? e.message : e}`;
+  }
+  revalidatePath("/", "layout");
+  avisoGoogle(msg);
+}
+
+export async function vincularContaGoogle(form: FormData) {
+  const conta = String(form.get("conta_id"));
+  const cliente = String(form.get("cliente_id") ?? "") || null;
+  const { error } = await db().from("contas_google").update({ cliente_id: cliente }).eq("id", conta);
+  if (error) avisoGoogle(`Erro: ${error.message}`);
+  revalidatePath("/", "layout");
+}
+
+export async function alternarSyncContaGoogle(form: FormData) {
+  const conta = String(form.get("conta_id"));
+  await db().from("contas_google").update({ ativa_sync: form.get("ativa") === "1" }).eq("id", conta);
+  revalidatePath("/configuracoes");
+}
+
+export async function desconectarGoogle(form: FormData) {
+  const id = String(form.get("id"));
+  const { error } = await db().from("tokens_google").delete().eq("id", id);
+  if (error) avisoGoogle(`Erro: ${error.message}`);
+  revalidatePath("/", "layout");
+  avisoGoogle("Login do Google removido. As contas ficam cadastradas, mas param de sincronizar até reconectar.");
 }
 
 // ---------- CRM ----------

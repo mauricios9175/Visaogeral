@@ -2,6 +2,7 @@ import Link from "next/link";
 import { resolverPeriodo, progressoDoMes } from "@/lib/datas";
 import { alertasContas, resumoClientes, resumoCrm, type AlertaConta, type NumerosCrm, type ResumoCliente } from "@/lib/consultas";
 import { db, EMPRESA_PADRAO } from "@/lib/db";
+import { resumoGoogle, type NumerosGoogle } from "@/lib/consultas-google";
 import { dataCurta, dinheiro, inteiro, quandoFoi } from "@/lib/formato";
 import { Aviso, SeletorPeriodo, SeloSaude, TiposResultado, Variacao } from "@/components/ui";
 
@@ -12,7 +13,7 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
   const busca = (await searchParams) as { p?: string; de?: string; ate?: string; empresa?: string };
   const { atual, anterior } = resolverPeriodo(busca);
   const banco = db();
-  const [todosResumos, todosAlertas, { data: ultima }, { count: semCliente }, { data: primeiro }, crm] = await Promise.all([
+  const [todosResumos, todosAlertas, { data: ultima }, { count: semCliente }, { data: primeiro }, crm, google] = await Promise.all([
     resumoClientes(atual, anterior),
     alertasContas(),
     banco.from("sync_execucoes").select("finalizado_em, status").not("finalizado_em", "is", null)
@@ -20,6 +21,7 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
     banco.from("contas_anuncio").select("id", { count: "exact", head: true }).is("cliente_id", null).eq("status", 1),
     banco.from("metricas_diarias").select("data").order("data").limit(1).maybeSingle(),
     resumoCrm(atual, anterior),
+    resumoGoogle(atual, anterior).catch(() => new Map<string, { atual: NumerosGoogle; anterior: NumerosGoogle }>()),
   ]);
   const historicoDesde: string | null = primeiro?.data ?? null;
   todosResumos.sort((a, b) => ORDEM[a.saude] - ORDEM[b.saude] || b.atual.gasto - a.atual.gasto);
@@ -35,12 +37,15 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
   const alertas = todosAlertas.filter((a) => idsVisiveis.has(a.clienteId));
   const resumoEmpresas = empresas
     .filter((e) => !empresa || e === empresa)
-    .map((e) => resumirEmpresa(e, todosResumos.filter((r) => empresaDe(r) === e), todosAlertas, crm));
+    .map((e) => resumirEmpresa(e, todosResumos.filter((r) => empresaDe(r) === e), todosAlertas, crm, google));
   const linkEmpresa = (e: string | null) => `/?${atual.qs}${e ? `&empresa=${encodeURIComponent(e)}` : ""}`;
 
   const total = resumos.reduce(
-    (t, r) => ({ gasto: t.gasto + r.atual.gasto, resultados: t.resultados + r.atual.resultados }),
-    { gasto: 0, resultados: 0 },
+    (t, r) => ({
+      gasto: t.gasto + r.atual.gasto, resultados: t.resultados + r.atual.resultados,
+      google: t.google + (google.get(r.cliente.id)?.atual.gasto ?? 0),
+    }),
+    { gasto: 0, resultados: 0, google: 0 },
   );
 
   // sem filtro: cards agrupados por empresa; com filtro: só a empresa escolhida
@@ -52,7 +57,8 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
         <div>
           <h1 className="text-xl font-semibold">{empresa ?? "Visão geral"}</h1>
           <p className="text-sm text-texto-2">
-            {resumos.length} clientes · {dinheiro(total.gasto)} investidos · {inteiro(total.resultados)} resultados ·
+            {resumos.length} clientes · {dinheiro(total.gasto)} investidos no Meta · {inteiro(total.resultados)} resultados ·
+            {total.google > 0 && <> {dinheiro(total.google)} no Google ·</>}
             atualizado {quandoFoi(ultima?.finalizado_em ?? null)}
           </p>
         </div>
@@ -114,6 +120,7 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
                 key={r.cliente.id} r={r} periodo={atual.qs}
                 alertas={alertas.filter((a) => a.clienteId === r.cliente.id).length}
                 crm={crm.get(r.cliente.id)?.atual}
+                google={google.get(r.cliente.id)}
               />
             ))}
           </div>
@@ -133,11 +140,13 @@ function resumirEmpresa(
   rs: ResumoCliente[],
   alertas: AlertaConta[],
   crm: Map<string, { atual: NumerosCrm }>,
+  google: Map<string, { atual: NumerosGoogle }>,
 ) {
   const soma = (f: (r: ResumoCliente) => number) => rs.reduce((t, r) => t + f(r), 0);
   const ids = new Set(rs.map((r) => r.cliente.id));
   const crms = rs.map((r) => crm.get(r.cliente.id)?.atual).filter((x): x is NumerosCrm => !!x);
   const gasto = soma((r) => r.atual.gasto);
+  const gs = rs.map((r) => google.get(r.cliente.id)?.atual).filter((x): x is NumerosGoogle => !!x && x.gasto > 0);
   const resultados = soma((r) => r.atual.resultados);
   return {
     nome,
@@ -150,6 +159,9 @@ function resumirEmpresa(
     cpr: resultados ? gasto / resultados : null,
     cprAnterior: (() => { const g = soma((r) => r.anterior.gasto), n = soma((r) => r.anterior.resultados); return n ? g / n : null; })(),
     alertas: alertas.filter((a) => ids.has(a.clienteId)).length,
+    google: gs.length
+      ? { clientes: gs.length, gasto: gs.reduce((t, x) => t + x.gasto, 0), conversoes: gs.reduce((t, x) => t + x.conversoes, 0) }
+      : null,
     crm: crms.length
       ? {
           clientes: crms.length,
@@ -180,8 +192,14 @@ function CardEmpresa({ e, href, ativo }: { e: ResumoEmpresa; href: string; ativo
         <Metrica rotulo="Resultados" valor={inteiro(e.resultados)}><Variacao atual={e.resultados} anterior={e.resultadosAnterior} /></Metrica>
         <Metrica rotulo="Custo/result." valor={dinheiro(e.cpr)}><Variacao atual={e.cpr} anterior={e.cprAnterior} menorMelhor /></Metrica>
       </div>
-      {e.crm && (
+      {e.google && (
         <div className="mt-3 rounded-lg bg-fundo px-2 py-1 text-xs text-texto-2">
+          Google ({e.google.clientes} cliente(s)): {dinheiro(e.google.gasto)} · {inteiro(e.google.conversoes)} conversões
+          {e.google.conversoes > 0 && <> · {dinheiro(e.google.gasto / e.google.conversoes)} cada</>}
+        </div>
+      )}
+      {e.crm && (
+        <div className="mt-2 rounded-lg bg-fundo px-2 py-1 text-xs text-texto-2">
           CRM ({e.crm.clientes} cliente(s)): {inteiro(e.crm.leads)} leads · {inteiro(e.crm.vendas)} vendas · {dinheiro(e.crm.faturamento)}
         </div>
       )}
@@ -217,8 +235,9 @@ function PainelAlertas({ alertas }: { alertas: AlertaConta[] }) {
   );
 }
 
-function CardCliente({ r, periodo, alertas, crm }: {
+function CardCliente({ r, periodo, alertas, crm, google }: {
   r: ResumoCliente; periodo: string; alertas: number; crm?: NumerosCrm;
+  google?: { atual: NumerosGoogle; anterior: NumerosGoogle };
 }) {
   const { cliente: c, atual: a, anterior: b, mes } = r;
   const { diaAtual, totalDias } = progressoDoMes();
@@ -259,6 +278,15 @@ function CardCliente({ r, periodo, alertas, crm }: {
       </div>
 
       <div className="mt-2"><TiposResultado m={a} compacto /></div>
+      {google && (google.atual.gasto > 0 || google.anterior.gasto > 0) && (
+        <div className="mt-2 rounded-lg bg-fundo px-2 py-1 text-xs text-texto-2">
+          Google: {dinheiro(google.atual.gasto)} · {inteiro(google.atual.conversoes)} conversões
+          {google.atual.cpa != null && <> · {dinheiro(google.atual.cpa)} cada</>}
+          {google.atual.cpa != null && google.anterior.cpa != null && (
+            <> <Variacao atual={google.atual.cpa} anterior={google.anterior.cpa} menorMelhor /></>
+          )}
+        </div>
+      )}
       {crm && (
         <div className="mt-2 rounded-lg bg-fundo px-2 py-1 text-xs text-texto-2">
           CRM: {inteiro(crm.leads)} leads ({inteiro(crm.leadsAnuncio)} de anúncio)
