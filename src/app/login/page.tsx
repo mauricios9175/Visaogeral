@@ -23,6 +23,9 @@ export default function Login() {
         >
           {enviando ? "Entrando…" : "Entrar"}
         </button>
+        <a href="/privacidade" className="block text-center text-xs text-texto-3 hover:text-texto">
+          Política de Privacidade
+        </a>
       </form>
     </main>
   );

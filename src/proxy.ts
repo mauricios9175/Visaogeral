@@ -7,6 +7,6 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // /login fica aberto; /api/cron usa o próprio CRON_SECRET
-  matcher: ["/((?!login|api/cron|_next/static|_next/image|favicon.ico).*)"],
+  // /login e /privacidade ficam abertos; /api/cron usa o próprio CRON_SECRET
+  matcher: ["/((?!login|privacidade|api/cron|_next/static|_next/image|favicon.ico).*)"],
 };
