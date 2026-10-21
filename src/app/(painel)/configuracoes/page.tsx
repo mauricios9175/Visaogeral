@@ -18,8 +18,8 @@ const botao = "rounded-lg border border-borda bg-superficie px-3 py-1.5 text-sm 
 const botaoPrimario = "rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium text-white";
 
 export default async function Configuracoes({ searchParams }: PageProps<"/configuracoes">) {
-  const { msg, gbusca, gacesso, gcanceladas: canceladasParam } =
-    (await searchParams) as { msg?: string; gbusca?: string; gacesso?: string; gcanceladas?: string };
+  const { msg, mbusca, gbusca, gacesso, gcanceladas: canceladasParam } =
+    (await searchParams) as { msg?: string; mbusca?: string; gbusca?: string; gacesso?: string; gcanceladas?: string };
   const gcanceladas = canceladasParam === "1";
   const banco = db();
   const [{ data: clientes }, { data: contas }, { data: tokens }, { data: execucoes }, { data: tokensGoogle }, { data: contasGoogle }] = await Promise.all([
@@ -37,6 +37,15 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
   const encerrados = listaClientes.filter((c) => !c.ativo);
   const empresas = [...new Set([EMPRESA_PADRAO, ...listaClientes.map((c) => c.empresa).filter((e): e is string => !!e)])].sort();
   const listaContas = (contas ?? []) as ContaAnuncio[];
+  // Configurações mostra só as contas vinculadas; as outras ficam atrás da busca.
+  const metaVinculadas = listaContas.filter((c) => c.cliente_id);
+  const metaLivres = listaContas.filter((c) => !c.cliente_id)
+    .sort((a, b) => Number(b.status === 1) - Number(a.status === 1) || a.nome.localeCompare(b.nome));
+  const termoMeta = (mbusca ?? "").trim().toLowerCase();
+  const metaTodasFiltradas = metaLivres.filter((c) =>
+    !termoMeta || [c.nome, c.id, c.bm_nome ?? ""].some((x) => x.toLowerCase().includes(termoMeta)));
+  const metaFiltradas = metaTodasFiltradas.slice(0, 30);
+  const metaFiltradasTotal = metaTodasFiltradas.length;
   const temTokenBm = Boolean(process.env.META_SYSTEM_USER_TOKEN);
   const temApp = Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET);
 
@@ -168,10 +177,12 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
       </section>
 
       {/* ---------- Contas ---------- */}
-      <section className="space-y-3">
-        <h2 className="font-medium">3. Contas de anúncio → cliente</h2>
+      <section id="contas-meta" className="space-y-3">
+        <h2 className="font-medium">3. Contas do Meta → cliente <span className="font-normal text-texto-3">· {metaVinculadas.length} vinculada(s)</span></h2>
         {listaContas.length === 0 ? (
           <Aviso>Nenhuma conta ainda. Clique em “Buscar contas no Meta”.</Aviso>
+        ) : !metaVinculadas.length ? (
+          <Aviso>Nenhuma conta vinculada ainda. Abra “Vincular outra conta do Meta” abaixo e escolha o cliente.</Aviso>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
             <table className="w-full min-w-[900px] text-sm">
@@ -186,7 +197,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                 </tr>
               </thead>
               <tbody>
-                {listaContas.map((conta) => (
+                {metaVinculadas.map((conta) => (
                   <tr key={conta.id} className="border-t border-borda align-top">
                     <td className="px-4 py-2">
                       <div>{conta.nome}</div>
@@ -229,6 +240,23 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
               </tbody>
             </table>
           </div>
+        )}
+        {metaLivres.length > 0 && (
+          <details open={!!mbusca} className="rounded-xl border border-borda bg-superficie">
+            <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
+              Vincular outra conta do Meta <span className="font-normal text-texto-3">({metaLivres.length} sem cliente)</span>
+            </summary>
+            <div className="space-y-2 border-t border-borda p-3">
+              <form method="get" action="/configuracoes#contas-meta" className="flex flex-wrap gap-2 text-sm">
+                <input name="mbusca" defaultValue={mbusca ?? ""} placeholder="Buscar por nome, ID ou BM" className={`${campo} w-64`} />
+                <button className={botao}>Buscar</button>
+              </form>
+              <ListaVincular
+                contas={metaFiltradas.map((c) => ({ id: c.id, nome: c.nome, detalhe: `${c.id} · ${c.bm_nome ?? "sem BM"}${c.status !== 1 ? " · inativa" : ""}` }))}
+                total={metaFiltradasTotal} clientes={listaClientes} acao={vincularConta}
+              />
+            </div>
+          </details>
         )}
       </section>
 
@@ -282,7 +310,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
             .filter((c) => gcanceladas || c.status === "ENABLED" || !c.status)
             .filter((c) => !gacesso || (c.gerente_nome ?? "—") === gacesso)
             .filter((c) => !termo || c.nome.toLowerCase().includes(termo) || c.id.includes(termo.replace(/\D/g, "") || "§"));
-          const mostradas = filtradas.slice(0, 50);
+          const mostradas = filtradas.slice(0, 30);
           const tabela = (lista: ContaGoogle[], comSync: boolean) => (
             <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
               <table className="w-full min-w-[900px] text-sm">
@@ -342,7 +370,11 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                 Só as contas vinculadas a um cliente são sincronizadas. As outras ficam só nesta lista e não gastam cota do Google.
               </p>
 
-              <h3 className="pt-2 text-sm font-medium">Outras contas encontradas · {livres.length}</h3>
+              <details open={!!(gbusca || gacesso || gcanceladas)} className="rounded-xl border border-borda bg-superficie">
+              <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
+                Vincular outra conta do Google <span className="font-normal text-texto-3">({livres.length} sem cliente)</span>
+              </summary>
+              <div className="space-y-2 border-t border-borda p-3">
               <form method="get" action="/configuracoes#google" className="flex flex-wrap items-center gap-2 text-sm">
                 <input name="gbusca" defaultValue={gbusca ?? ""} placeholder="Buscar por nome ou ID" className={`${campo} w-64`} />
                 <select name="gacesso" defaultValue={gacesso ?? ""} className={campo}>
@@ -354,16 +386,51 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                 </label>
                 <button className={botao}>Filtrar</button>
               </form>
-              {mostradas.length ? tabela(mostradas, false) : <p className="text-sm text-texto-3">Nenhuma conta com esse filtro.</p>}
-              {filtradas.length > mostradas.length && (
-                <p className="text-xs text-texto-3">
-                  Mostrando 50 de {filtradas.length}. Use a busca para achar a conta do seu cliente.
-                </p>
-              )}
+              <ListaVincular
+                contas={mostradas.map((c) => ({ id: c.id, nome: c.nome, detalhe: `${formatarIdGoogle(c.id)} · ${c.gerente_nome ?? "—"}${c.status && c.status !== "ENABLED" ? " · cancelada/suspensa" : ""}` }))}
+                total={filtradas.length} clientes={listaClientes} acao={vincularContaGoogle}
+              />
+              </div>
+              </details>
             </>
           );
         })()}
       </section>
     </div>
+  );
+}
+
+/** Lista compacta de contas sem cliente, com o seletor para vincular. */
+function ListaVincular({ contas, total, clientes, acao }: {
+  contas: { id: string; nome: string; detalhe: string }[];
+  total: number;
+  clientes: Cliente[];
+  acao: (form: FormData) => Promise<void>;
+}) {
+  if (!contas.length) return <p className="text-sm text-texto-3">Nenhuma conta com essa busca.</p>;
+  return (
+    <>
+      <ul className="divide-y divide-borda text-sm">
+        {contas.map((c) => (
+          <li key={c.id} className="flex flex-wrap items-center gap-2 py-1.5">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">{c.nome}</span>
+              <span className="block truncate text-xs text-texto-3">{c.detalhe}</span>
+            </span>
+            <form action={acao} className="flex gap-2">
+              <input type="hidden" name="conta_id" value={c.id} />
+              <select name="cliente_id" defaultValue="" className={campo}>
+                <option value="">— escolher cliente —</option>
+                {clientes.filter((x) => x.ativo).map((x) => <option key={x.id} value={x.id}>{x.nome}</option>)}
+              </select>
+              <BotaoEnviar className={botao} aguardando="…">Vincular</BotaoEnviar>
+            </form>
+          </li>
+        ))}
+      </ul>
+      {total > contas.length && (
+        <p className="text-xs text-texto-3">Mostrando {contas.length} de {total}. Use a busca para achar a conta do seu cliente.</p>
+      )}
+    </>
   );
 }
