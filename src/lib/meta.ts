@@ -122,6 +122,13 @@ export type LinhaInsight = {
   // "Resultados" exatamente como o Gerenciador de Anúncios mostra (segue o objetivo do conjunto)
   results?: { indicator?: string; values?: { value?: string }[] }[];
   optimization_goal?: string;
+  // vídeo (para o painel de criativos)
+  video_play_actions?: Acao[];
+  video_p25_watched_actions?: Acao[];
+  video_p50_watched_actions?: Acao[];
+  video_p75_watched_actions?: Acao[];
+  video_p100_watched_actions?: Acao[];
+  video_thruplay_watched_actions?: Acao[];
 };
 
 const CAMPOS_INSIGHTS = [
@@ -132,6 +139,11 @@ const CAMPOS_INSIGHTS = [
 // Campos que nem toda versão/conta aceita; se o Meta recusar, seguimos sem eles.
 const CAMPOS_EXTRAS = ["results", "optimization_goal"];
 let aceitaExtras = true;
+const CAMPOS_VIDEO = [
+  "video_play_actions", "video_p25_watched_actions", "video_p50_watched_actions",
+  "video_p75_watched_actions", "video_p100_watched_actions", "video_thruplay_watched_actions",
+];
+let aceitaVideo = true;
 
 /** Métricas por anúncio e por dia, num intervalo de datas (formato AAAA-MM-DD). */
 export async function insightsPorAnuncio(contaId: string, token: string, desde: string, ate: string) {
@@ -145,16 +157,74 @@ export async function insightsPorAnuncio(contaId: string, token: string, desde: 
         limit: "500",
       }),
     );
-  if (!aceitaExtras) return buscar(CAMPOS_INSIGHTS);
-  try {
-    return await buscar([...CAMPOS_INSIGHTS, ...CAMPOS_EXTRAS]);
-  } catch (e) {
-    if (e instanceof MetaErro && e.codigo === 100) {
-      aceitaExtras = false;
-      return buscar(CAMPOS_INSIGHTS);
+  // Tenta com tudo; se o Meta recusar algum campo (código 100), tira primeiro os de vídeo, depois os extras.
+  for (;;) {
+    const campos = [...CAMPOS_INSIGHTS, ...(aceitaExtras ? CAMPOS_EXTRAS : []), ...(aceitaVideo ? CAMPOS_VIDEO : [])];
+    try {
+      return await buscar(campos);
+    } catch (e) {
+      if (!(e instanceof MetaErro && e.codigo === 100)) throw e;
+      if (aceitaVideo) aceitaVideo = false;
+      else if (aceitaExtras) aceitaExtras = false;
+      else throw e;
     }
-    throw e;
   }
+}
+
+/** Soma os valores de uma lista de ações do Meta (ex.: video_p25_watched_actions). */
+export function somaAcoes(lista?: Acao[], tipo?: string) {
+  return (lista ?? []).filter((a) => !tipo || a.action_type === tipo).reduce((s, a) => s + Number(a.value ?? 0), 0);
+}
+
+/** Métricas de vídeo da linha: plays, 3 segundos (gancho), quartis e ThruPlay. */
+export function metricasVideo(l: LinhaInsight) {
+  return {
+    video_plays: somaAcoes(l.video_play_actions),
+    video_3s: somaAcoes(l.actions, "video_view"),
+    video_p25: somaAcoes(l.video_p25_watched_actions),
+    video_p50: somaAcoes(l.video_p50_watched_actions),
+    video_p75: somaAcoes(l.video_p75_watched_actions),
+    video_p100: somaAcoes(l.video_p100_watched_actions),
+    video_thruplay: somaAcoes(l.video_thruplay_watched_actions),
+  };
+}
+
+/** Criativo do anúncio, como vem do Graph (campo creative do anúncio). */
+export type CriativoMeta = {
+  id: string;
+  effective_status?: string;
+  creative?: {
+    object_type?: string;
+    thumbnail_url?: string;
+    image_url?: string;
+    video_id?: string;
+    title?: string;
+    body?: string;
+    instagram_permalink_url?: string;
+    effective_object_story_id?: string;
+  };
+};
+
+// thumbnail maior que o padrão (64x64); se o Meta não aceitar o modificador, usamos o campo simples
+const CRIATIVO_GRANDE = "id,effective_status,creative.thumbnail_width(480).thumbnail_height(480){object_type,thumbnail_url,image_url,video_id,title,body,instagram_permalink_url,effective_object_story_id}";
+const CRIATIVO_SIMPLES = "id,effective_status,creative{object_type,thumbnail_url,image_url,video_id,title,body,instagram_permalink_url,effective_object_story_id}";
+
+/** Status e criativo dos anúncios (pelos ids, 50 por chamada). */
+let camposCriativo: string | null = null;
+export async function criativosDosAnuncios(ids: string[], token: string) {
+  const unicos = [...new Set(ids.filter(Boolean))];
+  if (!unicos.length) return new Map<string, CriativoMeta>();
+  // buscarPorIds engole erros por item; então testamos o modificador uma vez com um anúncio só
+  if (!camposCriativo) {
+    try {
+      await get(montarUrl(unicos[0], token, { fields: CRIATIVO_GRANDE }));
+      camposCriativo = CRIATIVO_GRANDE;
+    } catch (e) {
+      if (e instanceof MetaErro && e.codigo === 100) camposCriativo = CRIATIVO_SIMPLES;
+      else return buscarPorIds<CriativoMeta>(unicos, token, CRIATIVO_SIMPLES);
+    }
+  }
+  return buscarPorIds<CriativoMeta>(unicos, token, camposCriativo);
 }
 
 /** Insights por campanha com os dados brutos, para a tela de diagnóstico. */

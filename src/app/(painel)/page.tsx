@@ -308,7 +308,7 @@ function CardCliente({ r, periodo, alertas, crm }: {
 
       {c.cpl_meta && (
         <div className="mt-2 text-xs text-texto-3">
-          Meta {dinheiro(c.cpl_meta)} {cprAcima ? <span className="text-critico">· acima da meta</span> : null}
+          Alvo de custo/resultado: {dinheiro(c.cpl_meta)} {cprAcima ? <span className="text-critico">· acima do alvo</span> : null}
         </div>
       )}
 

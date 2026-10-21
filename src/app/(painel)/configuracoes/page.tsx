@@ -130,7 +130,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
         </datalist>
         <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
           <div className="grid min-w-[980px] grid-cols-[1.5fr_1.2fr_1.1fr_0.9fr_0.9fr_0.7fr_auto] gap-2 px-4 py-2 text-xs text-texto-3">
-            <span>Nome</span><span>Empresa</span><span>Nicho</span><span>Custo/result. meta (R$)</span>
+            <span>Nome</span><span>Empresa</span><span>Nicho</span><span>Alvo custo/result. (R$)</span>
             <span>Orçamento mensal (R$)</span><span>ROAS meta</span><span className="w-[190px]" />
           </div>
           {[...ativos, null].map((c) => (

@@ -112,3 +112,30 @@ export function TiposResultado({ m, compacto = false }: { m: Metricas; compacto?
     </span>
   );
 }
+
+const STATUS: Record<string, { rotulo: string; classe: string; icone: string }> = {
+  ACTIVE: { rotulo: "Ativo", classe: "bg-bom-bg text-bom", icone: "●" },
+  PAUSED: { rotulo: "Pausado", classe: "bg-fundo text-texto-3", icone: "❚❚" },
+  CAMPAIGN_PAUSED: { rotulo: "Campanha pausada", classe: "bg-fundo text-texto-3", icone: "❚❚" },
+  ADSET_PAUSED: { rotulo: "Conjunto pausado", classe: "bg-fundo text-texto-3", icone: "❚❚" },
+  IN_PROCESS: { rotulo: "Em análise", classe: "bg-atencao-bg text-atencao", icone: "◐" },
+  PENDING_REVIEW: { rotulo: "Em análise", classe: "bg-atencao-bg text-atencao", icone: "◐" },
+  PREAPPROVED: { rotulo: "Pré-aprovado", classe: "bg-atencao-bg text-atencao", icone: "◐" },
+  DISAPPROVED: { rotulo: "Reprovado", classe: "bg-critico-bg text-critico", icone: "■" },
+  WITH_ISSUES: { rotulo: "Com problemas", classe: "bg-critico-bg text-critico", icone: "■" },
+  PENDING_BILLING_INFO: { rotulo: "Pagamento pendente", classe: "bg-critico-bg text-critico", icone: "■" },
+  ARCHIVED: { rotulo: "Arquivado", classe: "bg-fundo text-texto-3", icone: "○" },
+  DELETED: { rotulo: "Excluído", classe: "bg-fundo text-texto-3", icone: "○" },
+};
+
+/** Status atual no Meta; ícone + texto, nunca só cor. */
+export function SeloStatus({ status }: { status: string | null }) {
+  const s = status ? STATUS[status] ?? { rotulo: status, classe: "bg-fundo text-texto-3", icone: "○" }
+    : { rotulo: "Arquivado/excluído", classe: "bg-fundo text-texto-3", icone: "○" };
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${s.classe}`}>
+      <span aria-hidden>{s.icone}</span>
+      {s.rotulo}
+    </span>
+  );
+}

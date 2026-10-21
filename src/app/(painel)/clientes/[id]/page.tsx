@@ -5,7 +5,7 @@ import { detalheCliente, detalheCrm, somarGeral, type LinhaTabela } from "@/lib/
 import { detalheGoogle } from "@/lib/consultas-google";
 import { formatarIdGoogle } from "@/lib/google";
 import { decimal, dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
-import { Aviso, Kpi, SeletorPeriodo, TiposResultado, Variacao } from "@/components/ui";
+import { Aviso, Kpi, SeletorPeriodo, SeloStatus, TiposResultado, Variacao } from "@/components/ui";
 import { BarrasDiarias } from "@/components/graficos";
 
 
@@ -22,33 +22,6 @@ const FILTROS = [
   { chave: "ativos", rotulo: "Ativos", aceita: (s: string | null) => !!s && ATIVOS.includes(s) },
   { chave: "pausados", rotulo: "Pausados", aceita: (s: string | null) => !s || !ATIVOS.includes(s) },
 ] as const;
-
-const STATUS: Record<string, { rotulo: string; classe: string; icone: string }> = {
-  ACTIVE: { rotulo: "Ativo", classe: "bg-bom-bg text-bom", icone: "●" },
-  PAUSED: { rotulo: "Pausado", classe: "bg-fundo text-texto-3", icone: "❚❚" },
-  CAMPAIGN_PAUSED: { rotulo: "Campanha pausada", classe: "bg-fundo text-texto-3", icone: "❚❚" },
-  ADSET_PAUSED: { rotulo: "Conjunto pausado", classe: "bg-fundo text-texto-3", icone: "❚❚" },
-  IN_PROCESS: { rotulo: "Em análise", classe: "bg-atencao-bg text-atencao", icone: "◐" },
-  PENDING_REVIEW: { rotulo: "Em análise", classe: "bg-atencao-bg text-atencao", icone: "◐" },
-  PREAPPROVED: { rotulo: "Pré-aprovado", classe: "bg-atencao-bg text-atencao", icone: "◐" },
-  DISAPPROVED: { rotulo: "Reprovado", classe: "bg-critico-bg text-critico", icone: "■" },
-  WITH_ISSUES: { rotulo: "Com problemas", classe: "bg-critico-bg text-critico", icone: "■" },
-  PENDING_BILLING_INFO: { rotulo: "Pagamento pendente", classe: "bg-critico-bg text-critico", icone: "■" },
-  ARCHIVED: { rotulo: "Arquivado", classe: "bg-fundo text-texto-3", icone: "○" },
-  DELETED: { rotulo: "Excluído", classe: "bg-fundo text-texto-3", icone: "○" },
-};
-
-/** Status atual no Meta; ícone + texto, nunca só cor. */
-function SeloStatus({ status }: { status: string | null }) {
-  const s = status ? STATUS[status] ?? { rotulo: status, classe: "bg-fundo text-texto-3", icone: "○" }
-    : { rotulo: "Arquivado/excluído", classe: "bg-fundo text-texto-3", icone: "○" };
-  return (
-    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${s.classe}`}>
-      <span aria-hidden>{s.icone}</span>
-      {s.rotulo}
-    </span>
-  );
-}
 
 export default async function PaginaCliente({ params, searchParams }: PageProps<"/clientes/[id]">) {
   const { id } = await params;
@@ -92,6 +65,8 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
               || "Nenhuma conta vinculada"}
             {d.contas[0] && <> · atualizado {quandoFoi(d.contas[0].ultima_sync)}</>}
             {" · "}
+            <Link href={`/criativos?cliente=${id}&${atual.qs}`} className="text-destaque underline">Criativos</Link>
+            {" · "}
             <Link href={`${base}/diagnostico`} className="text-destaque underline">Diagnóstico de resultados</Link>
             {" · "}
             <Link href={`${base}/crm`} className="text-destaque underline">{crm && !("erro" in crm) ? "Configurar CRM" : "Conectar CRM"}</Link>
@@ -108,7 +83,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
         <Kpi rotulo="Resultados" valor={inteiro(a.resultados)}>
           <TiposResultado m={a} />
         </Kpi>
-        <Kpi rotulo={`Custo/resultado${c.cpl_meta ? ` (meta ${dinheiro(c.cpl_meta)})` : ""}`} valor={dinheiro(a.cpr)}>
+        <Kpi rotulo={`Custo/resultado${c.cpl_meta ? ` (alvo ${dinheiro(c.cpl_meta)})` : ""}`} valor={dinheiro(a.cpr)}>
           <Variacao atual={a.cpr} anterior={b.cpr} menorMelhor />
         </Kpi>
         <Kpi rotulo="CTR (link)" valor={pct(a.ctr)}><Variacao atual={a.ctr} anterior={b.ctr} /></Kpi>
@@ -187,7 +162,7 @@ function ResumoGeral({ meta, metaAnt, g, metaCpl }: {
           {parte(inteiro(meta.resultados), inteiro(g.atual.conversoes))}
           <Variacao atual={at.resultados} anterior={an.resultados} />
         </Kpi>
-        <Kpi rotulo={`Custo/resultado${metaCpl ? ` (meta ${dinheiro(metaCpl)})` : ""}`} valor={dinheiro(at.cpr)}>
+        <Kpi rotulo={`Custo/resultado${metaCpl ? ` (alvo ${dinheiro(metaCpl)})` : ""}`} valor={dinheiro(at.cpr)}>
           {parte(dinheiro(meta.cpr), dinheiro(g.atual.cpa))}
           <Variacao atual={at.cpr} anterior={an.cpr} menorMelhor />
         </Kpi>

@@ -1,8 +1,8 @@
 import "server-only";
 import { db, type ContaAnuncio, type TokenMeta } from "./db";
 import {
-  buscarPorIds, dadosFinanceiros, extrairResultados, insightsPorAnuncio, listarContas, MetaErro,
-  type LinhaInsight, type ObjetivoConjunto,
+  buscarPorIds, criativosDosAnuncios, dadosFinanceiros, extrairResultados, insightsPorAnuncio, listarContas, MetaErro,
+  metricasVideo, type CriativoMeta, type LinhaInsight, type ObjetivoConjunto,
 } from "./meta";
 import { diasAtras, diasEntre, hojeISO, somarDias } from "./datas";
 
@@ -86,6 +86,39 @@ async function salvarStatus(conta: ContaAnuncio, linhas: { id: string; nivel: st
   }
 }
 
+/** As colunas de vídeo existem? (SQL 0010) Sem elas, salva as métricas sem vídeo em vez de falhar. */
+let temColunasVideo: boolean | null = null;
+async function colunasDeVideo() {
+  if (temColunasVideo === null) {
+    const { error } = await db().from("metricas_diarias").select("video_3s").limit(1);
+    temColunasVideo = !error;
+  }
+  return temColunasVideo;
+}
+
+/** Guarda miniatura, tipo e link de cada anúncio. Informativo: falha aqui não impede as métricas. */
+async function salvarCriativos(conta: ContaAnuncio, anuncios: Map<string, CriativoMeta>) {
+  try {
+    const agora = new Date().toISOString();
+    const registros = [...anuncios.values()].filter((a) => a.creative).map((a) => {
+      const c = a.creative!;
+      return {
+        ad_id: a.id, conta_id: conta.id, tipo: c.object_type ?? (c.video_id ? "VIDEO" : null),
+        thumbnail_url: c.thumbnail_url ?? null, imagem_url: c.image_url ?? null, video_id: c.video_id ?? null,
+        titulo: c.title ?? null, texto: c.body ?? null,
+        link: c.instagram_permalink_url ?? (c.effective_object_story_id ? `https://www.facebook.com/${c.effective_object_story_id}` : null),
+        atualizado_em: agora,
+      };
+    });
+    for (let i = 0; i < registros.length; i += 500) {
+      const { error } = await db().from("criativos_meta").upsert(registros.slice(i, i + 500), { onConflict: "ad_id" });
+      if (error) throw new Error(error.message);
+    }
+  } catch (e) {
+    console.error(`Criativos de ${conta.nome}:`, e);
+  }
+}
+
 async function sincronizarConta(conta: ContaAnuncio, token: string, desde: string, ate: string) {
   const linhas = await insightsEmPartes(conta.id, token, desde, ate);
   // Objetivo e status só dos itens que veicularam no período (pelo id, 50 por chamada).
@@ -93,7 +126,8 @@ async function sincronizarConta(conta: ContaAnuncio, token: string, desde: strin
   const [conjuntos, campanhas, anuncios] = await Promise.all([
     buscarPorIds<ObjetivoConjunto>(linhas.map((l) => l.adset_id), token, "id,effective_status,optimization_goal,promoted_object"),
     buscarPorIds<Obj>(linhas.map((l) => l.campaign_id), token, "id,effective_status"),
-    buscarPorIds<Obj>(linhas.map((l) => l.ad_id), token, "id,effective_status"),
+    // anúncios: status + criativo (miniatura, tipo e link) para o painel de criativos
+    criativosDosAnuncios(linhas.map((l) => l.ad_id), token),
   ]).catch((e) => {
     console.error(`Objetivos/status de ${conta.nome}:`, e);
     return [undefined, undefined, undefined] as const;
@@ -103,6 +137,8 @@ async function sincronizarConta(conta: ContaAnuncio, token: string, desde: strin
     ...[...(conjuntos?.values() ?? [])].map((c) => ({ id: c.id, nivel: "conjunto", status: c.effective_status })),
     ...[...(anuncios?.values() ?? [])].map((a) => ({ id: a.id, nivel: "anuncio", status: a.effective_status })),
   ]);
+  if (anuncios) await salvarCriativos(conta, anuncios);
+  const comVideo = await colunasDeVideo();
   const registros = linhas.map((l) => {
     const r = extrairResultados(l, conjuntos);
     return {
@@ -126,6 +162,7 @@ async function sincronizarConta(conta: ContaAnuncio, token: string, desde: strin
       resultados: r.resultados,
       resultado_tipo: r.tipo,
       resultado_acao: r.acao,
+      ...(comVideo ? metricasVideo(l) : {}),
       atualizado_em: new Date().toISOString(),
     };
   });

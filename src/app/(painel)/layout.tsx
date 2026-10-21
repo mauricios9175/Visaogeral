@@ -5,9 +5,10 @@ export default function PainelLayout({ children }: LayoutProps<"/">) {
   return (
     <>
       <header className="border-b border-borda bg-superficie">
-        <nav className="mx-auto flex max-w-7xl items-center gap-6 px-4 py-3 text-sm">
+        <nav className="mx-auto flex max-w-7xl items-center gap-x-6 gap-y-2 overflow-x-auto whitespace-nowrap px-4 py-3 text-sm">
           <Link href="/" className="font-semibold">Visão Geral</Link>
           <Link href="/alertas" className="text-texto-2 hover:text-texto">Alertas</Link>
+          <Link href="/criativos" className="text-texto-2 hover:text-texto">Criativos</Link>
           <Link href="/relatorios" className="text-texto-2 hover:text-texto">Relatórios</Link>
           <Link href="/configuracoes" className="text-texto-2 hover:text-texto">Configurações</Link>
           <form action={sair} className="ml-auto">
