@@ -18,7 +18,9 @@ const botao = "rounded-lg border border-borda bg-superficie px-3 py-1.5 text-sm 
 const botaoPrimario = "rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium text-white";
 
 export default async function Configuracoes({ searchParams }: PageProps<"/configuracoes">) {
-  const { msg } = (await searchParams) as { msg?: string };
+  const { msg, gbusca, gacesso, gcanceladas: canceladasParam } =
+    (await searchParams) as { msg?: string; gbusca?: string; gacesso?: string; gcanceladas?: string };
+  const gcanceladas = canceladasParam === "1";
   const banco = db();
   const [{ data: clientes }, { data: contas }, { data: tokens }, { data: execucoes }, { data: tokensGoogle }, { data: contasGoogle }] = await Promise.all([
     banco.from("clientes").select("*").order("nome"),
@@ -270,53 +272,97 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
             </form>
           </div>
         )}
-        {!!contasGoogle?.length && (
-          <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
-            <table className="w-full min-w-[900px] text-sm">
-              <thead className="text-left text-xs text-texto-3">
-                <tr>
-                  <th className="px-4 py-2 font-normal">Conta</th>
-                  <th className="px-3 py-2 font-normal">Acesso</th>
-                  <th className="px-3 py-2 font-normal">Última sync</th>
-                  <th className="px-3 py-2 font-normal">Cliente</th>
-                  <th className="px-3 py-2 font-normal">Sincronizar</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(contasGoogle as ContaGoogle[]).map((conta) => (
-                  <tr key={conta.id} className="border-t border-borda align-top">
-                    <td className="px-4 py-2">
-                      <div>{conta.nome}</div>
-                      <div className="text-xs text-texto-3">
-                        {formatarIdGoogle(conta.id)}{conta.status && conta.status !== "ENABLED" && ` · ${conta.status === "CANCELED" ? "cancelada" : conta.status === "SUSPENDED" ? "suspensa" : conta.status.toLowerCase()}`}
-                      </div>
-                      {conta.ultimo_erro && <div className="text-xs text-critico">Erro: {conta.ultimo_erro}</div>}
-                    </td>
-                    <td className="px-3 py-2 text-texto-2">{conta.gerente_nome ?? "—"}</td>
-                    <td className="px-3 py-2 text-texto-2">{quandoFoi(conta.ultima_sync)}</td>
-                    <td className="px-3 py-2">
-                      <form action={vincularContaGoogle} className="flex gap-2">
-                        <input type="hidden" name="conta_id" value={conta.id} />
-                        <select name="cliente_id" defaultValue={conta.cliente_id ?? ""} className={campo}>
-                          <option value="">— sem cliente —</option>
-                          {listaClientes.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.ativo ? "" : " (encerrado)"}</option>)}
-                        </select>
-                        <BotaoEnviar className={botao} aguardando="…">OK</BotaoEnviar>
-                      </form>
-                    </td>
-                    <td className="px-3 py-2">
-                      <form action={alternarSyncContaGoogle}>
-                        <input type="hidden" name="conta_id" value={conta.id} />
-                        <input type="hidden" name="ativa" value={conta.ativa_sync ? "0" : "1"} />
-                        <BotaoEnviar className={botao} aguardando="…">{conta.ativa_sync ? "Ativa · pausar" : "Pausada · ativar"}</BotaoEnviar>
-                      </form>
-                    </td>
+        {!!contasGoogle?.length && (() => {
+          const todas = contasGoogle as ContaGoogle[];
+          const vinculadas = todas.filter((c) => c.cliente_id);
+          const livres = todas.filter((c) => !c.cliente_id);
+          const acessos = [...new Set(livres.map((c) => c.gerente_nome ?? "—"))].sort();
+          const termo = (gbusca ?? "").trim().toLowerCase();
+          const filtradas = livres
+            .filter((c) => gcanceladas || c.status === "ENABLED" || !c.status)
+            .filter((c) => !gacesso || (c.gerente_nome ?? "—") === gacesso)
+            .filter((c) => !termo || c.nome.toLowerCase().includes(termo) || c.id.includes(termo.replace(/\D/g, "") || "§"));
+          const mostradas = filtradas.slice(0, 50);
+          const tabela = (lista: ContaGoogle[], comSync: boolean) => (
+            <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="text-left text-xs text-texto-3">
+                  <tr>
+                    <th className="px-4 py-2 font-normal">Conta</th>
+                    <th className="px-3 py-2 font-normal">Acesso</th>
+                    {comSync && <th className="px-3 py-2 font-normal">Última sync</th>}
+                    <th className="px-3 py-2 font-normal">Cliente</th>
+                    {comSync && <th className="px-3 py-2 font-normal">Sincronizar</th>}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody>
+                  {lista.map((conta) => (
+                    <tr key={conta.id} className="border-t border-borda align-top">
+                      <td className="px-4 py-2">
+                        <div>{conta.nome}</div>
+                        <div className="text-xs text-texto-3">
+                          {formatarIdGoogle(conta.id)}{conta.status && conta.status !== "ENABLED" && ` · ${conta.status === "CANCELED" ? "cancelada" : conta.status === "SUSPENDED" ? "suspensa" : conta.status.toLowerCase()}`}
+                        </div>
+                        {comSync && conta.ultimo_erro && <div className="text-xs text-critico">Erro: {conta.ultimo_erro}</div>}
+                      </td>
+                      <td className="px-3 py-2 text-texto-2">{conta.gerente_nome ?? "—"}</td>
+                      {comSync && <td className="px-3 py-2 text-texto-2">{quandoFoi(conta.ultima_sync)}</td>}
+                      <td className="px-3 py-2">
+                        <form action={vincularContaGoogle} className="flex gap-2">
+                          <input type="hidden" name="conta_id" value={conta.id} />
+                          <select name="cliente_id" defaultValue={conta.cliente_id ?? ""} className={campo}>
+                            <option value="">— sem cliente —</option>
+                            {listaClientes.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.ativo ? "" : " (encerrado)"}</option>)}
+                          </select>
+                          <BotaoEnviar className={botao} aguardando="…">OK</BotaoEnviar>
+                        </form>
+                      </td>
+                      {comSync && (
+                        <td className="px-3 py-2">
+                          <form action={alternarSyncContaGoogle}>
+                            <input type="hidden" name="conta_id" value={conta.id} />
+                            <input type="hidden" name="ativa" value={conta.ativa_sync ? "0" : "1"} />
+                            <BotaoEnviar className={botao} aguardando="…">{conta.ativa_sync ? "Ativa · pausar" : "Pausada · ativar"}</BotaoEnviar>
+                          </form>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+          return (
+            <>
+              <h3 className="text-sm font-medium">Suas contas (vinculadas a clientes) · {vinculadas.length}</h3>
+              {vinculadas.length
+                ? tabela(vinculadas, true)
+                : <Aviso>Nenhuma conta vinculada ainda. Procure abaixo as contas dos seus clientes e escolha o cliente.</Aviso>}
+              <p className="text-xs text-texto-3">
+                Só as contas vinculadas a um cliente são sincronizadas. As outras ficam só nesta lista e não gastam cota do Google.
+              </p>
+
+              <h3 className="pt-2 text-sm font-medium">Outras contas encontradas · {livres.length}</h3>
+              <form method="get" action="/configuracoes#google" className="flex flex-wrap items-center gap-2 text-sm">
+                <input name="gbusca" defaultValue={gbusca ?? ""} placeholder="Buscar por nome ou ID" className={`${campo} w-64`} />
+                <select name="gacesso" defaultValue={gacesso ?? ""} className={campo}>
+                  <option value="">Todos os acessos</option>
+                  {acessos.map((a) => <option key={a} value={a}>{a}</option>)}
+                </select>
+                <label className="flex items-center gap-1 text-texto-2">
+                  <input type="checkbox" name="gcanceladas" value="1" defaultChecked={gcanceladas} /> mostrar canceladas
+                </label>
+                <button className={botao}>Filtrar</button>
+              </form>
+              {mostradas.length ? tabela(mostradas, false) : <p className="text-sm text-texto-3">Nenhuma conta com esse filtro.</p>}
+              {filtradas.length > mostradas.length && (
+                <p className="text-xs text-texto-3">
+                  Mostrando 50 de {filtradas.length}. Use a busca para achar a conta do seu cliente.
+                </p>
+              )}
+            </>
+          );
+        })()}
       </section>
     </div>
   );
