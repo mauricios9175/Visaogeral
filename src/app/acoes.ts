@@ -7,7 +7,7 @@ import { COOKIE_SESSAO, criarSessao, senhaCorreta } from "@/lib/auth";
 import { db, EMPRESA_PADRAO } from "@/lib/db";
 import { importarContas } from "@/lib/sync";
 import { importarContasGoogle, sincronizarGoogle } from "@/lib/sync-google";
-import { listarFunisCrm, NOME_CRM, sincronizarCrmCliente, type ConexaoCrm, type TipoCrm } from "@/lib/crm/sync";
+import { avisosUtm, listarFunisCrm, NOME_CRM, sincronizarCrmCliente, type ConexaoCrm, type TipoCrm } from "@/lib/crm/sync";
 
 export async function entrar(_: unknown, form: FormData) {
   if (!senhaCorreta(String(form.get("senha") ?? ""))) return { erro: "Senha incorreta." };
@@ -211,7 +211,9 @@ export async function sincronizarCrmAgora(form: FormData) {
   try {
     if (!conexao) throw new Error("Cliente sem CRM conectado.");
     const n = await sincronizarCrmCliente(conexao as ConexaoCrm, 90);
-    msg = `CRM sincronizado: ${n} negócio(s) dos últimos 90 dias.`;
+    const aviso = avisosUtm.get(clienteId);
+    msg = `CRM sincronizado: ${n} negócio(s) dos últimos 90 dias.` +
+      (aviso ? ` Atenção: ${aviso}. Sem isso, as UTMs dos contatos não aparecem.` : "");
   } catch (e) {
     msg = `Erro ao sincronizar o CRM: ${e instanceof Error ? e.message : e}`;
   }

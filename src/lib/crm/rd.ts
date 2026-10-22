@@ -107,4 +107,15 @@ export function campanhaDoNegocio(d: NegocioApi): string | null {
   return campo?.value ? String(campo.value) : null;
 }
 
+/** UTMs guardadas em campos personalizados do negócio (ex.: "utm_source", "UTM Campaign"). */
+export function utmsDoNegocioRd(d: NegocioApi) {
+  const achar = (nome: string) => {
+    const re = new RegExp(`utm[ _-]?${nome}`, "i");
+    const c = d.deal_custom_fields?.find((x) => re.test(x.custom_field?.label ?? ""));
+    return c?.value != null && c.value !== "" ? String(c.value) : null;
+  };
+  const u = { source: achar("source"), medium: achar("medium"), campaign: achar("campaign"), content: achar("content"), term: achar("term") };
+  return Object.values(u).some(Boolean) ? u : null;
+}
+
 export { idDe as idNegocio };

@@ -58,9 +58,64 @@ export type OportunidadeApi = {
   createdAt: string;
   updatedAt?: string;
   lastStatusChangeAt?: string | null;
-  contact?: { name?: string; source?: string | null } | null;
+  contactId?: string;
+  contact?: { id?: string; name?: string; source?: string | null } | null;
   customFields?: CampoValor[];
+  // atribuição (UTMs) do lead; nem toda versão da API manda na oportunidade
+  attributions?: Atribuicao[] | null;
 };
+
+/** Atribuição do HighLevel/Ávora (oportunidade ou contato). Os nomes variam um pouco entre versões. */
+export type Atribuicao = Record<string, unknown> & { isFirst?: boolean; isLast?: boolean };
+
+export type Utms = { source: string | null; medium: string | null; campaign: string | null; content: string | null; term: string | null };
+
+const texto = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+
+/** UTMs de uma atribuição. Sem UTM mas com fbclid/gclid, marca a origem pelo clique. */
+export function utmsDe(a: Atribuicao | null | undefined): Utms | null {
+  if (!a) return null;
+  const u: Utms = {
+    source: texto(a.utmSource) ?? texto(a.utm_source),
+    medium: texto(a.utmMedium) ?? texto(a.utm_medium),
+    campaign: texto(a.utmCampaign) ?? texto(a.utm_campaign) ?? texto(a.campaign),
+    content: texto(a.utmContent) ?? texto(a.utm_content),
+    term: texto(a.utmTerm) ?? texto(a.utm_term) ?? texto(a.utmKeyword),
+  };
+  if (!u.source) {
+    if (texto(a.fbclid) || texto(a.fbc)) u.source = "facebook (sem UTM, pelo fbclid)";
+    else if (texto(a.gclid) || texto(a.wbraid) || texto(a.gbraid)) u.source = "google (sem UTM, pelo gclid)";
+  }
+  return Object.values(u).some(Boolean) ? u : null;
+}
+
+/** Primeira e última atribuição da lista da oportunidade. */
+export function atribuicoesDaOportunidade(o: OportunidadeApi) {
+  const lista = (o.attributions ?? []).filter(Boolean);
+  if (!lista.length) return null;
+  return {
+    primeiro: lista.find((a) => a.isFirst) ?? lista[0],
+    ultimo: lista.find((a) => a.isLast) ?? lista[lista.length - 1],
+  };
+}
+
+export class SemPermissaoContatos extends Error {}
+
+/** Atribuição guardada no contato (primeiro e último acesso). Precisa do escopo de leitura de contatos. */
+export async function atribuicaoDoContato(token: string, contatoId: string) {
+  try {
+    const r = await get<{ contact?: { attributionSource?: Atribuicao | null; lastAttributionSource?: Atribuicao | null } }>(
+      `contacts/${contatoId}`, token, {},
+    );
+    const c = r.contact;
+    if (!c?.attributionSource && !c?.lastAttributionSource) return null;
+    return { primeiro: c.attributionSource ?? null, ultimo: c.lastAttributionSource ?? null };
+  } catch (e) {
+    if (/Token inválido|Sem acesso/.test(String(e))) throw new SemPermissaoContatos(String(e));
+    if (/ 404:/.test(String(e))) return null;
+    throw e;
+  }
+}
 
 type PaginaOportunidades = {
   opportunities?: OportunidadeApi[];

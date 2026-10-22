@@ -1,4 +1,4 @@
--- Todas as migrações (0001 a 0010) num script só, seguro para rodar mais de uma vez:
+-- Todas as migrações (0001 a 0011) num script só, seguro para rodar mais de uma vez:
 -- cria apenas o que estiver faltando e não apaga dados.
 
 create extension if not exists pgcrypto;
@@ -280,3 +280,11 @@ create table if not exists criativos_meta (
 create index if not exists criativos_meta_conta_idx on criativos_meta (conta_id);
 
 alter table criativos_meta enable row level security;
+-- 0011: UTMs dos negócios do CRM (primeiro toque do lead), para saber de onde vêm leads e vendas.
+alter table crm_negocios add column if not exists utm_source   text;
+alter table crm_negocios add column if not exists utm_medium   text;
+alter table crm_negocios add column if not exists utm_campaign text;
+alter table crm_negocios add column if not exists utm_content  text;
+alter table crm_negocios add column if not exists utm_term     text;
+alter table crm_negocios add column if not exists atribuicao   jsonb;   -- dados brutos: {"primeiro": {...}, "ultimo": {...}}
+alter table crm_negocios add column if not exists utm_buscada  boolean not null default false; -- já consultou o contato no CRM

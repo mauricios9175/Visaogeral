@@ -359,7 +359,22 @@ type NegocioCrm = {
   criado_em: string; fechado_em: string | null; etapa_ordem: number | null;
   ganho: boolean | null; valor: number; campanha: string | null; origem: string | null;
   responsavel: string | null; campos: Record<string, string> | null;
+  utm_source?: string | null; utm_medium?: string | null; utm_campaign?: string | null;
+  utm_content?: string | null; utm_term?: string | null;
 };
+
+/** Dimensões de UTM para o relatório de origem dos leads e vendas. */
+export const DIMENSOES_UTM = [
+  { chave: "utm_source", rotulo: "Origem", dica: "utm_source (ex.: facebook, google, instagram)" },
+  { chave: "utm_medium", rotulo: "Mídia", dica: "utm_medium (ex.: cpc, paid_social)" },
+  { chave: "utm_campaign", rotulo: "Campanha", dica: "utm_campaign" },
+  { chave: "utm_content", rotulo: "Conteúdo / anúncio", dica: "utm_content (geralmente o nome do anúncio)" },
+  { chave: "utm_term", rotulo: "Termo / público", dica: "utm_term (palavra-chave ou público)" },
+] as const;
+export type DimensaoUtm = (typeof DIMENSOES_UTM)[number]["chave"];
+
+const COLUNAS_NEGOCIO = "id, cliente_id, nome, pipeline_id, pipeline_nome, etapa_nome, criado_em, fechado_em, etapa_ordem, ganho, valor, campanha, origem, responsavel, campos";
+const COLUNAS_UTM = "utm_source, utm_medium, utm_campaign, utm_content, utm_term";
 type ConexaoResumo = {
   cliente_id: string; pipeline_id: string | null; etapa_qualificado_ordem: number | null;
   fontes_anuncio: string[] | null; ultima_sync: string | null; ultimo_erro: string | null;
@@ -419,13 +434,15 @@ async function negociosDe(clienteIds: string[], desde: string) {
   if (!clienteIds.length) return [];
   // margem de 1 dia por causa do fuso
   const limite = `${somarDiasISO(desde, -1)}T00:00:00Z`;
-  return buscarTudo<NegocioCrm>((de, ate) =>
+  const buscar = (colunas: string) => buscarTudo<NegocioCrm>((de, ate) =>
     db().from("crm_negocios")
-      .select("id, cliente_id, nome, pipeline_id, pipeline_nome, etapa_nome, criado_em, fechado_em, etapa_ordem, ganho, valor, campanha, origem, responsavel, campos")
+      .select(colunas)
       .in("cliente_id", clienteIds)
       .or(`criado_em.gte.${limite},fechado_em.gte.${limite}`)
       .range(de, ate),
   );
+  // sem o SQL 0011 as colunas de UTM não existem: segue sem elas
+  return buscar(`${COLUNAS_NEGOCIO}, ${COLUNAS_UTM}`).catch(() => buscar(COLUNAS_NEGOCIO));
 }
 
 const COLUNAS_CONEXAO = "cliente_id, pipeline_id, etapa_qualificado_ordem, fontes_anuncio, ultima_sync, ultimo_erro";
@@ -471,8 +488,25 @@ export async function detalheCrm(clienteId: string, atual: Periodo, anterior: Pe
       destaques: Object.entries(n.campos ?? {}).filter(([k]) => CAMPO_VALOR.test(k)),
     }));
 
+  // origem por UTM: uma tabela para cada dimensão (Origem, Mídia, Campanha, Conteúdo, Termo)
+  const porUtm = Object.fromEntries(DIMENSOES_UTM.map(({ chave }) => {
+    const g = new Map<string, NegocioCrm[]>();
+    for (const n of negocios) {
+      const v = n[chave]?.trim() || "(sem UTM)";
+      g.set(v, [...(g.get(v) ?? []), n]);
+    }
+    const linhas = [...g.entries()]
+      .map(([nome, ns]) => ({ nome, ...numerosCrm(ns, cx, atual) }))
+      .filter((x) => x.leads || x.vendas)
+      .sort((a, b) => Number(a.nome === "(sem UTM)") - Number(b.nome === "(sem UTM)") || b.faturamento - a.faturamento || b.vendas - a.vendas || b.leads - a.leads);
+    return [chave, linhas];
+  })) as Record<DimensaoUtm, ({ nome: string } & NumerosCrm)[]>;
+  const temUtm = negocios.some((n) => DIMENSOES_UTM.some(({ chave }) => n[chave]));
+
   return {
     conexao: cx,
+    porUtm,
+    temUtm,
     fontesManuais: cx.fontes_anuncio != null,
     atual: numerosCrm(negocios, cx, atual),
     anterior: numerosCrm(negocios, cx, anterior),

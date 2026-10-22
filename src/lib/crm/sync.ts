@@ -1,8 +1,11 @@
 import "server-only";
 import { db } from "../db";
 import { diasAtras, hojeISO } from "../datas";
-import { camposDoNegocio, campanhaDoNegocio, idNegocio, listarFunis, listarNegocios, type FunilRd } from "./rd";
-import { camposDaOportunidade, listarFunisHL, listarOportunidades, nomesCamposHL } from "./highlevel";
+import { camposDoNegocio, campanhaDoNegocio, idNegocio, listarFunis, listarNegocios, utmsDoNegocioRd, type FunilRd } from "./rd";
+import {
+  atribuicaoDoContato, atribuicoesDaOportunidade, camposDaOportunidade, listarFunisHL, listarOportunidades, nomesCamposHL,
+  SemPermissaoContatos, utmsDe, type Atribuicao, type Utms,
+} from "./highlevel";
 
 export type TipoCrm = "rd_crm" | "highlevel" | "kommo";
 
@@ -43,6 +46,9 @@ type NegocioNormalizado = {
   campanha: string | null;
   responsavel: string | null;
   campos: Record<string, string> | null;
+  utms: Utms | null;
+  atribuicao: { primeiro: Atribuicao | null; ultimo: Atribuicao | null } | null;
+  contatoId: string | null;
 };
 
 /** Funis e etapas do CRM da conexão (também serve para testar a conexão). */
@@ -72,6 +78,9 @@ async function buscarNegocios(c: ConexaoCrm, dias: number): Promise<NegocioNorma
       campanha: campanhaDoNegocio(d),
       responsavel: d.user?.name ?? null,
       campos: camposDoNegocio(d),
+      utms: utmsDoNegocioRd(d),
+      atribuicao: null,
+      contatoId: null,
     }));
   }
   if (c.tipo === "highlevel" && c.location_id) {
@@ -93,9 +102,79 @@ async function buscarNegocios(c: ConexaoCrm, dias: number): Promise<NegocioNorma
       campanha: null,
       responsavel: null,
       campos: camposDaOportunidade(o, nomes),
+      ...(() => {
+        const atrib = atribuicoesDaOportunidade(o);
+        return { atribuicao: atrib, utms: utmsDe(atrib?.primeiro) ?? utmsDe(atrib?.ultimo) };
+      })(),
+      contatoId: o.contactId ?? o.contact?.id ?? null,
     }));
   }
   throw new Error(`${NOME_CRM[c.tipo]} ainda não está disponível.`);
+}
+
+/** Avisos da última sincronização por cliente (ex.: token sem permissão de contatos). */
+export const avisosUtm = new Map<string, string>();
+
+let temColunasUtm: boolean | null = null;
+async function colunasUtm() {
+  if (temColunasUtm === null) {
+    const { error } = await db().from("crm_negocios").select("utm_source").limit(1);
+    temColunasUtm = !error;
+  }
+  return temColunasUtm;
+}
+
+// Limite de contatos consultados por sincronização (o HighLevel aceita ~100 chamadas a cada 10 s).
+const MAX_CONTATOS_POR_SYNC = 300;
+
+/**
+ * HighLevel/Ávora: quando a oportunidade não traz a atribuição, lê do contato (primeiro e último acesso).
+ * Contatos já consultados antes não são consultados de novo: reaproveita o que está no banco.
+ * Devolve um aviso (ex.: token sem permissão de contatos) ou null.
+ */
+async function completarUtmsPeloContato(c: ConexaoCrm, negocios: NegocioNormalizado[]): Promise<string | null> {
+  const ids = negocios.map((n) => `${c.tipo}:${n.idExterno}`);
+  const salvos = new Map<string, { utm_source: string | null; utm_medium: string | null; utm_campaign: string | null; utm_content: string | null; utm_term: string | null; atribuicao: NegocioNormalizado["atribuicao"] }>();
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data, error } = await db().from("crm_negocios")
+      .select("id, utm_source, utm_medium, utm_campaign, utm_content, utm_term, atribuicao")
+      .in("id", ids.slice(i, i + 300)).eq("utm_buscada", true);
+    if (error) return null; // SQL 0011 não rodou: segue sem UTMs do contato
+    for (const r of data ?? []) salvos.set(r.id, r);
+  }
+  const faltando: NegocioNormalizado[] = [];
+  for (const n of negocios) {
+    if (n.atribuicao || n.utms) continue;
+    const s = salvos.get(`${c.tipo}:${n.idExterno}`);
+    if (s) {
+      n.atribuicao = s.atribuicao;
+      n.utms = { source: s.utm_source, medium: s.utm_medium, campaign: s.utm_campaign, content: s.utm_content, term: s.utm_term };
+      if (!Object.values(n.utms).some(Boolean)) n.utms = null;
+      n.atribuicao ??= { primeiro: null, ultimo: null }; // marca como já buscado
+    } else if (n.contatoId) {
+      faltando.push(n);
+    }
+  }
+  // mais recentes primeiro; o resto fica para as próximas sincronizações
+  faltando.sort((a, b) => b.criado_em.localeCompare(a.criado_em));
+  const fila = faltando.slice(0, MAX_CONTATOS_POR_SYNC);
+  const cache = new Map<string, Awaited<ReturnType<typeof atribuicaoDoContato>>>();
+  let aviso: string | null = null;
+  async function trabalhador() {
+    for (let n = fila.shift(); n && !aviso; n = fila.shift()) {
+      try {
+        if (!cache.has(n.contatoId!)) cache.set(n.contatoId!, await atribuicaoDoContato(c.token, n.contatoId!));
+        const atrib = cache.get(n.contatoId!) ?? null;
+        n.atribuicao = atrib ?? { primeiro: null, ultimo: null };
+        n.utms = utmsDe(atrib?.primeiro) ?? utmsDe(atrib?.ultimo);
+      } catch (e) {
+        if (e instanceof SemPermissaoContatos) aviso = "o token do Ávora não tem permissão para ler contatos (escopo contacts.readonly)";
+        // outros erros: tenta de novo na próxima sincronização
+      }
+    }
+  }
+  await Promise.all([trabalhador(), trabalhador(), trabalhador(), trabalhador()]);
+  return aviso;
 }
 
 /** Traz os negócios de um cliente criados ou fechados nos últimos `dias` dias. */
@@ -109,7 +188,10 @@ export async function sincronizarCrmCliente(c: ConexaoCrm, dias: number) {
     );
     // Sempre todos os funis: leads entram por um funil (ex.: SDR) e podem passar para outro (consultores).
     const negocios = await buscarNegocios(c, dias);
+    const avisoUtm = c.tipo === "highlevel" && (await colunasUtm()) ? await completarUtmsPeloContato(c, negocios) : null;
     const agora = new Date().toISOString();
+    // sem o SQL 0011 as colunas de UTM não existem: salva o resto normalmente
+    const comUtm = await colunasUtm();
     const linhas = negocios.map((n) => {
       const e = n.etapa_id ? etapas.get(n.etapa_id) : undefined;
       return {
@@ -129,6 +211,16 @@ export async function sincronizarCrmCliente(c: ConexaoCrm, dias: number) {
         campanha: n.campanha,
         responsavel: n.responsavel,
         campos: n.campos,
+        ...(comUtm && {
+          utm_source: n.utms?.source ?? null,
+          utm_medium: n.utms?.medium ?? null,
+          utm_campaign: n.utms?.campaign ?? null,
+          utm_content: n.utms?.content ?? null,
+          utm_term: n.utms?.term ?? null,
+          atribuicao: n.atribuicao,
+          // RD: não há o que buscar no contato; HighLevel: marcado quando a atribuição já foi lida
+          utm_buscada: c.tipo !== "highlevel" || !!n.atribuicao || n.utms != null,
+        }),
         atualizado_em: agora,
       };
     });
@@ -137,6 +229,8 @@ export async function sincronizarCrmCliente(c: ConexaoCrm, dias: number) {
       if (error) throw new Error(error.message);
     }
     await banco.from("crm_conexoes").update({ ultima_sync: agora, ultimo_erro: null }).eq("cliente_id", c.cliente_id);
+    if (avisoUtm) avisosUtm.set(c.cliente_id, avisoUtm);
+    else avisosUtm.delete(c.cliente_id);
     return linhas.length;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

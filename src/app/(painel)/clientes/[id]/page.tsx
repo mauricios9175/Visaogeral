@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { resolverPeriodo } from "@/lib/datas";
-import { detalheCliente, detalheCrm, somarGeral, type LinhaTabela } from "@/lib/consultas";
+import { detalheCliente, detalheCrm, DIMENSOES_UTM, somarGeral, type DimensaoUtm, type LinhaTabela } from "@/lib/consultas";
 import { detalheGoogle } from "@/lib/consultas-google";
 import { formatarIdGoogle } from "@/lib/google";
 import { decimal, dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
@@ -25,7 +25,8 @@ const FILTROS = [
 
 export default async function PaginaCliente({ params, searchParams }: PageProps<"/clientes/[id]">) {
   const { id } = await params;
-  const busca = (await searchParams) as { p?: string; de?: string; ate?: string; nivel?: string; status?: string };
+  const busca = (await searchParams) as { p?: string; de?: string; ate?: string; nivel?: string; status?: string; utm?: string };
+  const dimensao = (DIMENSOES_UTM.find((x) => x.chave === busca.utm) ?? DIMENSOES_UTM[0]).chave;
   const { nivel } = busca;
   const filtro = FILTROS.find((f) => f.chave === busca.status) ?? FILTROS[0];
   const { atual, anterior } = resolverPeriodo(busca);
@@ -133,7 +134,8 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
 
       {google && ("erro" in google ? <Aviso>Erro ao carregar o Google Ads: {google.erro}</Aviso> : <SecaoGoogle g={google} />)}
 
-      <SecaoCrm crm={crm} gasto={gastoTotal} gastoAnterior={gastoTotalAnterior} base={base} comGoogle={!!g} />
+      <SecaoCrm crm={crm} gasto={gastoTotal} gastoAnterior={gastoTotalAnterior} base={base} comGoogle={!!g}
+        dimensao={dimensao} qs={atual.qs} periodo={atual} />
     </div>
   );
 }
@@ -331,12 +333,15 @@ function Tabela({ linhas, meta }: { linhas: LinhaTabela[]; meta: number | null }
   );
 }
 
-function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle }: {
+function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, periodo }: {
   crm: Awaited<ReturnType<typeof detalheCrm>> | { erro: string };
   gasto: number;
   gastoAnterior: number;
   base: string;
   comGoogle: boolean;
+  dimensao: DimensaoUtm;
+  qs: string;
+  periodo: { desde: string; ate: string };
 }) {
   if (!crm) return null;
   if ("erro" in crm) return <Aviso>Erro ao carregar o CRM: {crm.erro}</Aviso>;
@@ -423,16 +428,18 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle }: {
         </div>
       )}
 
+      <TabelaUtm crm={crm} dimensao={dimensao} base={base} qs={qs} periodo={periodo} />
+
       {crm.negocios.length > 0 && (
         <details className="rounded-xl border border-borda bg-superficie">
           <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
             Negócios do período ({crm.negocios.length})
           </summary>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
+            <table className="w-full min-w-[1080px] text-sm">
               <thead className="text-left text-xs text-texto-3">
                 <tr>
-                  {["Negócio", "Criado", "Fonte", "Funil · etapa", "Status", "Valor", "Orçamento / campos"].map((h) => (
+                  {["Negócio", "Criado", "Fonte", "UTM", "Funil · etapa", "Status", "Valor", "Orçamento / campos"].map((h) => (
                     <th key={h} className="px-3 py-2 font-normal first:px-4">{h}</th>
                   ))}
                 </tr>
@@ -448,6 +455,15 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle }: {
                     <td className="px-3 py-2">
                       {n.origem ?? <span className="text-texto-3">sem fonte</span>}
                       {n.anuncio && <span className="ml-1 text-[11px] text-destaque">anúncio</span>}
+                    </td>
+                    <td className="max-w-56 px-3 py-2 text-xs text-texto-2">
+                      {n.utm_source || n.utm_campaign || n.utm_content ? (
+                        <>
+                          <div>{[n.utm_source, n.utm_medium].filter(Boolean).join(" / ")}</div>
+                          {n.utm_campaign && <div className="truncate" title={n.utm_campaign}>{n.utm_campaign}</div>}
+                          {n.utm_content && <div className="truncate text-texto-3" title={n.utm_content}>{n.utm_content}</div>}
+                        </>
+                      ) : <span className="text-texto-3">—</span>}
                     </td>
                     <td className="px-3 py-2 text-texto-2">{[n.pipeline_nome, n.etapa_nome].filter(Boolean).join(" · ")}</td>
                     <td className="px-3 py-2">{statusNegocio(n.ganho)}</td>
@@ -467,5 +483,70 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle }: {
         Custos e ROAS usam só os negócios de fontes de anúncio{comGoogle ? ", divididos pelo investimento somado do Meta e do Google" : ""}.
       </p>
     </section>
+  );
+}
+
+/** Leads, qualificados e vendas por UTM, com abas para cada parâmetro. */
+function TabelaUtm({ crm, dimensao, base, qs, periodo }: {
+  crm: NonNullable<Awaited<ReturnType<typeof detalheCrm>>>;
+  dimensao: DimensaoUtm;
+  base: string;
+  qs: string;
+  periodo: { desde: string; ate: string };
+}) {
+  const linhas = crm.porUtm[dimensao];
+  const csv = `/api/crm/exportar?cliente=${crm.conexao.cliente_id}&de=${periodo.desde}&ate=${periodo.ate}`;
+  return (
+    <div id="utm" className="rounded-xl border border-borda bg-superficie">
+      <div className="flex flex-wrap items-center gap-1 border-b border-borda p-2 text-sm">
+        <span className="px-2 font-medium">Origem por UTM</span>
+        {DIMENSOES_UTM.map((d) => (
+          <Link
+            key={d.chave} href={`${base}?${qs}&utm=${d.chave}#utm`} title={d.dica}
+            className={`rounded-md px-3 py-1 ${d.chave === dimensao ? "bg-fundo font-medium" : "text-texto-2 hover:text-texto"}`}
+          >
+            {d.rotulo}
+          </Link>
+        ))}
+        <a href={csv} className="ml-auto rounded-md border border-borda px-3 py-1 text-texto-2 hover:border-destaque hover:text-texto">
+          Baixar planilha (CSV)
+        </a>
+      </div>
+      {!crm.temUtm ? (
+        <p className="p-4 text-sm text-texto-3">
+          Nenhum negócio com UTM ainda. No Ávora, as UTMs vêm da atribuição do contato (clique em “Sincronizar agora” na
+          tela do CRM). No RD, crie campos personalizados no negócio com “utm_source”, “utm_campaign” etc. no nome.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs text-texto-3">
+              <tr>
+                <th className="px-4 py-2 font-normal">{DIMENSOES_UTM.find((d) => d.chave === dimensao)!.rotulo}</th>
+                {["Leads", "Qualificados", "Vendas", "Lead → venda", "Faturamento", "Em negociação"].map((h) => (
+                  <th key={h} className="px-3 py-2 text-right font-normal">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="num">
+              {linhas.map((l) => (
+                <tr key={l.nome} className="border-t border-borda">
+                  <td className={`max-w-96 truncate px-4 py-2 ${l.nome === "(sem UTM)" ? "text-texto-3" : ""}`} title={l.nome}>{l.nome}</td>
+                  <td className="px-3 py-2 text-right">{inteiro(l.leads)}</td>
+                  <td className="px-3 py-2 text-right">{l.qualificados == null ? "—" : inteiro(l.qualificados)}</td>
+                  <td className="px-3 py-2 text-right">{inteiro(l.vendas)}</td>
+                  <td className="px-3 py-2 text-right">{l.leads ? pct((l.vendas / l.leads) * 100) : "—"}</td>
+                  <td className="px-3 py-2 text-right">{dinheiro(l.faturamento)}</td>
+                  <td className="px-3 py-2 text-right">{dinheiro(l.emNegociacao)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="px-4 py-2 text-xs text-texto-3">
+            UTMs do primeiro acesso do lead. Leads: criados no período. Vendas: ganhas no período (o lead pode ter entrado antes).
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
