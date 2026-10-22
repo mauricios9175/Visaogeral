@@ -409,7 +409,8 @@ export function extrairResultados(linha: LinhaInsight, conjuntos?: Map<string, O
 
 // ---------- Login com Facebook (contas que ficam no BM do cliente) ----------
 
-export const ESCOPOS_LOGIN = "ads_read,leads_retrieval,business_management";
+// ads_management: necessário para as ações rápidas (pausar, ativar, mudar orçamento)
+export const ESCOPOS_LOGIN = "ads_read,ads_management,leads_retrieval,business_management";
 
 export function urlLogin(redirectUri: string, state: string) {
   const u = new URL(`https://www.facebook.com/${VERSAO}/dialog/oauth`);
@@ -462,4 +463,58 @@ export async function linkDoCriativo(adId: string, token: string): Promise<strin
   if (c?.instagram_permalink_url) return c.instagram_permalink_url;
   if (c?.effective_object_story_id) return `https://www.facebook.com/${c.effective_object_story_id}`;
   return null;
+}
+
+// ---------- Ações rápidas (escrita) ----------
+
+/** Mensagem clara quando falta a permissão de gerenciar anúncios. */
+function erroDeEscrita(e: unknown): Error {
+  if (e instanceof MetaErro && [10, 200, 3, 294].includes(e.codigo ?? -1)) {
+    return new Error(
+      "Sem permissão para alterar anúncios. Adicione “ads_management” na configuração do Login do app no Meta e clique em “Conectar / reconectar perfil” em Configurações.",
+    );
+  }
+  return e instanceof Error ? e : new Error(String(e));
+}
+
+async function post(id: string, token: string, campos: Record<string, string>) {
+  const res = await fetch(`${BASE}/${id}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ ...campos, access_token: token }),
+    cache: "no-store",
+  });
+  const corpo = await res.json();
+  if (corpo.error) throw erroDeEscrita(new MetaErro(corpo.error.error_user_msg || corpo.error.message, corpo.error.code));
+  return corpo;
+}
+
+/** Pausa ou ativa campanha, conjunto ou anúncio. */
+export async function mudarStatus(id: string, token: string, ativo: boolean) {
+  await post(id, token, { status: ativo ? "ACTIVE" : "PAUSED" });
+}
+
+export type Orcamento = { id: string; nome: string; nivel: "campanha" | "conjunto"; diario: number | null; total: number | null };
+
+/**
+ * Onde está o orçamento de um conjunto: no próprio conjunto ou na campanha (orçamento de campanha / CBO).
+ * Valores em reais (o Meta trabalha em centavos).
+ */
+export async function orcamentoDe(id: string, token: string, nivel: "campanha" | "conjunto"): Promise<Orcamento | null> {
+  type Obj = { id: string; name?: string; daily_budget?: string; lifetime_budget?: string; campaign?: Obj };
+  const campos = nivel === "conjunto"
+    ? "id,name,daily_budget,lifetime_budget,campaign{id,name,daily_budget,lifetime_budget}"
+    : "id,name,daily_budget,lifetime_budget";
+  const o = await get<Obj>(montarUrl(id, token, { fields: campos }));
+  const ler = (x: Obj, n: Orcamento["nivel"]): Orcamento | null => {
+    const diario = Number(x.daily_budget ?? 0) / 100, total = Number(x.lifetime_budget ?? 0) / 100;
+    return diario || total ? { id: x.id, nome: x.name ?? x.id, nivel: n, diario: diario || null, total: total || null } : null;
+  };
+  return ler(o, nivel) ?? (o.campaign ? ler(o.campaign, "campanha") : null);
+}
+
+/** Muda o orçamento (diário ou total, o que o item usar). Valor em reais. */
+export async function mudarOrcamento(o: Orcamento, token: string, novo: number) {
+  const centavos = String(Math.round(novo * 100));
+  await post(o.id, token, o.diario != null ? { daily_budget: centavos } : { lifetime_budget: centavos });
 }

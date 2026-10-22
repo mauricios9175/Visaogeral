@@ -32,3 +32,8 @@ export function quandoFoi(iso: string | null) {
 export function diasAte(iso: string) {
   return Math.round((Date.parse(iso) - Date.now()) / 86_400_000);
 }
+
+/** Instante de N horas atrás, em ISO (ex.: ações das últimas 24 h). */
+export function horasAtras(horas: number) {
+  return new Date(Date.now() - horas * 3_600_000).toISOString();
+}

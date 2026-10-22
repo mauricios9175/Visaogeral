@@ -70,14 +70,29 @@ async function insightsEmPartes(contaId: string, token: string, desde: string, a
 }
 
 /** Guarda o status atual (ativo, pausado, reprovado...) de campanhas, conjuntos e anúncios. */
-async function salvarStatus(conta: ContaAnuncio, linhas: { id: string; nivel: string; status?: string }[]) {
+async function salvarStatus(
+  conta: ContaAnuncio,
+  linhas: { id: string; nivel: string; status?: string; daily_budget?: string; lifetime_budget?: string }[],
+) {
   try {
     const agora = new Date().toISOString();
     const registros = linhas
       .filter((l) => l.status)
-      .map((l) => ({ id: l.id, nivel: l.nivel, status: l.status!, conta_id: conta.id, atualizado_em: agora }));
+      .map((l) => ({
+        id: l.id, nivel: l.nivel, status: l.status!, conta_id: conta.id, atualizado_em: agora,
+        // orçamento em reais (o Meta manda em centavos); null = o orçamento fica no outro nível
+        orcamento_diario: l.daily_budget ? Number(l.daily_budget) / 100 : null,
+        orcamento_total: l.lifetime_budget ? Number(l.lifetime_budget) / 100 : null,
+      }));
     for (let i = 0; i < registros.length; i += 500) {
-      const { error } = await db().from("status_meta").upsert(registros.slice(i, i + 500), { onConflict: "id" });
+      let { error } = await db().from("status_meta").upsert(registros.slice(i, i + 500), { onConflict: "id" });
+      // sem o SQL 0012 as colunas de orçamento não existem: salva só o status
+      if (error && /orcamento/.test(error.message)) {
+        ({ error } = await db().from("status_meta").upsert(
+          registros.slice(i, i + 500).map(({ orcamento_diario, orcamento_total, ...r }) => (void orcamento_diario, void orcamento_total, r)),
+          { onConflict: "id" },
+        ));
+      }
       if (error) throw new Error(error.message);
     }
   } catch (e) {
@@ -122,10 +137,10 @@ async function salvarCriativos(conta: ContaAnuncio, anuncios: Map<string, Criati
 async function sincronizarConta(conta: ContaAnuncio, token: string, desde: string, ate: string) {
   const linhas = await insightsEmPartes(conta.id, token, desde, ate);
   // Objetivo e status só dos itens que veicularam no período (pelo id, 50 por chamada).
-  type Obj = { id: string; effective_status?: string };
+  type Obj = { id: string; effective_status?: string; daily_budget?: string; lifetime_budget?: string };
   const [conjuntos, campanhas, anuncios] = await Promise.all([
-    buscarPorIds<ObjetivoConjunto>(linhas.map((l) => l.adset_id), token, "id,effective_status,optimization_goal,promoted_object"),
-    buscarPorIds<Obj>(linhas.map((l) => l.campaign_id), token, "id,effective_status"),
+    buscarPorIds<ObjetivoConjunto & Obj>(linhas.map((l) => l.adset_id), token, "id,effective_status,optimization_goal,promoted_object,daily_budget,lifetime_budget"),
+    buscarPorIds<Obj>(linhas.map((l) => l.campaign_id), token, "id,effective_status,daily_budget,lifetime_budget"),
     // anúncios: status + criativo (miniatura, tipo e link) para o painel de criativos
     criativosDosAnuncios(linhas.map((l) => l.ad_id), token),
   ]).catch((e) => {
@@ -133,8 +148,8 @@ async function sincronizarConta(conta: ContaAnuncio, token: string, desde: strin
     return [undefined, undefined, undefined] as const;
   });
   await salvarStatus(conta, [
-    ...[...(campanhas?.values() ?? [])].map((c) => ({ id: c.id, nivel: "campanha", status: c.effective_status })),
-    ...[...(conjuntos?.values() ?? [])].map((c) => ({ id: c.id, nivel: "conjunto", status: c.effective_status })),
+    ...[...(campanhas?.values() ?? [])].map((c) => ({ ...c, nivel: "campanha", status: c.effective_status })),
+    ...[...(conjuntos?.values() ?? [])].map((c) => ({ ...c, nivel: "conjunto", status: c.effective_status })),
     ...[...(anuncios?.values() ?? [])].map((a) => ({ id: a.id, nivel: "anuncio", status: a.effective_status })),
   ]);
   if (anuncios) await salvarCriativos(conta, anuncios);

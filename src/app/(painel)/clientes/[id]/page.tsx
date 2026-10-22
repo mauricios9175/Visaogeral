@@ -7,6 +7,8 @@ import { formatarIdGoogle } from "@/lib/google";
 import { decimal, dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
 import { Aviso, Kpi, SeletorPeriodo, SeloStatus, TiposResultado, Variacao } from "@/components/ui";
 import { BarrasDiarias } from "@/components/graficos";
+import { AcoesRapidas } from "@/components/acoes-rapidas";
+import { db } from "@/lib/db";
 
 
 const NIVEIS = [
@@ -25,16 +27,17 @@ const FILTROS = [
 
 export default async function PaginaCliente({ params, searchParams }: PageProps<"/clientes/[id]">) {
   const { id } = await params;
-  const busca = (await searchParams) as { p?: string; de?: string; ate?: string; nivel?: string; status?: string; utm?: string };
+  const busca = (await searchParams) as { p?: string; de?: string; ate?: string; nivel?: string; status?: string; utm?: string; msg?: string };
   const dimensao = (DIMENSOES_UTM.find((x) => x.chave === busca.utm) ?? DIMENSOES_UTM[0]).chave;
   const { nivel } = busca;
   const filtro = FILTROS.find((f) => f.chave === busca.status) ?? FILTROS[0];
   const { atual, anterior } = resolverPeriodo(busca);
   // O CRM não pode derrubar a tela do cliente: se falhar, mostra o erro só na seção dele.
-  const [d, crm, google] = await Promise.all([
+  const [d, crm, google, { data: historico }] = await Promise.all([
     detalheCliente(id, atual, anterior).catch((e: unknown) => ({ erroGeral: e instanceof Error ? e.message : String(e) })),
     detalheCrm(id, atual, anterior).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })),
     detalheGoogle(id, atual, anterior).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })),
+    db().from("acoes_log").select("*").eq("cliente_id", id).order("criado_em", { ascending: false }).limit(30),
   ]);
   if (!d) notFound();
   // Em produção o Next esconde a mensagem do erro; mostramos aqui para facilitar o diagnóstico.
@@ -50,6 +53,8 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
   const nivelAtual = NIVEIS.find((n) => n.chave === nivel) ?? NIVEIS[0];
   const linhas = d[nivelAtual.chave].filter((l) => filtro.aceita(l.status));
   const base = `/clientes/${id}`;
+  // depois de uma ação rápida, volta para a mesma tela (mesmo período, nível e filtro)
+  const voltar = `${base}?${atual.qs}&nivel=${nivelAtual.chave}&status=${filtro.chave}${busca.utm ? `&utm=${busca.utm}` : ""}`;
   // O CRM compara com o investimento total em anúncios (Meta + Google)
   const g = google && !("erro" in google) ? google : null;
   const gastoTotal = a.gasto + (g?.atual.gasto ?? 0);
@@ -75,6 +80,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
         </div>
         <SeletorPeriodo atual={atual} base={base} />
       </div>
+      {busca.msg && <Aviso>{busca.msg}</Aviso>}
 
       {g && <ResumoGeral meta={a} metaAnt={b} g={g} metaCpl={c.cpl_meta} />}
 
@@ -129,13 +135,15 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
             ))}
           </span>
         </div>
-        <Tabela linhas={linhas} meta={c.cpl_meta} />
+        <Tabela linhas={linhas} meta={c.cpl_meta} nivel={nivelAtual.chave} voltar={voltar} />
       </div>
 
-      {google && ("erro" in google ? <Aviso>Erro ao carregar o Google Ads: {google.erro}</Aviso> : <SecaoGoogle g={google} />)}
+      {google && ("erro" in google ? <Aviso>Erro ao carregar o Google Ads: {google.erro}</Aviso> : <SecaoGoogle g={google} voltar={voltar} />)}
 
       <SecaoCrm crm={crm} gasto={gastoTotal} gastoAnterior={gastoTotalAnterior} base={base} comGoogle={!!g}
         dimensao={dimensao} qs={atual.qs} periodo={atual} />
+
+      {!!historico?.length && <Historico itens={historico as ItemHistorico[]} />}
     </div>
   );
 }
@@ -181,11 +189,11 @@ const CANAL: Record<string, string> = {
 
 const STATUS_GOOGLE: Record<string, string> = { ENABLED: "ACTIVE", PAUSED: "PAUSED", REMOVED: "DELETED" };
 
-function SecaoGoogle({ g }: { g: NonNullable<Awaited<ReturnType<typeof detalheGoogle>>> }) {
+function SecaoGoogle({ g, voltar }: { g: NonNullable<Awaited<ReturnType<typeof detalheGoogle>>>; voltar: string }) {
   const { atual: x, anterior: y } = g;
   const erros = g.contas.filter((c) => c.ultimo_erro);
   return (
-    <section className="space-y-3">
+    <section id="google" className="space-y-3">
       <h2 className="text-sm font-medium">
         Google Ads <span className="font-normal text-texto-3">
           · {g.contas.map((c) => `${c.nome} (${formatarIdGoogle(c.id)})`).join(", ")} · atualizado {quandoFoi(g.contas[0]?.ultima_sync ?? null)}
@@ -235,7 +243,7 @@ function SecaoGoogle({ g }: { g: NonNullable<Awaited<ReturnType<typeof detalheGo
             <thead className="text-left text-xs text-texto-3">
               <tr>
                 <th className="px-4 py-2 font-normal">Campanha</th>
-                {["Investido", "Conversões", "Custo/conv.", "Cliques", "CTR", "CPC"].map((h) => (
+                {["Investido", "Conversões", "Custo/conv.", "Cliques", "CTR", "CPC", "Orçamento", "Ações"].map((h) => (
                   <th key={h} className="px-3 py-2 text-right font-normal">{h}</th>
                 ))}
               </tr>
@@ -263,6 +271,18 @@ function SecaoGoogle({ g }: { g: NonNullable<Awaited<ReturnType<typeof detalheGo
                     <td className="px-3 py-2 text-right">{inteiro(l.cliques)}</td>
                     <td className="px-3 py-2 text-right">{pct(l.ctr)}</td>
                     <td className="px-3 py-2 text-right">{dinheiro(l.cpc)}</td>
+                    <td className="px-3 py-2 text-right text-texto-2">
+                      {l.orcamento != null ? `${dinheiro(l.orcamento)}/dia` : "—"}
+                      {l.compartilhado && <div className="text-[11px] text-texto-3">compartilhado</div>}
+                    </td>
+                    <td className="px-3 py-2">
+                      <AcoesRapidas
+                        plataforma="google" contaId={l.contaId} objetoId={l.id} nivel="campanha" nome={l.nome}
+                        ativo={l.status === "ENABLED" ? true : l.status === "PAUSED" ? false : null}
+                        orcamento={l.orcamento != null ? { valor: l.orcamento, tipo: "dia" } : null}
+                        mostrarOrcamento={l.status !== "REMOVED"} voltar={`${voltar}#google`}
+                      />
+                    </td>
                   </tr>
                 );
               })}
@@ -278,7 +298,11 @@ function SecaoGoogle({ g }: { g: NonNullable<Awaited<ReturnType<typeof detalheGo
   );
 }
 
-function Tabela({ linhas, meta }: { linhas: LinhaTabela[]; meta: number | null }) {
+const NIVEL_ACAO = { campanhas: "campanha", conjuntos: "conjunto", anuncios: "anuncio" } as const;
+
+function Tabela({ linhas, meta, nivel, voltar }: {
+  linhas: LinhaTabela[]; meta: number | null; nivel: keyof typeof NIVEL_ACAO; voltar: string;
+}) {
   if (!linhas.length) return <p className="p-4 text-sm text-texto-3">Sem dados no período.</p>;
   const media = (() => {
     const g = linhas.reduce((s, l) => s + l.gasto, 0);
@@ -294,6 +318,8 @@ function Tabela({ linhas, meta }: { linhas: LinhaTabela[]; meta: number | null }
             {["Investido", "Resultados", "Custo/result.", "CTR", "CPC", "CPM", "Freq."].map((h) => (
               <th key={h} className="px-3 py-2 text-right font-normal">{h}</th>
             ))}
+            {nivel !== "anuncios" && <th className="px-3 py-2 text-right font-normal">Orçamento</th>}
+            <th className="px-3 py-2 text-right font-normal">Ações</th>
           </tr>
         </thead>
         <tbody className="num">
@@ -321,6 +347,20 @@ function Tabela({ linhas, meta }: { linhas: LinhaTabela[]; meta: number | null }
                 <td className="px-3 py-2 text-right">{dinheiro(l.cpc)}</td>
                 <td className="px-3 py-2 text-right">{dinheiro(l.cpm)}</td>
                 <td className="px-3 py-2 text-right">{decimal(l.frequencia)}</td>
+                {nivel !== "anuncios" && (
+                  <td className="px-3 py-2 text-right text-texto-2">
+                    {l.orcamento ? `${dinheiro(l.orcamento.valor)}${l.orcamento.tipo === "dia" ? "/dia" : " total"}`
+                      : nivel === "conjuntos" ? <span className="text-xs text-texto-3">na campanha</span> : "—"}
+                  </td>
+                )}
+                <td className="px-3 py-2">
+                  <AcoesRapidas
+                    plataforma="meta" contaId={l.conta} objetoId={l.id} nivel={NIVEL_ACAO[nivel]} nome={l.nome}
+                    ativo={l.status === "ACTIVE" ? true : l.status === "PAUSED" ? false : null}
+                    orcamento={l.orcamento} mostrarOrcamento={nivel !== "anuncios" && (!!l.orcamento || nivel === "conjuntos")}
+                    voltar={voltar}
+                  />
+                </td>
               </tr>
             );
           })}
@@ -548,5 +588,39 @@ function TabelaUtm({ crm, dimensao, base, qs, periodo }: {
         </div>
       )}
     </div>
+  );
+}
+
+type ItemHistorico = {
+  id: number; criado_em: string; plataforma: "meta" | "google"; nivel: string | null; objeto_nome: string | null;
+  acao: string; antes: string | null; depois: string | null; ok: boolean; erro: string | null;
+};
+
+const ACAO: Record<string, string> = { pausar: "Pausou", ativar: "Ativou", orcamento: "Mudou o orçamento de" };
+const ACAO_FALHA: Record<string, string> = { pausar: "pausar", ativar: "ativar", orcamento: "mudar o orçamento de" };
+
+/** Tudo o que foi feito pelo painel neste cliente: o histórico de otimizações, sem anotar à mão. */
+function Historico({ itens }: { itens: ItemHistorico[] }) {
+  return (
+    <details className="rounded-xl border border-borda bg-superficie" open>
+      <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
+        Histórico de ações pelo painel <span className="font-normal text-texto-3">({itens.length} mais recentes)</span>
+      </summary>
+      <ul className="divide-y divide-borda text-sm">
+        {itens.map((h) => (
+          <li key={h.id} className="flex flex-wrap gap-x-3 px-4 py-2">
+            <span className="num text-texto-3">
+              {new Date(h.criado_em).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+            </span>
+            <span className="text-texto-3">{h.plataforma === "meta" ? "Meta" : "Google"}</span>
+            <span className={h.ok ? "" : "text-critico"}>
+              {h.ok ? ACAO[h.acao] ?? h.acao : `✕ Não deu para ${ACAO_FALHA[h.acao] ?? h.acao}`} {h.nivel === "anuncio" ? "anúncio" : h.nivel} “{h.objeto_nome ?? "—"}”
+              {h.antes && h.depois && <span className="text-texto-2"> · {h.antes} → {h.depois}</span>}
+              {h.erro && <span className="block text-xs">{h.erro}</span>}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }

@@ -15,10 +15,16 @@ export type Alerta = {
   titulo: string;
   detalhe: string;
   sugestao: string;
+  /** Ação rápida que resolve o alerta (pausar ou mexer no orçamento) */
+  acao?: {
+    plataforma: "meta" | "google"; contaId: string; objetoId: string; nivel: "campanha" | "conjunto" | "anuncio";
+    nome: string; tipo: "pausar" | "orcamento";
+  };
 };
 
 type Linha = {
   conta_id: string; data: string; ad_id: string; ad_nome: string | null; campaign_nome: string | null;
+  adset_id: string | null; adset_nome: string | null;
   gasto: number; impressoes: number; alcance: number; cliques_link: number;
   resultados: number; resultado_tipo: string | null; leads: number; conversas: number;
 };
@@ -60,7 +66,7 @@ export async function calcularAlertas(): Promise<Alerta[]> {
   const linhas = contas.length
     ? await buscarTudo<Linha>((de, ate) =>
         banco.from("metricas_diarias")
-          .select("conta_id, data, ad_id, ad_nome, campaign_nome, gasto, impressoes, alcance, cliques_link, resultados, resultado_tipo, leads, conversas")
+          .select("conta_id, data, ad_id, ad_nome, adset_id, adset_nome, campaign_nome, gasto, impressoes, alcance, cliques_link, resultados, resultado_tipo, leads, conversas")
           .in("conta_id", contas.map((c) => c.id)).gte("data", ini14).lte("data", ontem).range(de, ate),
       )
     : [];
@@ -139,7 +145,8 @@ export async function calcularAlertas(): Promise<Alerta[]> {
         alertas.push({ ...base, nivel: s3.gasto >= limite * 2 ? "critico" : "atencao",
           titulo: "Anúncio gastando sem resultado",
           detalhe: `“${nome}” gastou ${dinheiro(s3.gasto)} nos últimos 3 dias sem nenhum resultado.`,
-          sugestao: "Pause ou troque o criativo/público desse anúncio." });
+          sugestao: "Pause ou troque o criativo/público desse anúncio.",
+          acao: { plataforma: "meta", contaId: ls[0].conta_id, objetoId: ls[0].ad_id, nivel: "anuncio", nome, tipo: "pausar" } });
       }
 
       // 6. Criativo saturando: CTR caiu e frequência alta
@@ -148,7 +155,8 @@ export async function calcularAlertas(): Promise<Alerta[]> {
       if (ctr3 != null && ctrAntes != null && s3.impr >= 1000 && ctr3 < ctrAntes * 0.7 && freq >= 2) {
         alertas.push({ ...base, nivel: "atencao", titulo: "Criativo saturando",
           detalhe: `“${nome}”: CTR caiu de ${ctrAntes.toFixed(2).replace(".", ",")}% para ${ctr3.toFixed(2).replace(".", ",")}% nos últimos 3 dias (frequência ~${freq.toFixed(1).replace(".", ",")}).`,
-          sugestao: "Prepare um criativo novo para substituir esse." });
+          sugestao: "Prepare um criativo novo para substituir esse.",
+          acao: { plataforma: "meta", contaId: ls[0].conta_id, objetoId: ls[0].ad_id, nivel: "anuncio", nome, tipo: "pausar" } });
       }
 
       // 7. Vencedor: custo bem abaixo da média do cliente
@@ -156,7 +164,10 @@ export async function calcularAlertas(): Promise<Alerta[]> {
       if (cprAd != null && media != null && s7.res >= 3 && cprAd <= media * 0.6) {
         alertas.push({ ...base, nivel: "oportunidade", titulo: "Anúncio com ótimo desempenho",
           detalhe: `“${nome}”: ${inteiro(s7.res)} resultados a ${dinheiro(cprAd)} cada (média do cliente: ${dinheiro(media)}).`,
-          sugestao: "Considere aumentar o orçamento desse conjunto ou duplicar o anúncio." });
+          sugestao: "Considere aumentar o orçamento desse conjunto ou duplicar o anúncio.",
+          ...(ls[0].adset_id && {
+            acao: { plataforma: "meta" as const, contaId: ls[0].conta_id, objetoId: ls[0].adset_id, nivel: "conjunto" as const, nome: ls[0].adset_nome ?? "Conjunto", tipo: "orcamento" as const },
+          }) });
       }
     }
   }
@@ -213,12 +224,14 @@ function alertasGoogle(
       alertas.push({ ...base, nivel: s3.gasto >= limite * 2 ? "critico" : "atencao",
         titulo: "Google · campanha gastando sem conversão",
         detalhe: `“${nome}” gastou ${dinheiro(s3.gasto)} nos últimos 3 dias sem nenhuma conversão.`,
-        sugestao: "Veja os termos de pesquisa, o rastreamento de conversões e a página de destino dessa campanha." });
+        sugestao: "Veja os termos de pesquisa, o rastreamento de conversões e a página de destino dessa campanha.",
+        acao: { plataforma: "google", contaId: ls[0].conta_id, objetoId: ls[0].campaign_id, nivel: "campanha", nome, tipo: "pausar" } });
     }
     if (s7.cpa != null && rec.cpa != null && s7.conversoes >= 3 && s7.cpa <= rec.cpa * 0.6 && porCampanha.size > 1) {
       alertas.push({ ...base, nivel: "oportunidade", titulo: "Google · campanha com ótimo desempenho",
         detalhe: `“${nome}”: ${conv(s7.conversoes)} conversões a ${dinheiro(s7.cpa)} cada (média do cliente no Google: ${dinheiro(rec.cpa)}).`,
-        sugestao: "Considere aumentar o orçamento dessa campanha." });
+        sugestao: "Considere aumentar o orçamento dessa campanha.",
+        acao: { plataforma: "google", contaId: ls[0].conta_id, objetoId: ls[0].campaign_id, nivel: "campanha", nome, tipo: "orcamento" } });
     }
   }
   return alertas;

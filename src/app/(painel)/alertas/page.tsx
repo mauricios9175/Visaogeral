@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { calcularAlertas, type Alerta, type Nivel } from "@/lib/alertas";
 import { Aviso } from "@/components/ui";
+import { AcoesRapidas } from "@/components/acoes-rapidas";
+import { db } from "@/lib/db";
+import { horasAtras, quandoFoi } from "@/lib/formato";
 
 const NIVEIS: { chave: Nivel; titulo: string; classe: string; icone: string }[] = [
   { chave: "critico", titulo: "Crítico", classe: "bg-critico-bg text-critico", icone: "■" },
@@ -9,8 +12,16 @@ const NIVEIS: { chave: Nivel; titulo: string; classe: string; icone: string }[] 
 ];
 
 export default async function Alertas({ searchParams }: PageProps<"/alertas">) {
-  const { empresa } = (await searchParams) as { empresa?: string };
-  const todos = await calcularAlertas();
+  const { empresa, msg } = (await searchParams) as { empresa?: string; msg?: string };
+  const [todos, { data: feitas }] = await Promise.all([
+    calcularAlertas(),
+    // ações das últimas 24 h: o alerta só some quando os dados do dia virarem, então mostramos o que já foi feito
+    db().from("acoes_log").select("objeto_id, acao, depois, criado_em").eq("ok", true)
+      .gte("criado_em", horasAtras(24)).order("criado_em", { ascending: false }),
+  ]);
+  const feitaPorObjeto = new Map<string, { acao: string; depois: string | null; criado_em: string }>();
+  for (const f of feitas ?? []) if (!feitaPorObjeto.has(f.objeto_id)) feitaPorObjeto.set(f.objeto_id, f);
+  const voltar = empresa ? `/alertas?empresa=${encodeURIComponent(empresa)}` : "/alertas";
   const empresas = [...new Set(todos.map((a) => a.empresa))].sort();
   const alertas = empresa ? todos.filter((a) => a.empresa === empresa) : todos;
   const chip = (ativo: boolean) =>
@@ -34,6 +45,7 @@ export default async function Alertas({ searchParams }: PageProps<"/alertas">) {
         ))}
       </div>
 
+      {msg && <Aviso>{msg}</Aviso>}
       {alertas.length === 0 && <Aviso>Nenhum alerta no momento. 🎉</Aviso>}
 
       {NIVEIS.map((n) => {
@@ -46,7 +58,9 @@ export default async function Alertas({ searchParams }: PageProps<"/alertas">) {
               <span className="text-texto-3">({lista.length})</span>
             </h2>
             <ul className="divide-y divide-borda rounded-xl border border-borda bg-superficie text-sm">
-              {lista.map((a, i) => <ItemAlerta key={i} a={a} />)}
+              {lista.map((a, i) => (
+                <ItemAlerta key={i} a={a} voltar={voltar} feita={a.acao ? feitaPorObjeto.get(a.acao.objetoId) : undefined} />
+              ))}
             </ul>
           </section>
         );
@@ -55,9 +69,12 @@ export default async function Alertas({ searchParams }: PageProps<"/alertas">) {
   );
 }
 
-function ItemAlerta({ a }: { a: Alerta }) {
+function ItemAlerta({ a, voltar, feita }: {
+  a: Alerta; voltar: string; feita?: { acao: string; depois: string | null; criado_em: string };
+}) {
   return (
-    <li className="space-y-0.5 px-4 py-3">
+    <li className="flex flex-wrap items-start gap-3 px-4 py-3">
+      <div className="min-w-0 flex-1 space-y-0.5">
       <div>
         <Link href={`/clientes/${a.clienteId}`} className="font-medium hover:underline">{a.clienteNome}</Link>
         <span className="text-texto-3"> · {a.empresa} · </span>
@@ -65,6 +82,18 @@ function ItemAlerta({ a }: { a: Alerta }) {
       </div>
       <div className="text-texto-2">{a.detalhe}</div>
       <div className="text-xs text-texto-3">→ {a.sugestao}</div>
+      </div>
+      {a.acao && (feita ? (
+        <span className="rounded-md bg-bom-bg px-2 py-1 text-xs text-bom">
+          ✓ {feita.acao === "pausar" ? "Pausado" : feita.acao === "ativar" ? "Ativado" : `Orçamento → ${feita.depois}`} pelo painel {quandoFoi(feita.criado_em)}
+        </span>
+      ) : (
+        <AcoesRapidas
+          plataforma={a.acao.plataforma} contaId={a.acao.contaId} objetoId={a.acao.objetoId} nivel={a.acao.nivel}
+          nome={a.acao.nome} ativo={a.acao.tipo === "pausar" ? true : null} orcamento={null}
+          mostrarOrcamento={a.acao.tipo === "orcamento"} voltar={voltar}
+        />
+      ))}
     </li>
   );
 }

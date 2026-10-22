@@ -7,6 +7,9 @@ import {
   salvarCliente, sincronizarGoogleAgora, vincularConta, vincularContaGoogle,
 } from "../../acoes";
 import { formatarIdGoogle, googleConfigurado } from "@/lib/google";
+import { saldosGoogle, type SaldoGoogle } from "@/lib/consultas-google";
+import { registrarRecargaGoogle, removerRecargaGoogle } from "../../acoes-anuncios";
+import { hojeISO } from "@/lib/datas";
 import type { ContaGoogle } from "@/lib/sync-google";
 import { PainelSincronizacao } from "@/components/sincronizacao";
 
@@ -37,6 +40,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
   const encerrados = listaClientes.filter((c) => !c.ativo);
   const empresas = [...new Set([EMPRESA_PADRAO, ...listaClientes.map((c) => c.empresa).filter((e): e is string => !!e)])].sort();
   const listaContas = (contas ?? []) as ContaAnuncio[];
+  const saldosG = await saldosGoogle().catch(() => new Map<string, SaldoGoogle>());
   // Configurações mostra só as contas vinculadas; as outras ficam atrás da busca.
   const metaVinculadas = listaContas.filter((c) => c.cliente_id);
   const metaLivres = listaContas.filter((c) => !c.cliente_id)
@@ -319,6 +323,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                     <th className="px-4 py-2 font-normal">Conta</th>
                     <th className="px-3 py-2 font-normal">Acesso</th>
                     {comSync && <th className="px-3 py-2 font-normal">Última sync</th>}
+                    {comSync && <th className="px-3 py-2 font-normal">Saldo (pré-paga)</th>}
                     <th className="px-3 py-2 font-normal">Cliente</th>
                     {comSync && <th className="px-3 py-2 font-normal">Sincronizar</th>}
                   </tr>
@@ -335,6 +340,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                       </td>
                       <td className="px-3 py-2 text-texto-2">{conta.gerente_nome ?? "—"}</td>
                       {comSync && <td className="px-3 py-2 text-texto-2">{quandoFoi(conta.ultima_sync)}</td>}
+                      {comSync && <td className="px-3 py-2"><SaldoGoogleCelula conta={conta} saldo={saldosG.get(conta.id)} /></td>}
                       <td className="px-3 py-2">
                         <form action={vincularContaGoogle} className="flex gap-2">
                           <input type="hidden" name="conta_id" value={conta.id} />
@@ -432,5 +438,60 @@ function ListaVincular({ contas, total, clientes, acao }: {
         <p className="text-xs text-texto-3">Mostrando {contas.length} de {total}. Use a busca para achar a conta do seu cliente.</p>
       )}
     </>
+  );
+}
+
+/** Saldo estimado da conta pré-paga do Google e o formulário para registrar recargas. */
+function SaldoGoogleCelula({ conta, saldo }: {
+  conta: ContaGoogle & { limite_conta?: number | null; gasto_limite?: number | null };
+  saldo?: SaldoGoogle;
+}) {
+  const voltar = "/configuracoes#google";
+  return (
+    <div className="space-y-1 text-xs">
+      {saldo ? (
+        <div className={`num text-sm ${saldo.saldo <= 0 || (saldo.dias != null && saldo.dias <= 5) ? "text-critico" : ""}`}>
+          {dinheiro(saldo.saldo)}
+          {saldo.dias != null && <span className="text-xs text-texto-3"> · ~{Math.max(0, Math.floor(saldo.dias))} dia(s)</span>}
+        </div>
+      ) : conta.limite_conta != null ? (
+        <div className="text-texto-2">Limite da conta: resta {dinheiro(conta.limite_conta - Number(conta.gasto_limite ?? 0))}</div>
+      ) : (
+        <div className="text-texto-3">—</div>
+      )}
+      <details>
+        <summary className="cursor-pointer text-destaque underline">{saldo ? "recargas" : "registrar saldo"}</summary>
+        <form action={registrarRecargaGoogle} className="mt-1 flex flex-wrap items-center gap-1">
+          <input type="hidden" name="conta_id" value={conta.id} />
+          <input type="hidden" name="voltar" value={voltar} />
+          <select name="tipo" defaultValue={saldo ? "recarga" : "saldo"} className={campo}>
+            <option value="recarga">Recarga (Pix/boleto)</option>
+            <option value="saldo">Saldo atual da conta</option>
+          </select>
+          <input type="date" name="data" defaultValue={hojeISO()} required className={campo} />
+          <input name="valor" inputMode="decimal" placeholder="R$" required className={`${campo} w-24`} />
+          <BotaoEnviar className={botao} aguardando="…">Salvar</BotaoEnviar>
+        </form>
+        <p className="mt-1 text-texto-3">
+          Comece informando o <b>saldo atual</b> que aparece no Google Ads (Faturamento → Resumo). Depois registre cada
+          recarga pelo valor creditado. O painel desconta o gasto diário e avisa 5 dias antes de acabar.
+        </p>
+        {!!saldo?.recargas.length && (
+          <ul className="mt-1 space-y-0.5">
+            {[...saldo.recargas].reverse().slice(0, 8).map((r) => (
+              <li key={r.id} className="flex items-center gap-2">
+                <span className="num">{r.data.split("-").reverse().join("/")}</span>
+                <span>{r.tipo === "saldo" ? "saldo informado" : "recarga"} {dinheiro(Number(r.valor))}</span>
+                <form action={removerRecargaGoogle}>
+                  <input type="hidden" name="id" value={r.id} />
+                  <input type="hidden" name="voltar" value={voltar} />
+                  <button className="text-texto-3 underline hover:text-critico">remover</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+      </details>
+    </div>
   );
 }

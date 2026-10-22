@@ -187,6 +187,8 @@ export type LinhaCampanhaDia = {
   conversoes: number;
   valorConversoes: number;
   conversoesAcao: Record<string, number> | null;
+  orcamentoDiario: number | null;
+  orcamentoCompartilhado: boolean | null;
 };
 
 /** Métricas diárias por campanha + conversões separadas por ação de conversão. */
@@ -196,6 +198,7 @@ export async function metricasPorCampanha(
   const periodo = `segments.date BETWEEN '${desde}' AND '${ate}'`;
   const linhas = await consultar(acesso, customerId, loginCustomerId, `
     SELECT segments.date, campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type,
+           campaign_budget.amount_micros, campaign_budget.explicitly_shared,
            metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
     FROM campaign
     WHERE ${periodo}`);
@@ -215,6 +218,8 @@ export async function metricasPorCampanha(
       conversoes: Number(m.conversions ?? 0),
       valorConversoes: Number(m.conversionsValue ?? 0),
       conversoesAcao: null,
+      orcamentoDiario: l.campaignBudget?.amountMicros != null ? Number(l.campaignBudget.amountMicros) / 1_000_000 : null,
+      orcamentoCompartilhado: l.campaignBudget?.explicitlyShared ?? null,
     };
     if (item.gasto || item.impressoes || item.cliques || item.conversoes) mapa.set(chave(item.data, item.campaignId), item);
   }
@@ -236,3 +241,73 @@ export async function metricasPorCampanha(
 }
 
 export const formatarIdGoogle = (id: string) => id.replace(/^(\d{3})(\d{3})(\d{4})$/, "$1-$2-$3");
+
+// ---------- Ações rápidas (escrita) ----------
+
+async function mutar(acesso: string, customerId: string, loginCustomerId: string | null, recurso: string, operacao: object) {
+  const res = await fetch(`${BASE}/customers/${customerId}/${recurso}:mutate`, {
+    method: "POST",
+    headers: cabecalhos(acesso, loginCustomerId),
+    body: JSON.stringify({ operations: [operacao] }),
+    cache: "no-store",
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    const e = erroGoogle(json, res.status);
+    if (/DEVELOPER_TOKEN_NOT_APPROVED|ACCESS_LEVEL|NOT_ALLOWED|PERMISSION_DENIED|USER_PERMISSION_DENIED/i.test(e.message)) {
+      throw new Error(`O Google recusou a alteração: ${e.message}. Pode ser o nível de acesso da API (Explorer só lê; peça o Basic) ou o seu usuário nessa conta ser só leitura.`);
+    }
+    throw e;
+  }
+}
+
+/** Pausa ou ativa uma campanha. */
+export async function mudarStatusCampanhaGoogle(acesso: string, customerId: string, loginCustomerId: string | null, campaignId: string, ativo: boolean) {
+  await mutar(acesso, customerId, loginCustomerId, "campaigns", {
+    update: { resourceName: `customers/${customerId}/campaigns/${campaignId}`, status: ativo ? "ENABLED" : "PAUSED" },
+    updateMask: "status",
+  });
+}
+
+export type OrcamentoGoogle = { recurso: string; nome: string | null; diario: number; compartilhado: boolean; campanha: string | null };
+
+/** Orçamento atual da campanha (lido na hora, para não alterar com base em dado velho). */
+export async function orcamentoCampanhaGoogle(acesso: string, customerId: string, loginCustomerId: string | null, campaignId: string): Promise<OrcamentoGoogle | null> {
+  const [l] = await consultar(acesso, customerId, loginCustomerId, `
+    SELECT campaign.name, campaign_budget.resource_name, campaign_budget.name, campaign_budget.amount_micros, campaign_budget.explicitly_shared
+    FROM campaign WHERE campaign.id = ${Number(campaignId)}`);
+  if (!l?.campaignBudget?.resourceName) return null;
+  return {
+    recurso: l.campaignBudget.resourceName,
+    nome: l.campaignBudget.name ?? null,
+    diario: Number(l.campaignBudget.amountMicros ?? 0) / 1_000_000,
+    compartilhado: Boolean(l.campaignBudget.explicitlyShared),
+    campanha: l.campaign?.name ?? null,
+  };
+}
+
+/** Muda o orçamento diário (em reais). */
+export async function mudarOrcamentoGoogle(acesso: string, customerId: string, loginCustomerId: string | null, o: OrcamentoGoogle, novo: number) {
+  // o Google exige múltiplos de 10.000 micros (R$ 0,01)
+  const micros = String(Math.round(novo * 100) * 10_000);
+  await mutar(acesso, customerId, loginCustomerId, "campaignBudgets", {
+    update: { resourceName: o.recurso, amountMicros: micros },
+    updateMask: "amount_micros",
+  });
+}
+
+/** Orçamento da conta (limite de gastos aprovado e quanto já foi gasto dele). Null se não houver ou sem permissão. */
+export async function orcamentoDaConta(acesso: string, customerId: string, loginCustomerId: string | null) {
+  try {
+    const linhas = await consultar(acesso, customerId, loginCustomerId, `
+      SELECT account_budget.status, account_budget.approved_spending_limit_micros, account_budget.adjusted_spending_limit_micros,
+             account_budget.amount_served_micros, account_budget.approved_spending_limit_type
+      FROM account_budget WHERE account_budget.status = 'APPROVED'`);
+    const b = linhas[0]?.accountBudget;
+    const limite = b?.adjustedSpendingLimitMicros ?? b?.approvedSpendingLimitMicros;
+    if (!b || limite == null) return null; // sem limite ou limite "infinito"
+    return { limite: Number(limite) / 1_000_000, gasto: Number(b.amountServedMicros ?? 0) / 1_000_000 };
+  } catch {
+    return null; // conta sem faturamento configurado ou usuário sem acesso ao faturamento
+  }
+}

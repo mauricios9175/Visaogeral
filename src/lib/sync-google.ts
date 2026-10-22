@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "./db";
-import { descobrirContas, metricasPorCampanha, tokenDeAcesso } from "./google";
+import { descobrirContas, metricasPorCampanha, orcamentoDaConta, tokenDeAcesso } from "./google";
 import { diasAtras, hojeISO } from "./datas";
 
 export type ContaGoogle = {
@@ -49,9 +49,26 @@ export async function importarContasGoogle() {
   return { contas: linhas.size, erros };
 }
 
+/** As colunas do SQL 0012 existem? Sem elas, sincroniza sem orçamento. */
+let temColunasOrcamento: boolean | null = null;
+async function colunasOrcamento() {
+  if (temColunasOrcamento === null) {
+    const { error } = await db().from("metricas_google").select("orcamento_diario").limit(1);
+    temColunasOrcamento = !error;
+  }
+  return temColunasOrcamento;
+}
+
 async function sincronizarContaGoogle(conta: ContaGoogle, refreshToken: string, desde: string, ate: string) {
   const acesso = await tokenDeAcesso(refreshToken);
-  const linhas = await metricasPorCampanha(acesso, conta.id, conta.login_customer_id, desde, ate);
+  const [linhas, limite] = await Promise.all([
+    metricasPorCampanha(acesso, conta.id, conta.login_customer_id, desde, ate),
+    orcamentoDaConta(acesso, conta.id, conta.login_customer_id),
+  ]);
+  const comOrcamento = await colunasOrcamento();
+  if (comOrcamento) {
+    await db().from("contas_google").update({ limite_conta: limite?.limite ?? null, gasto_limite: limite?.gasto ?? null }).eq("id", conta.id);
+  }
   if (!linhas.length) return 0;
   const agora = new Date().toISOString();
   const { error } = await db().from("metricas_google").upsert(
@@ -60,6 +77,7 @@ async function sincronizarContaGoogle(conta: ContaGoogle, refreshToken: string, 
       campaign_status: l.campaignStatus, canal: l.canal, gasto: l.gasto, impressoes: l.impressoes,
       cliques: l.cliques, conversoes: l.conversoes, valor_conversoes: l.valorConversoes,
       conversoes_acao: l.conversoesAcao, atualizado_em: agora,
+      ...(comOrcamento && { orcamento_diario: l.orcamentoDiario, orcamento_compartilhado: l.orcamentoCompartilhado }),
     })),
     { onConflict: "conta_id,data,campaign_id" },
   );

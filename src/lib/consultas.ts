@@ -2,7 +2,7 @@ import "server-only";
 import { db, type Cliente, type ContaAnuncio, type Metricas } from "./db";
 import { progressoDoMes, hojeISO, somarDias as somarDiasISO, type Periodo } from "./datas";
 import { dinheiro as dinheiroBR } from "./formato";
-import { somarGoogle, type LinhaGoogle, type NumerosGoogle } from "./consultas-google";
+import { saldosGoogle, somarGoogle, type LinhaGoogle, type NumerosGoogle } from "./consultas-google";
 
 const ZERO: Metricas = {
   gasto: 0, impressoes: 0, alcance: 0, cliques: 0, cliques_link: 0,
@@ -195,7 +195,13 @@ function comTipos(l: LinhaAnuncio): LinhaAnuncio {
   return m;
 }
 
-export type LinhaTabela = Derivadas & { id: string; nome: string; pai?: string; tipo: string | null; status: string | null };
+export type LinhaTabela = Derivadas & {
+  id: string; nome: string; pai?: string; tipo: string | null; status: string | null;
+  conta: string;                                   // conta do Meta (para as ações rápidas)
+  orcamento: { valor: number; tipo: "dia" | "total" } | null;
+};
+
+type InfoStatus = { status: string; orcamento_diario?: number | null; orcamento_total?: number | null };
 
 /** Rótulo do tipo de resultado que mais aparece (ex.: "conversas"), para mostrar ao lado do nome. */
 export function tipoPrincipal(m: Metricas): string | null {
@@ -207,17 +213,22 @@ export function tipoPrincipal(m: Metricas): string | null {
 function agrupar(
   linhas: LinhaAnuncio[],
   chave: (l: LinhaAnuncio) => [string, string, string?],
-  status: Map<string, string>,
+  status: Map<string, InfoStatus>,
 ): LinhaTabela[] {
-  const mapa = new Map<string, { nome: string; pai?: string; m: Metricas }>();
+  const mapa = new Map<string, { nome: string; pai?: string; conta: string; m: Metricas }>();
   for (const l of linhas) {
     const [id, nome, pai] = chave(l);
-    const g = mapa.get(id) ?? { nome, pai, m: { ...ZERO } };
+    const g = mapa.get(id) ?? { nome, pai, conta: l.conta_id, m: { ...ZERO } };
     somar(g.m, l);
     mapa.set(id, g);
   }
   return [...mapa.entries()]
-    .map(([id, g]) => ({ id, nome: g.nome, pai: g.pai, tipo: tipoPrincipal(g.m), status: status.get(id) ?? null, ...derivar(g.m) }))
+    .map(([id, g]) => {
+      const st = status.get(id);
+      const orcamento = st?.orcamento_diario ? { valor: Number(st.orcamento_diario), tipo: "dia" as const }
+        : st?.orcamento_total ? { valor: Number(st.orcamento_total), tipo: "total" as const } : null;
+      return { id, nome: g.nome, pai: g.pai, conta: g.conta, orcamento, tipo: tipoPrincipal(g.m), status: st?.status ?? null, ...derivar(g.m) };
+    })
     .sort((a, b) => b.gasto - a.gasto);
 }
 
@@ -238,15 +249,17 @@ export async function detalheCliente(clienteId: string, atual: Periodo, anterior
     : [];
   const linhas = brutas.map(comTipos);
   // Status é informativo: se a tabela ainda não existir ou falhar, a tela abre sem os selos.
+  const lerStatus = (colunas: string) => buscarTudo<InfoStatus & { id: string }>((de, ate) =>
+    banco.from("status_meta").select(colunas).in("conta_id", ids).range(de, ate),
+  );
   const statusRows = ids.length
-    ? await buscarTudo<{ id: string; status: string }>((de, ate) =>
-        banco.from("status_meta").select("id, status").in("conta_id", ids).range(de, ate),
-      ).catch((e) => {
+    // sem o SQL 0012 não há colunas de orçamento: lê só o status
+    ? await lerStatus("id, status, orcamento_diario, orcamento_total").catch(() => lerStatus("id, status")).catch((e) => {
         console.error("status_meta:", e);
         return [];
       })
     : [];
-  const status = new Map(statusRows.map((r) => [r.id, r.status]));
+  const status = new Map(statusRows.map((r) => [r.id, r]));
 
   const doAtual = linhas.filter((l) => l.data >= atual.desde);
   const doAnterior = linhas.filter((l) => l.data <= anterior.ate);
@@ -288,6 +301,54 @@ export type AlertaConta = {
   nivel: "critico" | "atencao";
   mensagem: string;
 };
+
+/**
+ * Google: saldo estimado pelas recargas registradas (contas pré-pagas) ou orçamento da conta (limite de gastos).
+ * Mesma regra do Meta: avisa quando dá para DIAS_SALDO_ALERTA dias ou menos.
+ */
+async function alertasSaldoGoogle(nomeCliente: Map<string, string>): Promise<AlertaConta[]> {
+  const { data: contasRaw, error } = await db().from("contas_google")
+    .select("id, nome, cliente_id, limite_conta, gasto_limite").not("cliente_id", "is", null);
+  if (error) return [];
+  const contas = (contasRaw ?? []) as { id: string; nome: string; cliente_id: string; limite_conta: number | null; gasto_limite: number | null }[];
+  const saldos = await saldosGoogle(contas.map((c) => c.id));
+  // média dos últimos 7 dias, para as contas com limite (as com recarga já vêm calculadas)
+  const ini7 = somarDiasISO(hojeISO(), -7);
+  const comLimite = contas.filter((c) => c.limite_conta != null && !saldos.has(c.id));
+  const gastos = comLimite.length
+    ? await buscarTudo<{ conta_id: string; gasto: number }>((de, ate) =>
+        db().from("metricas_google").select("conta_id, gasto").in("conta_id", comLimite.map((c) => c.id))
+          .gte("data", ini7).lt("data", hojeISO()).range(de, ate),
+      )
+    : [];
+  const alertas: AlertaConta[] = [];
+  for (const c of contas) {
+    const clienteNome = nomeCliente.get(c.cliente_id);
+    if (!clienteNome) continue;
+    const s = saldos.get(c.id);
+    const [restante, mediaDia, oque] = s
+      ? [s.saldo, s.mediaDia, "Saldo estimado do Google (pelas recargas registradas)"]
+      : c.limite_conta != null
+        ? [c.limite_conta - Number(c.gasto_limite ?? 0), gastos.filter((g) => g.conta_id === c.id).reduce((t, g) => t + Number(g.gasto), 0) / 7, "Orçamento da conta do Google"]
+        : [null, 0, ""];
+    if (restante == null) continue;
+    const base = { clienteId: c.cliente_id, clienteNome, contaNome: `Google · ${c.nome}` };
+    if (restante <= 0) {
+      alertas.push({ ...base, nivel: "critico", mensagem: `${oque} esgotado. Confira a conta e registre a recarga no painel.` });
+      continue;
+    }
+    if (mediaDia <= 0) continue;
+    const dias = restante / mediaDia;
+    if (dias <= DIAS_SALDO_ALERTA) {
+      alertas.push({
+        ...base,
+        nivel: dias <= 1 ? "critico" : "atencao",
+        mensagem: `${oque}: ${dinheiroBR(restante)}, dá para ~${dias < 1 ? "menos de 1 dia" : `${Math.floor(dias)} dia(s)`} no ritmo atual (${dinheiroBR(mediaDia)}/dia). Recarregue.`,
+      });
+    }
+  }
+  return alertas;
+}
 
 /** Até quantos dias de saldo/limite o painel considera "baixo". */
 export const DIAS_SALDO_ALERTA = 5;
@@ -348,6 +409,7 @@ export async function alertasContas(): Promise<AlertaConta[]> {
       });
     }
   }
+  alertas.push(...(await alertasSaldoGoogle(nomeCliente).catch(() => [])));
   return alertas.sort((a, b) => (a.nivel === b.nivel ? 0 : a.nivel === "critico" ? -1 : 1));
 }
 
