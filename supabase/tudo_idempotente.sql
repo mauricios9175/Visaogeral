@@ -1,4 +1,4 @@
--- Todas as migrações (0001 a 0012) num script só, seguro para rodar mais de uma vez:
+-- Todas as migrações (0001 a 0013) num script só, seguro para rodar mais de uma vez:
 -- cria apenas o que estiver faltando e não apaga dados.
 
 create extension if not exists pgcrypto;
@@ -333,3 +333,19 @@ alter table contas_google add column if not exists gasto_limite  numeric(14,2);
 
 alter table acoes_log       enable row level security;
 alter table recargas_google enable row level security;
+-- 0013: Modelos de campanha (montar campanha, conjunto e anúncios a partir de um modelo pronto).
+
+create table if not exists modelos (
+  id             uuid primary key default gen_random_uuid(),
+  nome           text not null,
+  plataforma     text not null default 'meta' check (plataforma in ('meta', 'google')),
+  objetivo       text not null,          -- meta: formulario, mensagens, site · google: pesquisa
+  config         jsonb not null default '{}'::jsonb,
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now()
+);
+
+-- Últimas escolhas de cada cliente (página, Instagram, formulário, pixel, cidades), para já vir preenchido
+alter table clientes add column if not exists padroes_meta jsonb;
+
+alter table modelos enable row level security;

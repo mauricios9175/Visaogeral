@@ -586,3 +586,6 @@ export function linkGerenciador(contaId: string, nivel: "campanha" | "conjunto" 
   const [aba, campo] = nivel === "campanha" ? ["campaigns", "selected_campaign_ids"] : nivel === "conjunto" ? ["adsets", "selected_adset_ids"] : ["ads", "selected_ad_ids"];
   return `https://adsmanager.facebook.com/adsmanager/manage/${aba}?act=${act}&${campo}=${id}`;
 }
+
+// usados pela montagem de campanhas (meta-montar.ts)
+export { get as getMeta, post as postMeta, montarUrl, todasPaginas, BASE as BASE_META };

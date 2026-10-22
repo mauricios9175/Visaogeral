@@ -9,6 +9,7 @@ export default function PainelLayout({ children }: LayoutProps<"/">) {
           <Link href="/" className="font-semibold">Visão Geral</Link>
           <Link href="/alertas" className="text-texto-2 hover:text-texto">Alertas</Link>
           <Link href="/criativos" className="text-texto-2 hover:text-texto">Criativos</Link>
+          <Link href="/modelos" className="text-texto-2 hover:text-texto">Modelos</Link>
           <Link href="/relatorios" className="text-texto-2 hover:text-texto">Relatórios</Link>
           <Link href="/configuracoes" className="text-texto-2 hover:text-texto">Configurações</Link>
           <form action={sair} className="ml-auto">

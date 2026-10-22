@@ -82,6 +82,8 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
               || "Nenhuma conta vinculada"}
             {d.contas[0] && <> · atualizado {quandoFoi(d.contas[0].ultima_sync)}</>}
             {" · "}
+            <Link href={`${base}/montar`} className="text-destaque underline">Montar campanha</Link>
+            {" · "}
             <Link href={`/criativos?cliente=${id}&${atual.qs}`} className="text-destaque underline">Criativos</Link>
             {" · "}
             <Link href={`${base}/diagnostico`} className="text-destaque underline">Diagnóstico de resultados</Link>
