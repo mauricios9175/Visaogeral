@@ -3,7 +3,9 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db, type ContaAnuncio } from "@/lib/db";
-import { mudarOrcamento, mudarStatus, orcamentoDe } from "@/lib/meta";
+import {
+  duplicarAnuncio, duplicarCampanha, duplicarConjunto, linkGerenciador, mudarOrcamento, mudarStatus, orcamentoDe,
+} from "@/lib/meta";
 import { mudarOrcamentoGoogle, mudarStatusCampanhaGoogle, orcamentoCampanhaGoogle, tokenDeAcesso } from "@/lib/google";
 import { tokenDaConta } from "@/lib/sync";
 import { dinheiro } from "@/lib/formato";
@@ -74,6 +76,30 @@ export async function acaoMeta(form: FormData) {
       const tipo = o.diario != null ? "/dia" : " (total)";
       await registrar({ ...base, nivel: o.nivel, objeto_id: o.id, objeto_nome: o.nome, acao, antes: `${dinheiro(atual)}${tipo}`, depois: `${dinheiro(novo)}${tipo}` });
       msg = `Orçamento ${o.nivel === "campanha" && nivel === "conjunto" ? "da campanha (orçamento de campanha) " : ""}“${o.nome}”: ${dinheiro(atual)} → ${dinheiro(novo)}${tipo}.`;
+    } else if (acao === "duplicar") {
+      const destino = String(form.get("destino") ?? "");
+      let novo: string, detalhe = "";
+      if (nivel === "anuncio") {
+        novo = await duplicarAnuncio(objetoId, token, destino || String(form.get("conjunto_atual")));
+      } else if (nivel === "conjunto") {
+        const r = await duplicarConjunto(objetoId, token, destino || String(form.get("campanha_atual")), form.get("com_anuncios") === "1");
+        novo = r.id;
+        detalhe = r.anuncios ? ` com ${r.anuncios} anúncio(s)` : " sem anúncios";
+        // orçamento diferente para a cópia (opcional)
+        const valor = String(form.get("valor") ?? "").trim();
+        if (valor) {
+          const o = await orcamentoDe(novo, token, "conjunto");
+          const v = Number(valor.replace(/\./g, "").replace(",", "."));
+          if (o && o.nivel === "conjunto" && v > 0) {
+            await mudarOrcamento(o, token, v);
+            detalhe += `, orçamento ${dinheiro(v)}`;
+          }
+        }
+      } else {
+        novo = await duplicarCampanha(objetoId, token);
+      }
+      await registrar({ ...base, acao, antes: null, depois: `cópia ${novo}${detalhe}` });
+      msg = `Cópia de ${NIVEL[nivel]} “${nome ?? objetoId}” criada PAUSADA${detalhe}. Revise e ative no Gerenciador: ${linkGerenciador(contaId, nivel, novo)}`;
     } else {
       throw new Error("Ação desconhecida.");
     }

@@ -5,6 +5,12 @@ import { acaoGoogle, acaoMeta } from "@/app/acoes-anuncios";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
+/** Para onde dá para copiar: campanhas e conjuntos do cliente (só os da mesma conta aparecem). */
+export type DestinosDuplicar = {
+  campanhas: { id: string; nome: string; conta: string }[];
+  conjuntos: { id: string; nome: string; conta: string; pai: string }[];
+};
+
 export type PropsAcoes = {
   plataforma: "meta" | "google";
   contaId: string;
@@ -18,6 +24,8 @@ export type PropsAcoes = {
   mostrarOrcamento: boolean;
   voltar: string;
   compacto?: boolean;
+  /** Meta: liga o "Duplicar" (campanha atual do conjunto / conjunto atual do anúncio + destinos possíveis) */
+  duplicar?: { destinos: DestinosDuplicar; campanhaAtual: string; conjuntoAtual: string | null };
 };
 
 function Botao({ children, className, titulo }: { children: React.ReactNode; className: string; titulo?: string }) {
@@ -71,7 +79,7 @@ export function AcoesRapidas(p: PropsAcoes) {
               <Botao className={btn} titulo={mudanca(fator)}>{fator > 1 ? "+20%" : "−20%"}</Botao>
             </form>
           ))}
-          <details className="relative">
+          <details>
             <summary className={`${btn} cursor-pointer list-none`}>R$…</summary>
             <form
               action={acao}
@@ -79,7 +87,7 @@ export function AcoesRapidas(p: PropsAcoes) {
                 const v = new FormData(e.currentTarget).get("valor");
                 if (!confirm(`Mudar o orçamento ${onde} de “${p.nome}” para R$ ${v}${sufixo}?`)) e.preventDefault();
               }}
-              className="absolute right-0 z-10 mt-1 flex gap-1 rounded-lg border border-borda bg-superficie p-2 shadow-lg"
+              className="mt-1 flex gap-1 rounded-lg border border-borda bg-fundo p-2"
             >
               {ocultos}
               <input type="hidden" name="acao" value="orcamento" />
@@ -92,6 +100,63 @@ export function AcoesRapidas(p: PropsAcoes) {
           </details>
         </>
       )}
+      {p.duplicar && <Duplicar {...p} duplicar={p.duplicar} ocultos={ocultos} />}
     </div>
+  );
+}
+
+/** Duplicar no Meta: anúncio → conjunto de destino; conjunto → campanha de destino (com ou sem anúncios); campanha inteira. */
+function Duplicar(p: PropsAcoes & { duplicar: NonNullable<PropsAcoes["duplicar"]>; ocultos: React.ReactNode }) {
+  const { destinos, campanhaAtual, conjuntoAtual } = p.duplicar;
+  const campo = "w-full rounded-md border border-borda bg-fundo px-2 py-1 text-xs";
+  const btn = "rounded-md border border-borda bg-superficie px-2 py-0.5 text-xs hover:border-destaque";
+  const conjuntos = destinos.conjuntos.filter((c) => c.conta === p.contaId);
+  const campanhas = destinos.campanhas.filter((c) => c.conta === p.contaId);
+  return (
+    <details>
+      <summary className={`${btn} cursor-pointer list-none`} title="Duplicar (a cópia nasce pausada)">⧉ Duplicar</summary>
+      <form
+        action={acaoMeta}
+        onSubmit={(e) => {
+          if (!confirm(`Duplicar “${p.nome}”? A cópia vai ser criada PAUSADA no Meta.`)) e.preventDefault();
+        }}
+        className="mt-1 w-72 space-y-2 rounded-lg border border-borda bg-fundo p-3 text-left text-xs"
+      >
+        {p.ocultos}
+        <input type="hidden" name="acao" value="duplicar" />
+        <input type="hidden" name="campanha_atual" value={campanhaAtual} />
+        <input type="hidden" name="conjunto_atual" value={conjuntoAtual ?? ""} />
+        {p.nivel === "anuncio" && (
+          <label className="block space-y-1">
+            <span className="text-texto-3">Copiar para o conjunto</span>
+            <select name="destino" defaultValue={conjuntoAtual ?? ""} className={campo}>
+              {conjuntos.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.id === conjuntoAtual ? " (o mesmo)" : ` · ${c.pai}`}</option>)}
+            </select>
+          </label>
+        )}
+        {p.nivel === "conjunto" && (
+          <>
+            <label className="block space-y-1">
+              <span className="text-texto-3">Copiar para a campanha</span>
+              <select name="destino" defaultValue={campanhaAtual} className={campo}>
+                {campanhas.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.id === campanhaAtual ? " (a mesma)" : ""}</option>)}
+              </select>
+            </label>
+            <label className="flex items-center gap-1">
+              <input type="checkbox" name="com_anuncios" value="1" defaultChecked /> copiar junto os anúncios
+            </label>
+            {p.orcamento?.tipo === "dia" && (
+              <label className="block space-y-1">
+                <span className="text-texto-3">Orçamento diário da cópia (vazio = igual, {brl.format(p.orcamento.valor)})</span>
+                <input name="valor" inputMode="decimal" placeholder="R$" className={campo} />
+              </label>
+            )}
+          </>
+        )}
+        {p.nivel === "campanha" && <p className="text-texto-2">Copia a campanha inteira, com todos os conjuntos e anúncios.</p>}
+        <p className="text-texto-3">A cópia nasce pausada, com “ - cópia” no nome. Você revisa e ativa no Gerenciador.</p>
+        <Botao className={`${btn} w-full`}>Criar cópia pausada</Botao>
+      </form>
+    </details>
   );
 }

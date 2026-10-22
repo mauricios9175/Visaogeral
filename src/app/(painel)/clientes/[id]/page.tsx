@@ -7,7 +7,7 @@ import { formatarIdGoogle } from "@/lib/google";
 import { decimal, dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
 import { Aviso, Kpi, SeletorPeriodo, SeloStatus, TiposResultado, Variacao } from "@/components/ui";
 import { BarrasDiarias } from "@/components/graficos";
-import { AcoesRapidas } from "@/components/acoes-rapidas";
+import { AcoesRapidas, type DestinosDuplicar } from "@/components/acoes-rapidas";
 import { db } from "@/lib/db";
 
 
@@ -27,7 +27,10 @@ const FILTROS = [
 
 export default async function PaginaCliente({ params, searchParams }: PageProps<"/clientes/[id]">) {
   const { id } = await params;
-  const busca = (await searchParams) as { p?: string; de?: string; ate?: string; nivel?: string; status?: string; utm?: string; msg?: string };
+  const busca = (await searchParams) as {
+    p?: string; de?: string; ate?: string; nivel?: string; status?: string; utm?: string; msg?: string;
+    campanha?: string; conjunto?: string;
+  };
   const dimensao = (DIMENSOES_UTM.find((x) => x.chave === busca.utm) ?? DIMENSOES_UTM[0]).chave;
   const { nivel } = busca;
   const filtro = FILTROS.find((f) => f.chave === busca.status) ?? FILTROS[0];
@@ -51,10 +54,18 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
   }
   const { cliente: c, atual: a, anterior: b } = d;
   const nivelAtual = NIVEIS.find((n) => n.chave === nivel) ?? NIVEIS[0];
-  const linhas = d[nivelAtual.chave].filter((l) => filtro.aceita(l.status));
+  // navegação igual ao Gerenciador: escolher uma campanha filtra conjuntos e anúncios; um conjunto filtra os anúncios
+  const campanhaSel = d.campanhas.find((x) => x.id === busca.campanha) ?? null;
+  const conjuntoSel = d.conjuntos.find((x) => x.id === busca.conjunto) ?? null;
+  const doRecorte = (n: (typeof NIVEIS)[number]["chave"]) => d[n].filter((l) =>
+    filtro.aceita(l.status) &&
+    (n === "campanhas" || !campanhaSel || l.campanhaId === campanhaSel.id) &&
+    (n !== "anuncios" || !conjuntoSel || l.conjuntoId === conjuntoSel.id));
+  const linhas = doRecorte(nivelAtual.chave);
+  const recorte = `${campanhaSel ? `&campanha=${campanhaSel.id}` : ""}${conjuntoSel ? `&conjunto=${conjuntoSel.id}` : ""}`;
   const base = `/clientes/${id}`;
   // depois de uma ação rápida, volta para a mesma tela (mesmo período, nível e filtro)
-  const voltar = `${base}?${atual.qs}&nivel=${nivelAtual.chave}&status=${filtro.chave}${busca.utm ? `&utm=${busca.utm}` : ""}`;
+  const voltar = `${base}?${atual.qs}&nivel=${nivelAtual.chave}&status=${filtro.chave}${recorte}${busca.utm ? `&utm=${busca.utm}` : ""}`;
   // O CRM compara com o investimento total em anúncios (Meta + Google)
   const g = google && !("erro" in google) ? google : null;
   const gastoTotal = a.gasto + (g?.atual.gasto ?? 0);
@@ -112,22 +123,46 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
         <BarrasDiarias dados={d.serie} campo="cpr" titulo="Custo por resultado por dia" formato="dinheiro" />
       </div>
 
-      <div className="rounded-xl border border-borda bg-superficie">
+      <div id="tabela" className="scroll-mt-4 rounded-xl border border-borda bg-superficie">
+        {(campanhaSel || conjuntoSel) && (
+          <div className="flex flex-wrap items-center gap-1 border-b border-borda px-3 py-2 text-sm">
+            <Link href={`${base}?${atual.qs}&nivel=campanhas&status=${filtro.chave}#tabela`} className="text-destaque underline">
+              Todas as campanhas
+            </Link>
+            {campanhaSel && (
+              <>
+                <span className="text-texto-3">›</span>
+                <Link
+                  href={`${base}?${atual.qs}&nivel=conjuntos&status=${filtro.chave}&campanha=${campanhaSel.id}#tabela`}
+                  className={conjuntoSel ? "text-destaque underline" : "font-medium"}
+                >
+                  {campanhaSel.nome}
+                </Link>
+              </>
+            )}
+            {conjuntoSel && (
+              <>
+                <span className="text-texto-3">›</span>
+                <span className="font-medium">{conjuntoSel.nome}</span>
+              </>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-1 border-b border-borda p-2 text-sm">
           {NIVEIS.map((n) => (
             <Link
               key={n.chave}
-              href={`${base}?${atual.qs}&nivel=${n.chave}&status=${filtro.chave}`}
+              href={`${base}?${atual.qs}&nivel=${n.chave}&status=${filtro.chave}${recorte}#tabela`}
               className={`rounded-md px-3 py-1 ${n.chave === nivelAtual.chave ? "bg-fundo font-medium" : "text-texto-2 hover:text-texto"}`}
             >
-              {n.rotulo} <span className="text-texto-3">({d[n.chave].filter((l) => filtro.aceita(l.status)).length})</span>
+              {n.rotulo} <span className="text-texto-3">({doRecorte(n.chave).length})</span>
             </Link>
           ))}
           <span className="ml-auto flex gap-1">
             {FILTROS.map((f) => (
               <Link
                 key={f.chave}
-                href={`${base}?${atual.qs}&nivel=${nivelAtual.chave}&status=${f.chave}`}
+                href={`${base}?${atual.qs}&nivel=${nivelAtual.chave}&status=${f.chave}${recorte}#tabela`}
                 className={`rounded-md px-3 py-1 ${f.chave === filtro.chave ? "bg-fundo font-medium" : "text-texto-2 hover:text-texto"}`}
               >
                 {f.rotulo}
@@ -135,7 +170,14 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
             ))}
           </span>
         </div>
-        <Tabela linhas={linhas} meta={c.cpl_meta} nivel={nivelAtual.chave} voltar={voltar} />
+        <Tabela
+          linhas={linhas} meta={c.cpl_meta} nivel={nivelAtual.chave} voltar={voltar}
+          abrir={(l) =>
+            nivelAtual.chave === "campanhas" ? `${base}?${atual.qs}&nivel=conjuntos&status=${filtro.chave}&campanha=${l.id}#tabela`
+            : nivelAtual.chave === "conjuntos" ? `${base}?${atual.qs}&nivel=anuncios&status=${filtro.chave}&campanha=${l.campanhaId}&conjunto=${l.id}#tabela`
+            : null}
+          destinos={{ campanhas: d.campanhas.map((x) => ({ id: x.id, nome: x.nome, conta: x.conta })), conjuntos: d.conjuntos.map((x) => ({ id: x.id, nome: x.nome, conta: x.conta, pai: x.pai ?? "" })) }}
+        />
       </div>
 
       {google && ("erro" in google ? <Aviso>Erro ao carregar o Google Ads: {google.erro}</Aviso> : <SecaoGoogle g={google} voltar={voltar} />)}
@@ -300,8 +342,10 @@ function SecaoGoogle({ g, voltar }: { g: NonNullable<Awaited<ReturnType<typeof d
 
 const NIVEL_ACAO = { campanhas: "campanha", conjuntos: "conjunto", anuncios: "anuncio" } as const;
 
-function Tabela({ linhas, meta, nivel, voltar }: {
+function Tabela({ linhas, meta, nivel, voltar, abrir, destinos }: {
   linhas: LinhaTabela[]; meta: number | null; nivel: keyof typeof NIVEL_ACAO; voltar: string;
+  abrir: (l: LinhaTabela) => string | null;
+  destinos: DestinosDuplicar;
 }) {
   if (!linhas.length) return <p className="p-4 text-sm text-texto-3">Sem dados no período.</p>;
   const media = (() => {
@@ -332,7 +376,13 @@ function Tabela({ linhas, meta, nivel, voltar }: {
                 <td className="max-w-80 px-4 py-2">
                   <div className="flex items-center gap-2">
                     <SeloStatus status={l.status} />
-                    <span className="truncate" title={l.nome}>{l.nome}</span>
+                    {abrir(l) ? (
+                      <Link href={abrir(l)!} className="truncate text-destaque hover:underline" title={`Ver ${nivel === "campanhas" ? "conjuntos" : "anúncios"} de “${l.nome}”`}>
+                        {l.nome}
+                      </Link>
+                    ) : (
+                      <span className="truncate" title={l.nome}>{l.nome}</span>
+                    )}
                   </div>
                   <div className="truncate text-xs text-texto-3">
                     {[l.tipo, l.pai].filter(Boolean).join(" · ")}
@@ -359,6 +409,7 @@ function Tabela({ linhas, meta, nivel, voltar }: {
                     ativo={l.status === "ACTIVE" ? true : l.status === "PAUSED" ? false : null}
                     orcamento={l.orcamento} mostrarOrcamento={nivel !== "anuncios" && (!!l.orcamento || nivel === "conjuntos")}
                     voltar={voltar}
+                    duplicar={{ destinos, campanhaAtual: l.campanhaId, conjuntoAtual: l.conjuntoId }}
                   />
                 </td>
               </tr>

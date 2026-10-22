@@ -198,6 +198,8 @@ function comTipos(l: LinhaAnuncio): LinhaAnuncio {
 export type LinhaTabela = Derivadas & {
   id: string; nome: string; pai?: string; tipo: string | null; status: string | null;
   conta: string;                                   // conta do Meta (para as ações rápidas)
+  campanhaId: string;                              // para navegar campanha → conjuntos → anúncios
+  conjuntoId: string | null;
   orcamento: { valor: number; tipo: "dia" | "total" } | null;
 };
 
@@ -215,10 +217,10 @@ function agrupar(
   chave: (l: LinhaAnuncio) => [string, string, string?],
   status: Map<string, InfoStatus>,
 ): LinhaTabela[] {
-  const mapa = new Map<string, { nome: string; pai?: string; conta: string; m: Metricas }>();
+  const mapa = new Map<string, { nome: string; pai?: string; conta: string; campanhaId: string; conjuntoId: string | null; m: Metricas }>();
   for (const l of linhas) {
     const [id, nome, pai] = chave(l);
-    const g = mapa.get(id) ?? { nome, pai, conta: l.conta_id, m: { ...ZERO } };
+    const g = mapa.get(id) ?? { nome, pai, conta: l.conta_id, campanhaId: l.campaign_id, conjuntoId: l.adset_id ?? null, m: { ...ZERO } };
     somar(g.m, l);
     mapa.set(id, g);
   }
@@ -227,7 +229,7 @@ function agrupar(
       const st = status.get(id);
       const orcamento = st?.orcamento_diario ? { valor: Number(st.orcamento_diario), tipo: "dia" as const }
         : st?.orcamento_total ? { valor: Number(st.orcamento_total), tipo: "total" as const } : null;
-      return { id, nome: g.nome, pai: g.pai, conta: g.conta, orcamento, tipo: tipoPrincipal(g.m), status: st?.status ?? null, ...derivar(g.m) };
+      return { id, nome: g.nome, pai: g.pai, conta: g.conta, campanhaId: g.campanhaId, conjuntoId: g.conjuntoId, orcamento, tipo: tipoPrincipal(g.m), status: st?.status ?? null, ...derivar(g.m) };
     })
     .sort((a, b) => b.gasto - a.gasto);
 }

@@ -518,3 +518,71 @@ export async function mudarOrcamento(o: Orcamento, token: string, novo: number) 
   const centavos = String(Math.round(novo * 100));
   await post(o.id, token, o.diario != null ? { daily_budget: centavos } : { lifetime_budget: centavos });
 }
+
+// ---------- Duplicar (cópias do próprio Meta; tudo nasce PAUSADO) ----------
+
+const COPIA = JSON.stringify({ rename_strategy: "ONLY_TOP_LEVEL_RENAME", rename_suffix: " - cópia" });
+const SEM_RENOMEAR = JSON.stringify({ rename_strategy: "NO_RENAME" });
+
+/** Lista os ids filhos (conjuntos de uma campanha ou anúncios de um conjunto), sem os excluídos. */
+async function filhos(id: string, token: string, borda: "adsets" | "ads") {
+  return (await todasPaginas<{ id: string }>(montarUrl(`${id}/${borda}`, token, { fields: "id", limit: "200" }))).map((x) => x.id);
+}
+
+/** Duplica um anúncio para um conjunto (o mesmo ou outro da mesma conta). */
+export async function duplicarAnuncio(adId: string, token: string, conjuntoDestino: string, renomear = true) {
+  const r = await post(`${adId}/copies`, token, {
+    adset_id: conjuntoDestino, status_option: "PAUSED", rename_options: renomear ? COPIA : SEM_RENOMEAR,
+  });
+  return String(r.copied_ad_id ?? r.ad_object_ids?.[0]?.copied_id ?? "");
+}
+
+/**
+ * Duplica um conjunto (com ou sem os anúncios) para uma campanha.
+ * O Meta só faz a cópia completa de uma vez quando há poucos anúncios; se recusar, copia o conjunto e depois anúncio por anúncio.
+ */
+export async function duplicarConjunto(adsetId: string, token: string, campanhaDestino: string, comAnuncios: boolean) {
+  const base = { campaign_id: campanhaDestino, status_option: "PAUSED" };
+  if (comAnuncios) {
+    try {
+      const r = await post(`${adsetId}/copies`, token, { ...base, deep_copy: "true", rename_options: COPIA });
+      return { id: String(r.copied_adset_id), anuncios: (r.ad_object_ids ?? []).length as number };
+    } catch {
+      // segue para a cópia em partes
+    }
+  }
+  const r = await post(`${adsetId}/copies`, token, { ...base, deep_copy: "false", rename_options: COPIA });
+  const novo = String(r.copied_adset_id);
+  let anuncios = 0;
+  if (comAnuncios) {
+    for (const ad of await filhos(adsetId, token, "ads")) {
+      await duplicarAnuncio(ad, token, novo, false);
+      anuncios++;
+    }
+  }
+  return { id: novo, anuncios };
+}
+
+/** Duplica uma campanha inteira (conjuntos e anúncios). */
+export async function duplicarCampanha(campanhaId: string, token: string) {
+  try {
+    const r = await post(`${campanhaId}/copies`, token, { deep_copy: "true", status_option: "PAUSED", rename_options: COPIA });
+    return String(r.copied_campaign_id);
+  } catch {
+    const r = await post(`${campanhaId}/copies`, token, { deep_copy: "false", status_option: "PAUSED", rename_options: COPIA });
+    const nova = String(r.copied_campaign_id);
+    for (const adset of await filhos(campanhaId, token, "adsets")) {
+      // conjuntos e anúncios copiados sem " - cópia" (só a campanha recebe o sufixo)
+      const c = await post(`${adset}/copies`, token, { campaign_id: nova, deep_copy: "false", status_option: "PAUSED", rename_options: SEM_RENOMEAR });
+      for (const ad of await filhos(adset, token, "ads")) await duplicarAnuncio(ad, token, String(c.copied_adset_id), false);
+    }
+    return nova;
+  }
+}
+
+/** Link para o item no Gerenciador de Anúncios (para revisar a cópia antes de ativar). */
+export function linkGerenciador(contaId: string, nivel: "campanha" | "conjunto" | "anuncio", id: string) {
+  const act = contaId.replace(/^act_/, "");
+  const [aba, campo] = nivel === "campanha" ? ["campaigns", "selected_campaign_ids"] : nivel === "conjunto" ? ["adsets", "selected_adset_ids"] : ["ads", "selected_ad_ids"];
+  return `https://adsmanager.facebook.com/adsmanager/manage/${aba}?act=${act}&${campo}=${id}`;
+}

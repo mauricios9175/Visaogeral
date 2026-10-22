@@ -96,7 +96,14 @@ export function Kpi({ rotulo, valor, children }: { rotulo: string; valor: string
 }
 
 export function Aviso({ children }: { children: React.ReactNode }) {
-  return <div className="rounded-lg border border-borda bg-superficie px-4 py-3 text-sm text-texto-2">{children}</div>;
+  // mensagens de texto com link (ex.: "Revise no Gerenciador: https://...") viram link clicável
+  const conteudo = typeof children === "string"
+    ? children.split(/(https?:\/\/\S+)/).map((parte, i) =>
+        /^https?:\/\//.test(parte)
+          ? <a key={i} href={parte} target="_blank" rel="noreferrer" className="text-destaque underline">abrir ↗</a>
+          : parte)
+    : children;
+  return <div className="rounded-lg border border-borda bg-superficie px-4 py-3 text-sm text-texto-2">{conteudo}</div>;
 }
 
 /** "12 conversas · 3 formulário · 5 conv. personalizada"; cliques/engajamento aparecem à parte. */
