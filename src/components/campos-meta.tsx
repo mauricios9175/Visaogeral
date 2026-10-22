@@ -141,6 +141,12 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
             <input type="checkbox" checked={valor.advantage} onChange={(e) => set("advantage", e.target.checked)} /> Público Advantage+
           </label>
         </div>
+        {valor.advantage && (
+          <p className={dica}>
+            Com o público Advantage+, o Meta trata idade e interesses como sugestão e exige faixa até 65 anos
+            (idade mínima de no máximo 25). Para travar a idade, desligue o Advantage+.
+          </p>
+        )}
         <div className="space-y-1">
           <span className="text-sm">Localização {naMontagem ? "" : <span className={dica}>(opcional no modelo; na montagem você escolhe a cidade do cliente)</span>}</span>
           <Busca<Local>
@@ -202,11 +208,6 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
               Acrescentar UTMs (utm_source=facebook, utm_campaign, utm_content = nome do anúncio)
             </label>
           </div>
-        )}
-        {objetivo === "mensagens" && (
-          <label className={rotulo}>Mensagem que já vem escrita no WhatsApp (opcional)
-            <input value={valor.mensagemWhatsapp} onChange={(e) => set("mensagemWhatsapp", e.target.value)} className={campo} />
-          </label>
         )}
       </fieldset>
     </div>

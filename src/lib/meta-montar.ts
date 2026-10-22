@@ -39,9 +39,20 @@ export async function ativosDaConta(contaId: string, token: string) {
     todasPaginas<{ id: string; username?: string; name?: string }>(montarUrl(`${contaId}/instagram_accounts`, token, { fields: "id,username", limit: "100" })).catch(() => []),
     todasPaginas<{ id: string; name: string }>(montarUrl(`${contaId}/adspixels`, token, { fields: "id,name", limit: "100" })).catch(() => []),
   ]);
+  // alternativas: páginas do próprio perfil e o Instagram conectado a cada página
+  const listaPaginas = paginas.length ? paginas
+    : await todasPaginas<{ id: string; name: string }>(montarUrl("me/accounts", token, { fields: "id,name", limit: "100" })).catch(() => []);
+  let listaIg = instagram;
+  if (!listaIg.length) {
+    const ligados = await Promise.all(listaPaginas.slice(0, 20).map((p) =>
+      getMeta<{ instagram_business_account?: { id: string; username?: string } }>(
+        montarUrl(p.id, token, { fields: "instagram_business_account{id,username}" }),
+      ).then((r) => r.instagram_business_account ?? null, () => null)));
+    listaIg = ligados.filter((x): x is { id: string; username?: string } => !!x);
+  }
   return {
-    paginas: paginas.map((p) => ({ id: p.id, nome: p.name })),
-    instagram: instagram.map((i) => ({ id: i.id, nome: i.username ? `@${i.username}` : i.name ?? i.id })),
+    paginas: listaPaginas.map((p) => ({ id: p.id, nome: p.name })),
+    instagram: listaIg.map((i) => ({ id: i.id, nome: i.username ? `@${i.username}` : (i as { name?: string }).name ?? i.id })),
     pixels: pixels.map((p) => ({ id: p.id, nome: p.name })),
   };
 }
@@ -73,10 +84,14 @@ async function subirVideo(contaId: string, token: string, caminho: string, nome:
   const r = await postMeta(`${contaId}/advideos`, token, { file_url: url, name: nome });
   const id = String(r.id);
   for (let i = 0; i < 40; i++) {
-    const v = await getMeta<{ status?: { video_status?: string }; picture?: string }>(montarUrl(id, token, { fields: "status,picture" }));
+    const v = await getMeta<{ status?: { video_status?: string }; picture?: string; thumbnails?: { data?: { uri: string; is_preferred?: boolean }[] } }>(
+      montarUrl(id, token, { fields: "status,picture,thumbnails" }),
+    );
     const st = v.status?.video_status;
     if (st === "error") throw new Error(`O Meta não conseguiu processar o vídeo ${nome}.`);
-    if (st === "ready" && v.picture) return { id, miniatura: v.picture };
+    // a miniatura da lista é a real; "picture" pode ser uma imagem provisória
+    const miniatura = v.thumbnails?.data?.find((t) => t.is_preferred)?.uri ?? v.thumbnails?.data?.[0]?.uri ?? v.picture;
+    if (st === "ready" && miniatura) return { id, miniatura };
     await new Promise((res) => setTimeout(res, 5000));
   }
   throw new Error(`O vídeo ${nome} ainda está sendo processado pelo Meta; tente montar de novo em alguns minutos.`);
@@ -98,8 +113,9 @@ function segmentacao(c: ConfigMeta) {
       ...(paises.length && { countries: paises }),
       location_types: ["home", "recent"],
     },
-    age_min: c.idadeMin,
-    age_max: c.idadeMax,
+    // com o público Advantage+ ligado, o Meta exige idade máxima 65 e mínima de até 25 (a idade vira sugestão)
+    age_min: c.advantage ? Math.min(c.idadeMin, 25) : c.idadeMin,
+    age_max: c.advantage ? 65 : c.idadeMax,
     ...(GENEROS[c.generos] && { genders: GENEROS[c.generos] }),
     ...(c.interesses.length && { flexible_spec: [{ interests: c.interesses.map((i) => ({ id: i.id, name: i.nome })) }] }),
     targeting_automation: { advantage_audience: c.advantage ? 1 : 0 },
@@ -181,17 +197,18 @@ export async function montarNoMeta(d: DadosMontagem) {
         const link =
           d.objetivo === "site" ? (c.utm ? comUtm(c.url, campanhaNome, nomeAnuncio) : c.url)
           : d.objetivo === "mensagens" ? "https://api.whatsapp.com/send"
-          : "https://www.facebook.com/";
+          : "http://fb.me/"; // link padrão do Meta para formulário instantâneo
+        // no vídeo não existe "link" fora do botão; no WhatsApp o botão não pode levar link
         const cta =
-          d.objetivo === "formulario" ? { type: c.cta, value: { lead_gen_form_id: d.formularioId } }
-          : d.objetivo === "mensagens" ? { type: "WHATSAPP_MESSAGE", value: { app_destination: "WHATSAPP" } }
+          d.objetivo === "formulario" ? { type: c.cta, value: { link, lead_gen_form_id: d.formularioId } }
+          : d.objetivo === "mensagens" ? (ehVideo ? { type: "WHATSAPP_MESSAGE" } : { type: "WHATSAPP_MESSAGE", value: { app_destination: "WHATSAPP" } })
           : { type: c.cta, value: { link } };
         const texto = textos.length ? textos[i % textos.length] : "";
         const titulo = titulos.length ? titulos[i % titulos.length] : "";
         const story = ehVideo
           ? { page_id: d.paginaId, video_data: {
               video_id: (midia as { id: string }).id, image_url: (midia as { miniatura: string }).miniatura,
-              message: texto, title: titulo, ...(c.descricao && { link_description: c.descricao }), call_to_action: cta,
+              message: texto, title: titulo, call_to_action: cta,
             } }
           : { page_id: d.paginaId, link_data: {
               image_hash: (midia as { hash: string }).hash, link, message: texto, name: titulo,

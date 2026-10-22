@@ -1,6 +1,7 @@
 import "server-only";
 
-const VERSAO = process.env.META_API_VERSION ?? "v23.0";
+// v24 e anteriores deixaram de funcionar em out/2026
+const VERSAO = process.env.META_API_VERSION ?? "v25.0";
 const BASE = `https://graph.facebook.com/${VERSAO}`;
 
 export class MetaErro extends Error {
@@ -410,7 +411,8 @@ export function extrairResultados(linha: LinhaInsight, conjuntos?: Map<string, O
 // ---------- Login com Facebook (contas que ficam no BM do cliente) ----------
 
 // ads_management: necessário para as ações rápidas (pausar, ativar, mudar orçamento)
-export const ESCOPOS_LOGIN = "ads_read,ads_management,leads_retrieval,business_management";
+// pages_*: listar páginas e formulários na montagem de campanhas
+export const ESCOPOS_LOGIN = "ads_read,ads_management,leads_retrieval,business_management,pages_show_list,pages_manage_ads,pages_read_engagement";
 
 export function urlLogin(redirectUri: string, state: string) {
   const u = new URL(`https://www.facebook.com/${VERSAO}/dialog/oauth`);
