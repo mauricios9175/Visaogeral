@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { MODELOS_PADRAO, normalizarConfig, OBJETIVOS, type ObjetivoMeta } from "@/lib/modelos";
+import { MODELOS_PADRAO, normalizarConfig, normalizarFormulario, OBJETIVO_FORMULARIO, OBJETIVOS, type ObjetivoMeta } from "@/lib/modelos";
 
 function aviso(msg: string): never {
   redirect(`/modelos?msg=${encodeURIComponent(msg)}`);
@@ -42,4 +42,22 @@ export async function criarModelosPadrao() {
   );
   revalidatePath("/modelos");
   aviso(error ? `Erro: ${error.message} (rodou o SQL 0013?)` : "Modelos prontos criados. Edite à vontade.");
+}
+
+export async function salvarModeloFormulario(form: FormData) {
+  const id = String(form.get("id") ?? "");
+  const nome = String(form.get("nome") ?? "").trim();
+  if (!nome) aviso("Dê um nome ao modelo de formulário.");
+  let config;
+  try {
+    config = normalizarFormulario(JSON.parse(String(form.get("config") ?? "{}")));
+  } catch {
+    aviso("Não foi possível ler o formulário.");
+  }
+  const dados = { nome, objetivo: OBJETIVO_FORMULARIO, plataforma: "meta", config, atualizado_em: new Date().toISOString() };
+  const { error } = id
+    ? await db().from("modelos").update(dados).eq("id", id)
+    : await db().from("modelos").insert(dados);
+  revalidatePath("/modelos");
+  redirect(`/modelos?msg=${encodeURIComponent(error ? `Erro: ${error.message}` : "Modelo de formulário salvo.")}#formularios`);
 }

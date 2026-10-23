@@ -16,12 +16,14 @@ const rotulo = "block space-y-1 text-sm";
 const tamanho = (b: number) => (b > 1e6 ? `${(b / 1e6).toFixed(1).replace(".", ",")} MB` : `${Math.round(b / 1e3)} KB`);
 
 /** Tela de montagem: escolhe o modelo, a conta, a página e os criativos, e cria tudo pausado no Meta. */
-export function Montagem({ clienteId, clienteNome, contas, modelos, padroes }: {
+export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, modelosFormulario }: {
   clienteId: string;
   clienteNome: string;
   contas: Opcao[];
   modelos: Modelo[];
   padroes: Padroes;
+  /** modelos de formulário: na montagem dá para criar um formulário novo na página a partir deles */
+  modelosFormulario: Opcao[];
 }) {
   const [modeloId, setModeloId] = useState(modelos[0]?.id ?? "");
   const modelo = modelos.find((m) => m.id === modeloId);
@@ -34,7 +36,9 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes }: {
   const [instagram, setInstagram] = useState(padroes.instagram ?? "");
   const [pixel, setPixel] = useState(padroes.pixel ?? "");
   const [formularios, setFormularios] = useState<{ itens: Opcao[]; erro?: string } | null>(null);
-  const [formulario, setFormulario] = useState(padroes.formulario ?? "");
+  // "modelo:<id>" = criar um formulário novo a partir do modelo; senão o id de um formulário da página
+  const [formulario, setFormulario] = useState(
+    padroes.formulario || (modelosFormulario[0] ? `modelo:${modelosFormulario[0].id}` : ""));
   const [criativos, setCriativos] = useState<Criativo[]>([]);
   const [enviando, setEnviando] = useState<string | null>(null);
   const [erroEnvio, setErroEnvio] = useState<string | null>(null);
@@ -69,7 +73,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes }: {
     fetch(`/api/meta/formularios?conta=${encodeURIComponent(conta)}&pagina=${pagina}`).then((r) => r.json()).then((f) => {
       if (!vivo) return;
       setFormularios(f);
-      setFormulario((x) => (f.itens?.some((y: Opcao) => y.id === x) ? x : f.itens?.[0]?.id ?? x));
+      setFormulario((x) => (x.startsWith("modelo:") || f.itens?.some((y: Opcao) => y.id === x) ? x : f.itens?.[0]?.id ?? x));
     }).catch(() => vivo && setFormularios({ itens: [], erro: "Falha ao buscar os formulários." }));
     return () => { vivo = false; };
   }, [objetivo, pagina, conta]);
@@ -126,10 +130,15 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes }: {
         </label>
         {ativos?.erro && <p className="text-sm text-critico md:col-span-2">{ativos.erro}</p>}
         <label className={rotulo}>Página do Facebook
-          <select value={pagina} onChange={(e) => setPagina(e.target.value)} className={campo}>
-            {!ativos && <option>Carregando…</option>}
-            {ativos?.paginas.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
-          </select>
+          {ativos && !ativos.paginas.length ? (
+            // nenhuma página encontrada: dá para colar o ID (Configurações da página → Transparência da página)
+            <input value={pagina} onChange={(e) => setPagina(e.target.value.trim())} placeholder="Cole o ID da página" className={campo} />
+          ) : (
+            <select value={pagina} onChange={(e) => setPagina(e.target.value)} className={campo}>
+              {!ativos && <option>Carregando…</option>}
+              {ativos?.paginas.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+            </select>
+          )}
         </label>
         <label className={rotulo}>Instagram
           <select value={instagram} onChange={(e) => setInstagram(e.target.value)} className={campo}>
@@ -139,14 +148,26 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes }: {
         </label>
         {objetivo === "formulario" && (
           <label className={rotulo}>Formulário instantâneo
-            {formularios?.itens.length ? (
+            {formularios?.itens.length || modelosFormulario.length ? (
               <select value={formulario} onChange={(e) => setFormulario(e.target.value)} className={campo}>
-                {formularios.itens.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                {modelosFormulario.length > 0 && (
+                  <optgroup label="Criar formulário novo a partir do modelo">
+                    {modelosFormulario.map((m) => <option key={m.id} value={`modelo:${m.id}`}>✚ {m.nome}</option>)}
+                  </optgroup>
+                )}
+                {!!formularios?.itens.length && (
+                  <optgroup label="Formulários que já existem na página">
+                    {formularios.itens.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                  </optgroup>
+                )}
               </select>
             ) : (
               <input value={formulario} onChange={(e) => setFormulario(e.target.value)} placeholder="ID do formulário" className={campo} />
             )}
-            {formularios?.erro && <span className="block text-xs text-texto-3">{formularios.erro} Cole o ID do formulário (Central de Formulários da página).</span>}
+            {formulario.startsWith("modelo:") && <span className="block text-xs text-texto-3">O formulário é criado na página na hora de montar.</span>}
+            {formularios?.erro && !formulario.startsWith("modelo:") && (
+              <span className="block text-xs text-texto-3">{formularios.erro} Use um modelo de formulário (menu Modelos) ou cole o ID.</span>
+            )}
           </label>
         )}
         {objetivo === "site" && (

@@ -167,3 +167,59 @@ export function normalizarConfig(c: (Partial<ConfigMeta> & Legado) | null | unde
       }];
   return { ...BASE, ...resto, conjuntos };
 }
+
+// ---------- Modelos de formulário instantâneo (criados na página do cliente na hora da montagem) ----------
+
+export const OBJETIVO_FORMULARIO = "modelo_formulario"; // valor da coluna "objetivo" na tabela modelos
+
+export type PerguntaForm = {
+  tipo: "FULL_NAME" | "PHONE" | "EMAIL" | "CITY" | "STATE" | "CUSTOM";
+  rotulo: string;      // só para CUSTOM
+  opcoes: string[];    // CUSTOM de múltipla escolha; vazio = resposta livre
+};
+
+export type ConfigFormulario = {
+  nome: string;              // aceita {cliente} e {data}
+  tipo: "volume" | "intencao"; // intenção = etapa extra de revisão (leads mais qualificados)
+  introTitulo: string;
+  introTexto: string;
+  perguntas: PerguntaForm[];
+  politicaUrl: string;
+  politicaTexto: string;
+  agradecimentoTitulo: string;
+  agradecimentoTexto: string;
+  botaoTexto: string;
+  botaoUrl: string;          // site ou link do WhatsApp (https://wa.me/55…)
+};
+
+export type ModeloFormulario = { id: string; nome: string; config: ConfigFormulario };
+
+export const PERGUNTAS_PADRAO: { tipo: PerguntaForm["tipo"]; rotulo: string }[] = [
+  { tipo: "FULL_NAME", rotulo: "Nome completo" },
+  { tipo: "PHONE", rotulo: "Telefone" },
+  { tipo: "EMAIL", rotulo: "E-mail" },
+  { tipo: "CITY", rotulo: "Cidade" },
+  { tipo: "STATE", rotulo: "Estado" },
+];
+
+export const FORMULARIO_PADRAO: ConfigFormulario = {
+  nome: "Formulário {cliente} - {data}",
+  tipo: "intencao",
+  introTitulo: "",
+  introTexto: "",
+  perguntas: [
+    { tipo: "FULL_NAME", rotulo: "", opcoes: [] },
+    { tipo: "PHONE", rotulo: "", opcoes: [] },
+    { tipo: "CUSTOM", rotulo: "Qual ambiente você quer planejar?", opcoes: ["Cozinha", "Quarto", "Sala", "Casa toda"] },
+  ],
+  politicaUrl: "",
+  politicaTexto: "Política de privacidade",
+  agradecimentoTitulo: "Recebemos seus dados!",
+  agradecimentoTexto: "Em breve um consultor vai entrar em contato pelo WhatsApp.",
+  botaoTexto: "Falar no WhatsApp",
+  botaoUrl: "",
+};
+
+export function normalizarFormulario(c: Partial<ConfigFormulario> | null | undefined): ConfigFormulario {
+  return { ...FORMULARIO_PADRAO, ...(c ?? {}), perguntas: c?.perguntas?.length ? c.perguntas : FORMULARIO_PADRAO.perguntas };
+}

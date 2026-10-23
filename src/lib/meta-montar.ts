@@ -1,6 +1,6 @@
 import "server-only";
 import { getMeta, montarUrl, postMeta, todasPaginas, BASE_META } from "./meta";
-import { aplicarNome, ROTULO_CURTO, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type ObjetivoMeta } from "./modelos";
+import { aplicarNome, ROTULO_CURTO, type ConfigFormulario, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type ObjetivoMeta } from "./modelos";
 import { baixar, linkTemporario } from "./armazenamento";
 import { hojeISO } from "./datas";
 
@@ -67,38 +67,140 @@ export async function buscarInteresses(q: string, token: string, contaId?: strin
 
 // ---------- ativos da conta ----------
 
+type Opcao = { id: string; nome: string };
+const msgErro = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * Páginas, Instagram e pixels de uma conta. Tenta vários caminhos, porque contas acessadas pela BM do cliente
+ * nem sempre liberam todos:
+ *  1. páginas promovidas pela conta (precisa de pages_show_list / pages_manage_ads);
+ *  2. páginas e Instagram usados nos anúncios que a conta já tem (só precisa de ads_read);
+ *  3. páginas da BM dona da conta;
+ *  4. páginas do seu perfil.
+ * Se nada vier, devolve os motivos para aparecerem na tela.
+ */
 export async function ativosDaConta(contaId: string, token: string) {
-  const [paginas, instagram, pixels] = await Promise.all([
-    todasPaginas<{ id: string; name: string }>(montarUrl(`${contaId}/promote_pages`, token, { fields: "id,name", limit: "100" })).catch(() => []),
-    todasPaginas<{ id: string; username?: string; name?: string }>(montarUrl(`${contaId}/instagram_accounts`, token, { fields: "id,username", limit: "100" })).catch(() => []),
-    todasPaginas<{ id: string; name: string }>(montarUrl(`${contaId}/adspixels`, token, { fields: "id,name", limit: "100" })).catch(() => []),
+  const erros: string[] = [];
+  const tentar = async <T,>(rotulo: string, f: () => Promise<T[]>) => {
+    try {
+      return await f();
+    } catch (e) {
+      erros.push(`${rotulo}: ${msgErro(e)}`);
+      return [] as T[];
+    }
+  };
+  const paginas = new Map<string, string>();
+  const instagram = new Map<string, string>();
+  const somarPaginas = (lista: { id: string; name?: string }[]) => lista.forEach((p) => p.id && paginas.set(p.id, p.name ?? paginas.get(p.id) ?? p.id));
+
+  const [promovidas, contasIg, pixels, criativos] = await Promise.all([
+    tentar("páginas da conta", () => todasPaginas<{ id: string; name: string }>(montarUrl(`${contaId}/promote_pages`, token, { fields: "id,name", limit: "100" }))),
+    tentar("Instagram da conta", () => todasPaginas<{ id: string; username?: string }>(montarUrl(`${contaId}/instagram_accounts`, token, { fields: "id,username", limit: "100" }))),
+    tentar("pixels", () => todasPaginas<{ id: string; name: string }>(montarUrl(`${contaId}/adspixels`, token, { fields: "id,name", limit: "100" }))),
+    // anúncios que já existem na conta: de onde vêm a página e o Instagram usados
+    tentar("anúncios da conta", async () => (await getMeta<{ data: {
+      object_story_spec?: { page_id?: string; instagram_user_id?: string; instagram_actor_id?: string };
+      effective_object_story_id?: string; instagram_user_id?: string; instagram_actor_id?: string;
+    }[] }>(montarUrl(`${contaId}/adcreatives`, token, {
+      fields: "object_story_spec{page_id,instagram_user_id,instagram_actor_id},effective_object_story_id,instagram_user_id,instagram_actor_id",
+      limit: "100",
+    }))).data),
   ]);
-  // alternativas: páginas do próprio perfil e o Instagram conectado a cada página
-  const listaPaginas = paginas.length ? paginas
-    : await todasPaginas<{ id: string; name: string }>(montarUrl("me/accounts", token, { fields: "id,name", limit: "100" })).catch(() => []);
-  let listaIg = instagram;
-  if (!listaIg.length) {
-    const ligados = await Promise.all(listaPaginas.slice(0, 20).map((p) =>
-      getMeta<{ instagram_business_account?: { id: string; username?: string } }>(
-        montarUrl(p.id, token, { fields: "instagram_business_account{id,username}" }),
-      ).then((r) => r.instagram_business_account ?? null, () => null)));
-    listaIg = ligados.filter((x): x is { id: string; username?: string } => !!x);
+  somarPaginas(promovidas);
+  for (const i of contasIg) instagram.set(i.id, i.username ? `@${i.username}` : i.id);
+  const doCriativo = new Set<string>();
+  for (const c of criativos) {
+    const pg = c.object_story_spec?.page_id ?? c.effective_object_story_id?.split("_")[0];
+    if (pg) doCriativo.add(pg);
+    const ig = c.object_story_spec?.instagram_user_id ?? c.instagram_user_id ?? c.object_story_spec?.instagram_actor_id ?? c.instagram_actor_id;
+    if (ig && !instagram.has(ig)) instagram.set(ig, ig);
   }
+  // nomes das páginas encontradas nos anúncios
+  const semNome = [...doCriativo].filter((id) => !paginas.has(id));
+  if (semNome.length) {
+    const r = await getMeta<Record<string, { id: string; name?: string }>>(montarUrl("", token, { ids: semNome.slice(0, 50).join(","), fields: "id,name" }))
+      .catch(() => ({} as Record<string, { id: string; name?: string }>));
+    for (const id of semNome) paginas.set(id, r[id]?.name ?? `Página ${id}`);
+  }
+  if (!paginas.size) {
+    // BM dona da conta e, por último, as páginas do perfil
+    const bm = await getMeta<{ business?: { id: string } }>(montarUrl(contaId, token, { fields: "business" })).catch(() => null);
+    if (bm?.business?.id) {
+      for (const borda of ["owned_pages", "client_pages"]) {
+        somarPaginas(await tentar(`páginas da BM (${borda})`, () =>
+          todasPaginas<{ id: string; name: string }>(montarUrl(`${bm.business!.id}/${borda}`, token, { fields: "id,name", limit: "100" }))));
+      }
+    }
+    if (!paginas.size) somarPaginas(await tentar("páginas do perfil", () => todasPaginas<{ id: string; name: string }>(montarUrl("me/accounts", token, { fields: "id,name", limit: "100" }))));
+  }
+  // nome do Instagram: o @ da conta conectada a cada página
+  const igSemNome = [...instagram].filter(([id, nome]) => id === nome).map(([id]) => id);
+  if (igSemNome.length) {
+    const r = await getMeta<Record<string, { id: string; username?: string }>>(montarUrl("", token, { ids: igSemNome.slice(0, 50).join(","), fields: "id,username" }))
+      .catch(() => ({} as Record<string, { id: string; username?: string }>));
+    for (const id of igSemNome) instagram.set(id, r[id]?.username ? `@${r[id].username}` : `Instagram ${id}`);
+  }
+  if (!instagram.size && paginas.size) {
+    const ligados = await Promise.all([...paginas.keys()].slice(0, 20).map((id) =>
+      getMeta<{ instagram_business_account?: { id: string; username?: string } }>(montarUrl(id, token, { fields: "instagram_business_account{id,username}" }))
+        .then((r) => r.instagram_business_account ?? null, () => null)));
+    for (const i of ligados) if (i) instagram.set(i.id, i.username ? `@${i.username}` : i.id);
+  }
+  const lista = (m: Map<string, string>): Opcao[] => [...m].map(([id, nome]) => ({ id, nome })).sort((a, b) => a.nome.localeCompare(b.nome));
   return {
-    paginas: listaPaginas.map((p) => ({ id: p.id, nome: p.name })),
-    instagram: listaIg.map((i) => ({ id: i.id, nome: i.username ? `@${i.username}` : (i as { name?: string }).name ?? i.id })),
+    paginas: lista(paginas),
+    instagram: lista(instagram),
     pixels: pixels.map((p) => ({ id: p.id, nome: p.name })),
+    erro: paginas.size ? undefined : `Nenhuma página encontrada para esta conta. ${erros.join(" · ")}`,
   };
 }
 
-/** Formulários instantâneos ativos da página. O Meta exige o token da própria página para listar. */
+/** O Meta exige o token da própria página para listar e criar formulários. */
+async function tokenDaPagina(paginaId: string, token: string) {
+  const { access_token: t } = await getMeta<{ access_token?: string }>(montarUrl(paginaId, token, { fields: "access_token" }));
+  if (!t) throw new Error("Sem acesso aos formulários desta página (seu perfil precisa ter acesso à página com permissão de anúncios).");
+  return t;
+}
+
+/** Formulários instantâneos ativos da página. */
 export async function formulariosDaPagina(paginaId: string, token: string) {
-  const { access_token: tokenPagina } = await getMeta<{ access_token?: string }>(montarUrl(paginaId, token, { fields: "access_token" }));
-  if (!tokenPagina) throw new Error("Sem acesso aos formulários desta página.");
+  const tokenPagina = await tokenDaPagina(paginaId, token);
   const forms = await todasPaginas<{ id: string; name: string; status: string }>(
     montarUrl(`${paginaId}/leadgen_forms`, tokenPagina, { fields: "id,name,status", limit: "100" }),
   );
   return forms.filter((f) => f.status === "ACTIVE").map((f) => ({ id: f.id, nome: f.name }));
+}
+
+/** Cria um formulário instantâneo na página a partir do modelo. Devolve o id do formulário. */
+export async function criarFormulario(paginaId: string, token: string, f: ConfigFormulario, vars: Record<string, string>) {
+  if (!f.politicaUrl) throw new Error("O modelo de formulário precisa do link da política de privacidade.");
+  const tokenPagina = await tokenDaPagina(paginaId, token);
+  const perguntas = f.perguntas.map((p, i) => {
+    if (p.tipo !== "CUSTOM") return { type: p.tipo };
+    const opcoes = p.opcoes.map((o) => o.trim()).filter(Boolean);
+    return {
+      type: "CUSTOM", key: `pergunta_${i + 1}`, label: p.rotulo,
+      ...(opcoes.length && { options: opcoes.map((o, j) => ({ key: `opcao_${i + 1}_${j + 1}`, value: o })) }),
+    };
+  });
+  const r = await postMeta(`${paginaId}/leadgen_forms`, tokenPagina, {
+    name: aplicarNome(f.nome, vars),
+    locale: "PT_BR",
+    questions: JSON.stringify(perguntas),
+    privacy_policy: JSON.stringify({ url: f.politicaUrl, link_text: f.politicaTexto || "Política de privacidade" }),
+    is_optimized_for_quality: f.tipo === "intencao" ? "true" : "false",
+    ...(f.introTitulo && {
+      context_card: JSON.stringify({ title: f.introTitulo, style: "PARAGRAPH_STYLE", content: [f.introTexto || f.introTitulo] }),
+    }),
+    thank_you_page: JSON.stringify({
+      title: f.agradecimentoTitulo || "Obrigado!",
+      body: f.agradecimentoTexto || "Em breve entraremos em contato.",
+      ...(f.botaoUrl
+        ? { button_type: "VIEW_WEBSITE", button_text: f.botaoTexto || "Saiba mais", website_url: f.botaoUrl }
+        : { button_type: "VIEW_ON_FACEBOOK", button_text: f.botaoTexto || "Ver página" }),
+    }),
+  });
+  return { id: String(r.id), arquivar: () => postMeta(String(r.id), tokenPagina, { status: "ARCHIVED" }).catch(() => null) };
 }
 
 // ---------- mídia ----------
@@ -179,6 +281,8 @@ export type DadosMontagem = {
   contaId: string; token: string; clienteNome: string; objetivo: ObjetivoMeta; config: ConfigMeta;
   paginaId: string; instagramId: string | null; formularioId: string | null; pixelId: string | null;
   criativos: { caminho: string; nome: string; tipo: string }[];
+  /** objetivo formulário: em vez de um formulário existente, cria um novo na página a partir deste modelo */
+  modeloFormulario?: ConfigFormulario | null;
 };
 
 /**
@@ -197,17 +301,36 @@ export async function montarNoMeta(d: DadosMontagem) {
   const centavos = (v: number) => String(Math.round(v * 100));
   if (d.objetivo === "site" && !d.pixelId) throw new Error("Escolha o pixel.");
 
+  // 0. formulário novo a partir do modelo (se a montagem falhar depois, ele é arquivado)
+  let arquivarFormulario: (() => Promise<unknown>) | null = null;
+  if (d.objetivo === "formulario" && d.modeloFormulario) {
+    try {
+      const f = await criarFormulario(d.paginaId, d.token, d.modeloFormulario, vars);
+      d = { ...d, formularioId: f.id };
+      arquivarFormulario = f.arquivar;
+    } catch (e) {
+      throw new Error(`Formulário: ${msgErro(e)}`);
+    }
+  }
+  if (d.objetivo === "formulario" && !d.formularioId) throw new Error("Escolha o formulário.");
+
   // 1. campanha
   const objetivoMeta = d.objetivo === "mensagens" ? "OUTCOME_ENGAGEMENT" : "OUTCOME_LEADS";
-  const campanha = await postMeta(`${d.contaId}/campaigns`, d.token, {
-    name: campanhaNome,
-    objective: objetivoMeta,
-    status: "PAUSED",
-    special_ad_categories: "[]",
-    ...(c.orcamentoEm === "campanha"
-      ? { daily_budget: centavos(c.orcamentoDiario), bid_strategy: "LOWEST_COST_WITHOUT_CAP" }
-      : { is_adset_budget_sharing_enabled: "false" }),
-  });
+  let campanha: { id: string };
+  try {
+    campanha = await postMeta(`${d.contaId}/campaigns`, d.token, {
+      name: campanhaNome,
+      objective: objetivoMeta,
+      status: "PAUSED",
+      special_ad_categories: "[]",
+      ...(c.orcamentoEm === "campanha"
+        ? { daily_budget: centavos(c.orcamentoDiario), bid_strategy: "LOWEST_COST_WITHOUT_CAP" }
+        : { is_adset_budget_sharing_enabled: "false" }),
+    });
+  } catch (e) {
+    await arquivarFormulario?.();
+    throw e;
+  }
   const campanhaId = String(campanha.id);
 
   try {
@@ -291,10 +414,11 @@ export async function montarNoMeta(d: DadosMontagem) {
       }
     }
     if (!anuncios) throw new Error(`Nenhum anúncio foi criado. ${falhas.join(" | ")}`);
-    return { campanhaId, campanhaNome, conjuntos: conjuntos.length, anuncios, falhas };
+    return { campanhaId, campanhaNome, conjuntos: conjuntos.length, anuncios, falhas, formularioCriado: arquivarFormulario ? d.formularioId : null };
   } catch (e) {
-    // desfaz: apaga a campanha (os conjuntos e os anúncios vão junto)
+    // desfaz: apaga a campanha (os conjuntos e os anúncios vão junto) e arquiva o formulário criado agora
     await fetch(`${BASE_META}/${campanhaId}?access_token=${encodeURIComponent(d.token)}`, { method: "DELETE" }).catch(() => null);
+    await arquivarFormulario?.();
     throw e;
   }
 }

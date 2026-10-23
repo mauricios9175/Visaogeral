@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db, type ContaAnuncio } from "@/lib/db";
-import { normalizarConfig, type ConfigMeta, type ObjetivoMeta } from "@/lib/modelos";
+import { normalizarConfig, normalizarFormulario, OBJETIVO_FORMULARIO, type ConfigMeta, type ObjetivoMeta } from "@/lib/modelos";
 import { montarNoMeta } from "@/lib/meta-montar";
 import { linkGerenciador } from "@/lib/meta";
 import { tokenDaConta } from "@/lib/sync";
@@ -34,12 +34,20 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
   if (!token) return { ok: false, mensagem: "Sem token para esta conta (reconecte o Facebook em Configurações).", detalhes: [], link: null };
 
   const config = normalizarConfig(p.config);
+  // "modelo:<id>" = criar um formulário novo na página a partir do modelo de formulário
+  let modeloFormulario = null;
+  if (p.objetivo === "formulario" && p.formulario.startsWith("modelo:")) {
+    const { data: mf } = await banco.from("modelos").select("config").eq("id", p.formulario.slice(7)).eq("objetivo", OBJETIVO_FORMULARIO).maybeSingle();
+    if (!mf) return { ok: false, mensagem: "Modelo de formulário não encontrado.", detalhes: [], link: null };
+    modeloFormulario = normalizarFormulario(mf.config);
+  }
   const registro = { plataforma: "meta", cliente_id: cliente.id, conta_id: conta.id, nivel: "campanha", acao: "montar" };
   try {
     const r = await montarNoMeta({
       contaId: conta.id, token, clienteNome: cliente.nome, objetivo: p.objetivo, config,
-      paginaId: p.pagina, instagramId: p.instagram || null, formularioId: p.formulario || null, pixelId: p.pixel || null,
-      criativos: p.criativos,
+      paginaId: p.pagina, instagramId: p.instagram || null,
+      formularioId: modeloFormulario ? null : p.formulario || null, pixelId: p.pixel || null,
+      criativos: p.criativos, modeloFormulario,
     });
     // lembra as escolhas deste cliente para a próxima montagem
     await banco.from("clientes").update({
@@ -54,7 +62,10 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
     return {
       ok: true,
       mensagem: `Campanha “${r.campanhaNome}” criada PAUSADA com ${r.conjuntos} conjunto(s) e ${r.anuncios} anúncio(s).`,
-      detalhes: r.falhas.map((f) => `⚠ ${f}`),
+      detalhes: [
+        ...(r.formularioCriado ? [`Formulário novo criado na página (id ${r.formularioCriado}).`] : []),
+        ...r.falhas.map((f) => `⚠ ${f}`),
+      ],
       link: linkGerenciador(conta.id, "campanha", r.campanhaId),
     };
   } catch (e) {
