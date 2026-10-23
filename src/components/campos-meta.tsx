@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CTAS, type ConfigMeta, type Interesse, type Local, type ObjetivoMeta } from "@/lib/modelos";
+import { CONJUNTO_PADRAO, CTAS, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type ObjetivoMeta } from "@/lib/modelos";
 
 export const campo = "w-full rounded-lg border border-borda bg-fundo px-2 py-1.5 text-sm outline-none focus:border-destaque";
 const rotulo = "block space-y-1 text-sm";
@@ -107,48 +107,28 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
   return (
     <div className="space-y-5">
       <fieldset className="grid gap-3 md:grid-cols-3">
-        <legend className="mb-2 text-sm font-medium">Nomes</legend>
-        <label className={rotulo}>Campanha<input value={valor.nomeCampanha} onChange={(e) => set("nomeCampanha", e.target.value)} className={campo} /></label>
-        <label className={rotulo}>Conjunto<input value={valor.nomeConjunto} onChange={(e) => set("nomeConjunto", e.target.value)} className={campo} /></label>
-        <label className={rotulo}>Anúncio<input value={valor.nomeAnuncio} onChange={(e) => set("nomeAnuncio", e.target.value)} className={campo} /></label>
-        <p className={`${dica} md:col-span-3`}>Use {"{cliente}"}, {"{objetivo}"}, {"{data}"}, {"{cidade}"}; no anúncio também {"{n}"} (número) e {"{arquivo}"} (nome do arquivo).</p>
-      </fieldset>
-
-      <fieldset className="grid gap-3 md:grid-cols-3">
-        <legend className="mb-2 text-sm font-medium">Orçamento</legend>
-        <label className={rotulo}>Orçamento diário (R$)
-          <input type="number" min={1} step="0.01" value={valor.orcamentoDiario} onChange={(e) => set("orcamentoDiario", Number(e.target.value))} className={campo} />
-        </label>
+        <legend className="mb-2 text-sm font-medium">Campanha</legend>
+        <label className={rotulo}>Nome da campanha<input value={valor.nomeCampanha} onChange={(e) => set("nomeCampanha", e.target.value)} className={campo} /></label>
         <label className={rotulo}>Onde fica o orçamento
           <select value={valor.orcamentoEm} onChange={(e) => set("orcamentoEm", e.target.value as ConfigMeta["orcamentoEm"])} className={campo}>
-            <option value="conjunto">No conjunto (ABO)</option>
+            <option value="conjunto">Em cada conjunto (ABO)</option>
             <option value="campanha">Na campanha (CBO / Advantage+)</option>
           </select>
         </label>
+        {valor.orcamentoEm === "campanha" && (
+          <label className={rotulo}>Orçamento diário da campanha (R$)
+            <input type="number" min={1} step="0.01" value={valor.orcamentoDiario} onChange={(e) => set("orcamentoDiario", Number(e.target.value))} className={campo} />
+          </label>
+        )}
+        <p className={`${dica} md:col-span-3`}>
+          Nos nomes, use {"{cliente}"}, {"{objetivo}"}, {"{data}"} e {"{cidade}"}; no anúncio também {"{conjunto}"}, {"{n}"} (número) e {"{arquivo}"} (nome do arquivo).
+        </p>
       </fieldset>
 
       <fieldset className="space-y-3">
-        <legend className="mb-2 text-sm font-medium">Público</legend>
-        <div className="grid gap-3 md:grid-cols-4">
-          <label className={rotulo}>Idade mínima<input type="number" min={18} max={65} value={valor.idadeMin} onChange={(e) => set("idadeMin", Number(e.target.value))} className={campo} /></label>
-          <label className={rotulo}>Idade máxima<input type="number" min={18} max={65} value={valor.idadeMax} onChange={(e) => set("idadeMax", Number(e.target.value))} className={campo} /></label>
-          <label className={rotulo}>Gênero
-            <select value={valor.generos} onChange={(e) => set("generos", e.target.value as ConfigMeta["generos"])} className={campo}>
-              <option value="todos">Todos</option><option value="mulheres">Mulheres</option><option value="homens">Homens</option>
-            </select>
-          </label>
-          <label className="flex items-end gap-2 pb-2 text-sm">
-            <input type="checkbox" checked={valor.advantage} onChange={(e) => set("advantage", e.target.checked)} /> Público Advantage+
-          </label>
-        </div>
-        {valor.advantage && (
-          <p className={dica}>
-            Com o público Advantage+, o Meta trata idade e interesses como sugestão e exige faixa até 65 anos
-            (idade mínima de no máximo 25). Para travar a idade, desligue o Advantage+.
-          </p>
-        )}
+        <legend className="mb-2 text-sm font-medium">Localização <span className="font-normal text-texto-3">(vale para todos os conjuntos)</span></legend>
         <div className="space-y-1">
-          <span className="text-sm">Localização {naMontagem ? "" : <span className={dica}>(opcional no modelo; na montagem você escolhe a cidade do cliente)</span>}</span>
+          {!naMontagem && <span className={dica}>Opcional no modelo; na montagem você escolhe a cidade do cliente.</span>}
           <Busca<Local>
             tipo="local" conta={conta} placeholder="Digite a cidade ou o estado…"
             rotuloItem={(l) => l.nome}
@@ -172,20 +152,30 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
             ))}
           </div>
         </div>
-        <div className="space-y-1">
-          <span className="text-sm">Interesses <span className={dica}>(vazio = aberto)</span></span>
-          <Busca<Interesse>
-            tipo="interesse" conta={conta} placeholder="Ex.: móveis planejados, arquitetura…"
-            rotuloItem={(x) => x.nome}
-            onEscolher={(x) => !valor.interesses.some((y) => y.id === x.id) && set("interesses", [...valor.interesses, x])}
+      </fieldset>
+
+      <fieldset className="space-y-3">
+        <legend className="mb-2 text-sm font-medium">Conjuntos de anúncios <span className="font-normal text-texto-3">({valor.conjuntos.length}) · cada um com o seu público</span></legend>
+        {valor.conjuntos.map((cj, i) => (
+          <CartaoConjunto
+            key={i} indice={i} conjunto={cj} conta={conta} comOrcamento={valor.orcamentoEm === "conjunto"} podeRemover={valor.conjuntos.length > 1}
+            onChange={(novo) => set("conjuntos", valor.conjuntos.map((x, j) => (j === i ? novo : x)))}
+            onDuplicar={() => set("conjuntos", [...valor.conjuntos.slice(0, i + 1), { ...cj, nome: `${cj.nome} (cópia)` }, ...valor.conjuntos.slice(i + 1)])}
+            onRemover={() => set("conjuntos", valor.conjuntos.filter((_, j) => j !== i))}
           />
-          <Chips itens={valor.interesses} texto={(x) => x.nome} onRemover={(i) => set("interesses", valor.interesses.filter((_, j) => j !== i))} />
-        </div>
+        ))}
+        {valor.conjuntos.length < 10 && (
+          <button type="button" onClick={() => set("conjuntos", [...valor.conjuntos, { ...CONJUNTO_PADRAO, nome: `{cidade} - Público ${valor.conjuntos.length + 1}` }])}
+            className="rounded-lg border border-dashed border-borda px-3 py-1.5 text-sm text-texto-2 hover:border-destaque hover:text-texto">
+            + Adicionar conjunto
+          </button>
+        )}
         <p className={dica}>Posicionamentos: automáticos (Advantage+), como o Meta recomenda.</p>
       </fieldset>
 
       <fieldset className="space-y-3">
-        <legend className="mb-2 text-sm font-medium">Anúncio</legend>
+        <legend className="mb-2 text-sm font-medium">Anúncio <span className="font-normal text-texto-3">(o mesmo em todos os conjuntos)</span></legend>
+        <label className={rotulo}>Nome do anúncio<input value={valor.nomeAnuncio} onChange={(e) => set("nomeAnuncio", e.target.value)} className={campo} /></label>
         <label className={rotulo}>Texto principal
           <Variacoes valores={valor.textos} onChange={(v) => set("textos", v)} linhas={3} placeholder="Texto que aparece acima do criativo" />
         </label>
@@ -210,6 +200,64 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
           </div>
         )}
       </fieldset>
+    </div>
+  );
+}
+
+/** Um conjunto do modelo: nome, orçamento (ABO), idade, gênero, Advantage+ e interesses. */
+function CartaoConjunto({ indice, conjunto, conta, comOrcamento, podeRemover, onChange, onDuplicar, onRemover }: {
+  indice: number;
+  conjunto: ConjuntoMeta;
+  conta?: string;
+  comOrcamento: boolean;
+  podeRemover: boolean;
+  onChange: (c: ConjuntoMeta) => void;
+  onDuplicar: () => void;
+  onRemover: () => void;
+}) {
+  const set = <K extends keyof ConjuntoMeta>(k: K, v: ConjuntoMeta[K]) => onChange({ ...conjunto, [k]: v });
+  return (
+    <div className="space-y-3 rounded-lg border border-borda bg-fundo p-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <span className="pb-2 text-xs font-medium text-texto-3">#{indice + 1}</span>
+        <label className={`${rotulo} min-w-48 flex-1`}>Nome do conjunto
+          <input value={conjunto.nome} onChange={(e) => set("nome", e.target.value)} className={campo} />
+        </label>
+        {comOrcamento && (
+          <label className={`${rotulo} w-36`}>R$/dia
+            <input type="number" min={1} step="0.01" value={conjunto.orcamentoDiario} onChange={(e) => set("orcamentoDiario", Number(e.target.value))} className={campo} />
+          </label>
+        )}
+        <button type="button" onClick={onDuplicar} className="pb-2 text-xs text-destaque underline">duplicar</button>
+        {podeRemover && <button type="button" onClick={onRemover} className="pb-2 text-xs text-texto-3 underline hover:text-critico">remover</button>}
+      </div>
+      <div className="grid gap-3 md:grid-cols-4">
+        <label className={rotulo}>Idade mínima<input type="number" min={18} max={65} value={conjunto.idadeMin} onChange={(e) => set("idadeMin", Number(e.target.value))} className={campo} /></label>
+        <label className={rotulo}>Idade máxima<input type="number" min={18} max={65} value={conjunto.idadeMax} onChange={(e) => set("idadeMax", Number(e.target.value))} className={campo} /></label>
+        <label className={rotulo}>Gênero
+          <select value={conjunto.generos} onChange={(e) => set("generos", e.target.value as ConjuntoMeta["generos"])} className={campo}>
+            <option value="todos">Todos</option><option value="mulheres">Mulheres</option><option value="homens">Homens</option>
+          </select>
+        </label>
+        <label className="flex items-end gap-2 pb-2 text-sm">
+          <input type="checkbox" checked={conjunto.advantage} onChange={(e) => set("advantage", e.target.checked)} /> Público Advantage+
+        </label>
+      </div>
+      {conjunto.advantage && (
+        <p className={dica}>
+          Com o Advantage+, o Meta trata idade e interesses como sugestão e exige faixa até 65 anos (mínima de no máximo 25).
+          Para travar idade e interesses, desligue.
+        </p>
+      )}
+      <div className="space-y-1">
+        <span className="text-sm">Interesses <span className={dica}>(vazio = público aberto)</span></span>
+        <Busca<Interesse>
+          tipo="interesse" conta={conta} placeholder="Ex.: móveis planejados, arquitetura…"
+          rotuloItem={(x) => x.nome}
+          onEscolher={(x) => !conjunto.interesses.some((y) => y.id === x.id) && set("interesses", [...conjunto.interesses, x])}
+        />
+        <Chips itens={conjunto.interesses} texto={(x) => x.nome} onRemover={(i) => set("interesses", conjunto.interesses.filter((_, j) => j !== i))} />
+      </div>
     </div>
   );
 }

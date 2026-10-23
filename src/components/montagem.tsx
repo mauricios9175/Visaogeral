@@ -188,7 +188,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes }: {
             ))}
           </ul>
         )}
-        <p className="text-xs text-texto-3">Cada criativo vira um anúncio no mesmo conjunto, com os textos do modelo.</p>
+        <p className="text-xs text-texto-3">Cada criativo vira um anúncio em cada conjunto, com os textos do modelo. Normalmente basta um: depois é só duplicar e trocar a imagem.</p>
       </section>
 
       <section className="rounded-xl border border-borda bg-superficie p-4">

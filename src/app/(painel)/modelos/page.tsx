@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { OBJETIVOS, type Modelo } from "@/lib/modelos";
+import { aplicarNome, normalizarConfig, OBJETIVOS, ROTULO_CURTO, type Modelo } from "@/lib/modelos";
 import { Aviso } from "@/components/ui";
 import { BotaoEnviar } from "@/components/botao";
 import { EditorModelo } from "@/components/editor-modelo";
@@ -11,7 +11,7 @@ const botao = "rounded-lg border border-borda bg-superficie px-3 py-1.5 text-sm 
 export default async function Modelos({ searchParams }: PageProps<"/modelos">) {
   const { msg, editar } = (await searchParams) as { msg?: string; editar?: string };
   const { data, error } = await db().from("modelos").select("*").eq("plataforma", "meta").order("nome");
-  const modelos = (data ?? []) as Modelo[];
+  const modelos = ((data ?? []) as Modelo[]).map((m) => ({ ...m, config: normalizarConfig(m.config) }));
   const emEdicao = editar === "novo" ? null : modelos.find((m) => m.id === editar);
 
   return (
@@ -42,8 +42,8 @@ export default async function Modelos({ searchParams }: PageProps<"/modelos">) {
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{m.nome}</div>
                 <div className="text-xs text-texto-3">
-                  {OBJETIVOS[m.objetivo]?.rotulo ?? m.objetivo} · R$ {m.config.orcamentoDiario}/dia no {m.config.orcamentoEm} ·
-                  {" "}{m.config.idadeMin}–{m.config.idadeMax} anos · {m.config.interesses.length} interesse(s)
+                  {OBJETIVOS[m.objetivo]?.rotulo ?? m.objetivo} · {m.config.conjuntos.length} conjunto(s):{" "}
+                  {m.config.conjuntos.map((c) => aplicarNome(c.nome, { cidade: "", objetivo: ROTULO_CURTO[m.objetivo] }).replace(/^-\s*/, "")).join(", ")}
                 </div>
               </div>
               <Link href={`/modelos?editar=${m.id}#editor`} className={botao}>Editar</Link>

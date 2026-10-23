@@ -1,6 +1,6 @@
 import "server-only";
 import { getMeta, montarUrl, postMeta, todasPaginas, BASE_META } from "./meta";
-import { aplicarNome, ROTULO_CURTO, type ConfigMeta, type Interesse, type Local, type ObjetivoMeta } from "./modelos";
+import { aplicarNome, ROTULO_CURTO, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type ObjetivoMeta } from "./modelos";
 import { baixar, linkTemporario } from "./armazenamento";
 import { hojeISO } from "./datas";
 
@@ -101,7 +101,7 @@ async function subirVideo(contaId: string, token: string, caminho: string, nome:
 
 const GENEROS = { todos: undefined, homens: [1], mulheres: [2] } as const;
 
-function segmentacao(c: ConfigMeta) {
+function segmentacao(c: ConfigMeta, p: ConjuntoMeta) {
   const cidades = c.locais.filter((l) => l.tipo === "city")
     .map((l) => (l.raio ? { key: l.key, radius: l.raio, distance_unit: "kilometer" } : { key: l.key }));
   const regioes = c.locais.filter((l) => l.tipo === "region").map((l) => ({ key: l.key }));
@@ -114,11 +114,11 @@ function segmentacao(c: ConfigMeta) {
       location_types: ["home", "recent"],
     },
     // com o público Advantage+ ligado, o Meta exige idade máxima 65 e mínima de até 25 (a idade vira sugestão)
-    age_min: c.advantage ? Math.min(c.idadeMin, 25) : c.idadeMin,
-    age_max: c.advantage ? 65 : c.idadeMax,
-    ...(GENEROS[c.generos] && { genders: GENEROS[c.generos] }),
-    ...(c.interesses.length && { flexible_spec: [{ interests: c.interesses.map((i) => ({ id: i.id, name: i.nome })) }] }),
-    targeting_automation: { advantage_audience: c.advantage ? 1 : 0 },
+    age_min: p.advantage ? Math.min(p.idadeMin, 25) : p.idadeMin,
+    age_max: p.advantage ? 65 : p.idadeMax,
+    ...(GENEROS[p.generos] && { genders: GENEROS[p.generos] }),
+    ...(p.interesses.length && { flexible_spec: [{ interests: p.interesses.map((i) => ({ id: i.id, name: i.nome })) }] }),
+    targeting_automation: { advantage_audience: p.advantage ? 1 : 0 },
   };
 }
 
@@ -138,17 +138,20 @@ export type DadosMontagem = {
 };
 
 /**
- * Campanha → conjunto → um anúncio por criativo, tudo PAUSADO.
- * Se a campanha ou o conjunto falharem, apaga o que foi criado. Se um criativo falhar, segue com os outros e avisa.
+ * Campanha → um conjunto por público do modelo → os mesmos anúncios (um por criativo) em cada conjunto. Tudo PAUSADO.
+ * Cada criativo é enviado e criado uma vez só e reaproveitado nos conjuntos.
+ * Se a campanha ou um conjunto falharem, apaga tudo. Se um criativo falhar, segue com os outros e avisa.
  */
 export async function montarNoMeta(d: DadosMontagem) {
   const c = d.config;
   if (!d.criativos.length) throw new Error("Nenhum criativo.");
+  if (!c.conjuntos.length) throw new Error("O modelo não tem conjuntos.");
   const cidade = c.locais.find((l) => l.tipo === "city")?.nome.replace(/\s*\(.*\)$/, "") ?? c.locais[0]?.nome ?? "";
   const data = hojeISO().split("-").reverse().slice(0, 2).join("/");
   const vars = { cliente: d.clienteNome, objetivo: ROTULO_CURTO[d.objetivo], data, cidade };
   const campanhaNome = aplicarNome(c.nomeCampanha, vars);
-  const centavos = String(Math.round(c.orcamentoDiario * 100));
+  const centavos = (v: number) => String(Math.round(v * 100));
+  if (d.objetivo === "site" && !d.pixelId) throw new Error("Escolha o pixel.");
 
   // 1. campanha
   const objetivoMeta = d.objetivo === "mensagens" ? "OUTCOME_ENGAGEMENT" : "OUTCOME_LEADS";
@@ -158,44 +161,53 @@ export async function montarNoMeta(d: DadosMontagem) {
     status: "PAUSED",
     special_ad_categories: "[]",
     ...(c.orcamentoEm === "campanha"
-      ? { daily_budget: centavos, bid_strategy: "LOWEST_COST_WITHOUT_CAP" }
+      ? { daily_budget: centavos(c.orcamentoDiario), bid_strategy: "LOWEST_COST_WITHOUT_CAP" }
       : { is_adset_budget_sharing_enabled: "false" }),
   });
   const campanhaId = String(campanha.id);
 
   try {
-    // 2. conjunto
+    // 2. um conjunto por público
     const destino =
       d.objetivo === "formulario" ? { optimization_goal: "LEAD_GENERATION", destination_type: "ON_AD", promoted_object: { page_id: d.paginaId } }
       : d.objetivo === "mensagens" ? { optimization_goal: "CONVERSATIONS", destination_type: "WHATSAPP", promoted_object: { page_id: d.paginaId } }
       : { optimization_goal: "OFFSITE_CONVERSIONS", destination_type: "WEBSITE", promoted_object: { pixel_id: d.pixelId, custom_event_type: "LEAD" } };
-    if (d.objetivo === "site" && !d.pixelId) throw new Error("Escolha o pixel.");
-    const conjunto = await postMeta(`${d.contaId}/adsets`, d.token, {
-      name: aplicarNome(c.nomeConjunto, vars),
-      campaign_id: campanhaId,
-      status: "PAUSED",
-      billing_event: "IMPRESSIONS",
-      optimization_goal: destino.optimization_goal,
-      destination_type: destino.destination_type,
-      promoted_object: JSON.stringify(destino.promoted_object),
-      targeting: JSON.stringify(segmentacao(c)),
-      ...(c.orcamentoEm === "conjunto" && { daily_budget: centavos, bid_strategy: "LOWEST_COST_WITHOUT_CAP" }),
-      start_time: new Date(Date.now() + 10 * 60_000).toISOString(),
-    });
-    const conjuntoId = String(conjunto.id);
+    const inicio = new Date(Date.now() + 10 * 60_000).toISOString();
+    const conjuntos: { id: string; nome: string }[] = [];
+    for (const p of c.conjuntos) {
+      const nome = aplicarNome(p.nome, vars);
+      try {
+        const r = await postMeta(`${d.contaId}/adsets`, d.token, {
+          name: nome,
+          campaign_id: campanhaId,
+          status: "PAUSED",
+          billing_event: "IMPRESSIONS",
+          optimization_goal: destino.optimization_goal,
+          destination_type: destino.destination_type,
+          promoted_object: JSON.stringify(destino.promoted_object),
+          targeting: JSON.stringify(segmentacao(c, p)),
+          ...(c.orcamentoEm === "conjunto" && { daily_budget: centavos(p.orcamentoDiario), bid_strategy: "LOWEST_COST_WITHOUT_CAP" }),
+          start_time: inicio,
+        });
+        conjuntos.push({ id: String(r.id), nome });
+      } catch (e) {
+        throw new Error(`Conjunto “${nome}”: ${e instanceof Error ? e.message : e}`);
+      }
+    }
 
-    // 3. um anúncio por criativo; com várias variações de texto/título, elas se revezam entre os anúncios
+    // 3. criativos (uma vez cada) e um anúncio por criativo em cada conjunto
     const textos = c.textos.map((t) => t.trim()).filter(Boolean);
     const titulos = c.titulos.map((t) => t.trim()).filter(Boolean);
     let anuncios = 0;
     const falhas: string[] = [];
     for (const [i, cr] of d.criativos.entries()) {
-      const nomeAnuncio = aplicarNome(c.nomeAnuncio, { ...vars, n: String(i + 1), arquivo: cr.nome.replace(/\.\w+$/, "") });
+      const nomeBase = { ...vars, n: String(i + 1), arquivo: cr.nome.replace(/\.\w+$/, "") };
       try {
         const ehVideo = cr.tipo.startsWith("video");
         const midia = ehVideo ? await subirVideo(d.contaId, d.token, cr.caminho, cr.nome) : { hash: await subirImagem(d.contaId, d.token, cr.caminho) };
+        const nomeCriativo = aplicarNome(c.nomeAnuncio, { ...nomeBase, conjunto: "" }).replace(/\s*-\s*$/, "");
         const link =
-          d.objetivo === "site" ? (c.utm ? comUtm(c.url, campanhaNome, nomeAnuncio) : c.url)
+          d.objetivo === "site" ? (c.utm ? comUtm(c.url, campanhaNome, nomeCriativo) : c.url)
           : d.objetivo === "mensagens" ? "https://api.whatsapp.com/send"
           : "http://fb.me/"; // link padrão do Meta para formulário instantâneo
         // no vídeo não existe "link" fora do botão; no WhatsApp o botão não pode levar link
@@ -216,21 +228,28 @@ export async function montarNoMeta(d: DadosMontagem) {
             } };
         if (d.instagramId) Object.assign(story, { instagram_user_id: d.instagramId });
         const criativo = await postMeta(`${d.contaId}/adcreatives`, d.token, {
-          name: nomeAnuncio,
+          name: nomeCriativo,
           object_story_spec: JSON.stringify(story),
         });
-        await postMeta(`${d.contaId}/ads`, d.token, {
-          name: nomeAnuncio, adset_id: conjuntoId, status: "PAUSED", creative: JSON.stringify({ creative_id: criativo.id }),
-        });
-        anuncios++;
+        for (const cj of conjuntos) {
+          try {
+            await postMeta(`${d.contaId}/ads`, d.token, {
+              name: aplicarNome(c.nomeAnuncio, { ...nomeBase, conjunto: cj.nome }),
+              adset_id: cj.id, status: "PAUSED", creative: JSON.stringify({ creative_id: criativo.id }),
+            });
+            anuncios++;
+          } catch (e) {
+            falhas.push(`${cr.nome} em “${cj.nome}”: ${e instanceof Error ? e.message : e}`);
+          }
+        }
       } catch (e) {
         falhas.push(`${cr.nome}: ${e instanceof Error ? e.message : e}`);
       }
     }
     if (!anuncios) throw new Error(`Nenhum anúncio foi criado. ${falhas.join(" | ")}`);
-    return { campanhaId, campanhaNome, conjuntoId, anuncios, falhas };
+    return { campanhaId, campanhaNome, conjuntos: conjuntos.length, anuncios, falhas };
   } catch (e) {
-    // desfaz: apaga a campanha (o conjunto e os anúncios vão junto)
+    // desfaz: apaga a campanha (os conjuntos e os anúncios vão junto)
     await fetch(`${BASE_META}/${campanhaId}?access_token=${encodeURIComponent(d.token)}`, { method: "DELETE" }).catch(() => null);
     throw e;
   }

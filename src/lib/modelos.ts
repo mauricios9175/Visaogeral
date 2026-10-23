@@ -12,25 +12,30 @@ export const OBJETIVOS: Record<ObjetivoMeta, { rotulo: string; descricao: string
 export type Local = { key: string; nome: string; tipo: "city" | "region" | "country"; raio?: number };
 export type Interesse = { id: string; nome: string };
 
-export type ConfigMeta = {
-  nomeCampanha: string;   // aceita {cliente}, {objetivo}, {data} e {cidade}
-  nomeConjunto: string;
-  nomeAnuncio: string;    // aceita também {n} (número do criativo) e {arquivo}
-  orcamentoDiario: number;
-  orcamentoEm: "campanha" | "conjunto";
+/** Um conjunto de anúncios do modelo: cada um com o seu público. */
+export type ConjuntoMeta = {
+  nome: string;           // aceita {cliente}, {objetivo}, {data} e {cidade}
+  orcamentoDiario: number; // usado quando o orçamento fica no conjunto (ABO)
   idadeMin: number;
   idadeMax: number;
   generos: "todos" | "homens" | "mulheres";
   advantage: boolean;     // público Advantage+ (o Meta pode ampliar além dos interesses)
-  locais: Local[];        // padrão do modelo; na montagem dá para trocar (cidade do cliente)
   interesses: Interesse[];
+};
+
+export type ConfigMeta = {
+  nomeCampanha: string;   // aceita {cliente}, {objetivo}, {data} e {cidade}
+  nomeAnuncio: string;    // aceita também {n} (número do criativo), {arquivo} e {conjunto}
+  orcamentoDiario: number; // usado quando o orçamento fica na campanha (CBO)
+  orcamentoEm: "campanha" | "conjunto";
+  locais: Local[];        // vale para todos os conjuntos; na montagem você escolhe a cidade do cliente
+  conjuntos: ConjuntoMeta[];
   textos: string[];       // texto principal (até 5 variações)
   titulos: string[];      // título (até 5 variações)
   descricao: string;
   cta: string;
   url: string;            // site (objetivo site)
   utm: boolean;           // acrescenta UTMs padrão no link do site
-  mensagemWhatsapp: string;
 };
 
 export type Modelo = {
@@ -60,25 +65,30 @@ export const CTAS: Record<ObjetivoMeta, { valor: string; rotulo: string }[]> = {
   ],
 };
 
-const BASE: ConfigMeta = {
-  nomeCampanha: "[{objetivo}] {cliente} - {data}",
-  nomeConjunto: "{cidade} - {objetivo}",
-  nomeAnuncio: "AD {n} - {arquivo}",
+export const CONJUNTO_PADRAO: ConjuntoMeta = {
+  nome: "{cidade} - Aberto",
   orcamentoDiario: 30,
-  orcamentoEm: "conjunto",
   idadeMin: 25,
   idadeMax: 65,
   generos: "todos",
   advantage: true,
-  locais: [],
   interesses: [],
+};
+
+const BASE: ConfigMeta = {
+  nomeCampanha: "[{objetivo}] {cliente} - {data}",
+  nomeAnuncio: "AD {n} - {arquivo}",
+  orcamentoDiario: 30,
+  orcamentoEm: "conjunto",
+  locais: [],
+  // exemplo com dois públicos; o usuário troca os interesses de cada nicho
+  conjuntos: [CONJUNTO_PADRAO, { ...CONJUNTO_PADRAO, nome: "{cidade} - Interesses", advantage: false }],
   textos: [""],
   titulos: [""],
   descricao: "",
   cta: "LEARN_MORE",
   url: "",
   utm: true,
-  mensagemWhatsapp: "",
 };
 
 /** Modelos prontos para começar (o usuário edita e salva os dele). */
@@ -99,7 +109,6 @@ export const MODELOS_PADRAO: { nome: string; objetivo: ObjetivoMeta; config: Con
       ...BASE, cta: "WHATSAPP_MESSAGE",
       textos: ["Chame a gente no WhatsApp e tire suas dúvidas."],
       titulos: ["Fale com a gente no WhatsApp"],
-      mensagemWhatsapp: "Olá! Vi o anúncio e quero mais informações.",
     },
   },
   {
@@ -120,7 +129,20 @@ export function aplicarNome(padrao: string, vars: Record<string, string>) {
   return padrao.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m)).replace(/\s+/g, " ").trim();
 }
 
+/** Campos da primeira versão dos modelos (um conjunto só, público no nível da campanha). */
+type Legado = Partial<Omit<ConjuntoMeta, "nome" | "orcamentoDiario"> & { nomeConjunto: string }>;
+
 /** Completa uma config salva com os campos que faltarem (modelos antigos ou JSON parcial). */
-export function normalizarConfig(c: Partial<ConfigMeta> | null | undefined): ConfigMeta {
-  return { ...BASE, ...(c ?? {}) };
+export function normalizarConfig(c: (Partial<ConfigMeta> & Legado) | null | undefined): ConfigMeta {
+  const { nomeConjunto, idadeMin, idadeMax, generos, advantage, interesses, ...resto } = c ?? {};
+  const conjuntos = resto.conjuntos?.length
+    ? resto.conjuntos.map((x) => ({ ...CONJUNTO_PADRAO, ...x }))
+    : [{
+        ...CONJUNTO_PADRAO,
+        ...(nomeConjunto && { nome: nomeConjunto }),
+        ...(idadeMin != null && { idadeMin }), ...(idadeMax != null && { idadeMax }),
+        ...(generos && { generos }), ...(advantage != null && { advantage }), ...(interesses && { interesses }),
+        orcamentoDiario: resto.orcamentoDiario ?? CONJUNTO_PADRAO.orcamentoDiario,
+      }];
+  return { ...BASE, ...resto, conjuntos };
 }

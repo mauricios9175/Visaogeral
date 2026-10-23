@@ -47,13 +47,13 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
     }).eq("id", cliente.id).then(() => null, () => null);
     await banco.from("acoes_log").insert({
       ...registro, objeto_id: r.campanhaId, objeto_nome: r.campanhaNome, ok: true,
-      depois: `${r.anuncios} anúncio(s), ${r.falhas.length ? `${r.falhas.length} criativo(s) com erro` : "pausado"}`,
+      depois: `${r.conjuntos} conjunto(s), ${r.anuncios} anúncio(s), ${r.falhas.length ? `${r.falhas.length} criativo(s) com erro` : "pausado"}`,
     }).then(() => null, () => null);
     await apagar(p.criativos.map((c) => c.caminho));
     revalidatePath(`/clientes/${cliente.id}`);
     return {
       ok: true,
-      mensagem: `Campanha “${r.campanhaNome}” criada PAUSADA com ${r.anuncios} anúncio(s).`,
+      mensagem: `Campanha “${r.campanhaNome}” criada PAUSADA com ${r.conjuntos} conjunto(s) e ${r.anuncios} anúncio(s).`,
       detalhes: r.falhas.map((f) => `⚠ ${f}`),
       link: linkGerenciador(conta.id, "campanha", r.campanhaId),
     };
