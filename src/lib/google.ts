@@ -7,8 +7,7 @@ import "server-only";
  */
 const VERSAO = process.env.GOOGLE_ADS_API_VERSION?.trim() || "v25";
 const BASE = `https://googleads.googleapis.com/${VERSAO}`;
-// drive.readonly: importar criativos de uma pasta do Drive na montagem de campanhas
-const ESCOPOS = "https://www.googleapis.com/auth/adwords https://www.googleapis.com/auth/drive.readonly openid email";
+const ESCOPOS = "https://www.googleapis.com/auth/adwords openid email";
 
 function credenciais() {
   const id = process.env.GOOGLE_CLIENT_ID?.trim();

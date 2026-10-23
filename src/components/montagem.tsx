@@ -38,7 +38,6 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes }: {
   const [criativos, setCriativos] = useState<Criativo[]>([]);
   const [enviando, setEnviando] = useState<string | null>(null);
   const [erroEnvio, setErroEnvio] = useState<string | null>(null);
-  const [linkDrive, setLinkDrive] = useState("");
   const lote = useMemo(() => crypto.randomUUID(), []);
   const [resultado, enviar, montando] = useActionState<ResultadoMontagem | null, FormData>(montarCampanhaMeta, null);
 
@@ -92,23 +91,6 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes }: {
       } catch (e) {
         setErroEnvio(`${f.name}: ${e instanceof Error ? e.message : e}`);
       }
-    }
-    setEnviando(null);
-  }
-
-  async function importarDoDrive() {
-    if (!linkDrive.trim()) return;
-    setErroEnvio(null);
-    setEnviando("Trazendo os arquivos do Drive… (vídeos grandes podem levar alguns minutos)");
-    try {
-      const r = await fetch("/api/drive/importar", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: linkDrive, lote }),
-      }).then((x) => x.json());
-      if (r.erro) throw new Error(r.erro);
-      setCriativos((c) => [...c, ...r.arquivos]);
-      setLinkDrive("");
-    } catch (e) {
-      setErroEnvio(e instanceof Error ? e.message : String(e));
     }
     setEnviando(null);
   }
@@ -189,9 +171,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes }: {
             <input type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" className="hidden"
               onChange={(e) => { enviarDoComputador(e.target.files); e.target.value = ""; }} disabled={!!enviando} />
           </label>
-          <span className="text-texto-3">ou</span>
-          <input value={linkDrive} onChange={(e) => setLinkDrive(e.target.value)} placeholder="Link da pasta do Google Drive" className={`${campo} max-w-md`} />
-          <button type="button" onClick={importarDoDrive} disabled={!!enviando || !linkDrive.trim()} className={botao}>Importar do Drive</button>
+          <span className="text-xs text-texto-3">Imagens (JPG, PNG, WEBP) e vídeos (MP4, MOV). Dá para escolher vários de uma vez.</span>
         </div>
         {enviando && <p className="text-sm text-texto-2">⏳ {enviando}</p>}
         {erroEnvio && <p className="text-sm text-critico">{erroEnvio}</p>}

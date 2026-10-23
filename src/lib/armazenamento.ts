@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "./db";
 
-// Criativos ficam um tempo no Storage do Supabase entre o envio (computador ou Drive) e a subida no Meta.
+// Criativos ficam um tempo no Storage do Supabase entre o envio do computador e a subida no Meta.
 // O navegador manda o arquivo direto para o Supabase (URL assinada), sem passar pela Vercel (que limita o tamanho).
 const BUCKET = "criativos";
 let bucketOk = false;
@@ -31,13 +31,6 @@ export async function urlDeEnvio(caminho: string) {
   const { data, error } = await db().storage.from(BUCKET).createSignedUploadUrl(caminho);
   if (error || !data) throw new Error(`Não foi possível preparar o envio: ${error?.message}`);
   return data.signedUrl;
-}
-
-/** Guarda um arquivo vindo do servidor (ex.: baixado do Drive). */
-export async function salvar(caminho: string, conteudo: ArrayBuffer, tipo: string) {
-  await garantirBucket();
-  const { error } = await db().storage.from(BUCKET).upload(caminho, conteudo, { contentType: tipo, upsert: true });
-  if (error) throw new Error(`Não foi possível guardar o arquivo: ${error.message}`);
 }
 
 export async function baixar(caminho: string) {
