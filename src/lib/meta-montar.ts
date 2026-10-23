@@ -11,7 +11,7 @@ import { hojeISO } from "./datas";
 export async function buscarLocais(q: string, token: string): Promise<Local[]> {
   type R = { key: string; name: string; type: string; region?: string; country_code?: string };
   const r = await getMeta<{ data: R[] }>(montarUrl("search", token, {
-    type: "adgeolocation", q, location_types: JSON.stringify(["city", "region", "country"]), limit: "15",
+    type: "adgeolocation", q, location_types: JSON.stringify(["city", "region", "country"]), limit: "25", locale: "pt_BR",
   }));
   return r.data
     .filter((x) => ["city", "region", "country"].includes(x.type))
@@ -24,11 +24,45 @@ export async function buscarLocais(q: string, token: string): Promise<Local[]> {
     }));
 }
 
-export async function buscarInteresses(q: string, token: string): Promise<Interesse[]> {
-  const r = await getMeta<{ data: { id: string; name: string; audience_size_upper_bound?: number }[] }>(
-    montarUrl("search", token, { type: "adinterest", q, limit: "15", locale: "pt_BR" }),
-  );
-  return r.data.map((x) => ({ id: x.id, nome: x.name }));
+type ResultadoSegmentacao = {
+  id: string; name: string; type?: string; path?: string[];
+  audience_size_lower_bound?: number; audience_size_upper_bound?: number;
+};
+
+const paraInteresse = (x: ResultadoSegmentacao, tipoPadrao: string): Interesse => ({
+  id: String(x.id), nome: x.name, tipo: x.type ?? tipoPadrao,
+  caminho: x.path?.slice(0, -1).join(" › ") || undefined,
+  publico: x.audience_size_upper_bound ?? x.audience_size_lower_bound,
+});
+
+/**
+ * Segmentação detalhada como no Gerenciador: interesses, comportamentos, dados demográficos (cargos, setores,
+ * formação, eventos da vida…). Usa a busca da conta de anúncio e completa com interesses e cargos.
+ */
+export async function buscarInteresses(q: string, token: string, contaId?: string | null): Promise<Interesse[]> {
+  const buscas: Promise<Interesse[]>[] = [
+    getMeta<{ data: ResultadoSegmentacao[] }>(montarUrl("search", token, { type: "adinterest", q, limit: "50", locale: "pt_BR" }))
+      .then((r) => r.data.map((x) => paraInteresse(x, "interests")), () => []),
+    getMeta<{ data: ResultadoSegmentacao[] }>(montarUrl("search", token, { type: "adworkposition", q, limit: "25", locale: "pt_BR" }))
+      .then((r) => r.data.map((x) => paraInteresse(x, "work_positions")), () => []),
+  ];
+  if (contaId) {
+    // mesma busca do campo "Segmentação detalhada" do Gerenciador (traz todos os tipos)
+    buscas.unshift(
+      getMeta<{ data: ResultadoSegmentacao[] }>(montarUrl(`${contaId}/targetingsearch`, token, { q, limit: "100", locale: "pt_BR" }))
+        .then((r) => r.data.map((x) => paraInteresse(x, "interests")), () => []),
+    );
+  }
+  const vistos = new Set<string>();
+  const itens: Interesse[] = [];
+  for (const lista of await Promise.all(buscas)) {
+    for (const x of lista) {
+      const chave = `${x.tipo}:${x.id}`;
+      if (!vistos.has(chave)) { vistos.add(chave); itens.push(x); }
+    }
+  }
+  if (!itens.length && !contaId) return [];
+  return itens.slice(0, 80);
 }
 
 // ---------- ativos da conta ----------
@@ -101,6 +135,15 @@ async function subirVideo(contaId: string, token: string, caminho: string, nome:
 
 const GENEROS = { todos: undefined, homens: [1], mulheres: [2] } as const;
 
+function agruparPorTipo(itens: Interesse[]) {
+  const grupos: Record<string, { id: string; name: string }[]> = {};
+  for (const i of itens) {
+    const tipo = !i.tipo || i.tipo === "user_adclusters" ? "interests" : i.tipo;
+    (grupos[tipo] ??= []).push({ id: i.id, name: i.nome });
+  }
+  return grupos;
+}
+
 function segmentacao(c: ConfigMeta, p: ConjuntoMeta) {
   const cidades = c.locais.filter((l) => l.tipo === "city")
     .map((l) => (l.raio ? { key: l.key, radius: l.raio, distance_unit: "kilometer" } : { key: l.key }));
@@ -117,7 +160,8 @@ function segmentacao(c: ConfigMeta, p: ConjuntoMeta) {
     age_min: p.advantage ? Math.min(p.idadeMin, 25) : p.idadeMin,
     age_max: p.advantage ? 65 : p.idadeMax,
     ...(GENEROS[p.generos] && { genders: GENEROS[p.generos] }),
-    ...(p.interesses.length && { flexible_spec: [{ interests: p.interesses.map((i) => ({ id: i.id, name: i.nome })) }] }),
+    // tipos diferentes no mesmo bloco = "OU" (a pessoa precisa bater com pelo menos um item), como no Gerenciador
+    ...(p.interesses.length && { flexible_spec: [agruparPorTipo(p.interesses)] }),
     targeting_automation: { advantage_audience: p.advantage ? 1 : 0 },
   };
 }

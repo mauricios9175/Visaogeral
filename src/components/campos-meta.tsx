@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CONJUNTO_PADRAO, CTAS, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type ObjetivoMeta } from "@/lib/modelos";
+import {
+  CONJUNTO_PADRAO, CTAS, TIPOS_SEGMENTACAO, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type ObjetivoMeta,
+} from "@/lib/modelos";
+
+const publico = (n?: number) =>
+  !n ? "" : n >= 1e6 ? `${(n / 1e6).toFixed(1).replace(".", ",")} mi` : n >= 1e3 ? `${Math.round(n / 1e3)} mil` : String(n);
+const tipoDe = (x: Interesse) => TIPOS_SEGMENTACAO[x.tipo ?? "interests"] ?? x.tipo ?? "Interesse";
 
 export const campo = "w-full rounded-lg border border-borda bg-fundo px-2 py-1.5 text-sm outline-none focus:border-destaque";
 const rotulo = "block space-y-1 text-sm";
@@ -13,7 +19,7 @@ function Busca<T>({ tipo, conta, placeholder, onEscolher, rotuloItem }: {
   conta?: string;
   placeholder: string;
   onEscolher: (item: T) => void;
-  rotuloItem: (item: T) => string;
+  rotuloItem: (item: T) => React.ReactNode;
 }) {
   const [termo, setTermo] = useState("");
   const [itens, setItens] = useState<T[]>([]);
@@ -35,7 +41,7 @@ function Busca<T>({ tipo, conta, placeholder, onEscolher, rotuloItem }: {
     <div className="relative">
       <input value={termo} onChange={(e) => setTermo(e.target.value)} placeholder={placeholder} className={campo} />
       {mostrar && (itens.length > 0 || erro) && (
-        <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-borda bg-superficie text-sm shadow-lg">
+        <ul className="absolute z-20 mt-1 max-h-80 w-full overflow-auto rounded-lg border border-borda bg-superficie text-sm shadow-lg">
           {erro && <li className="px-3 py-2 text-critico">{erro}</li>}
           {itens.map((it, i) => (
             <li key={i}>
@@ -250,13 +256,23 @@ function CartaoConjunto({ indice, conjunto, conta, comOrcamento, podeRemover, on
         </p>
       )}
       <div className="space-y-1">
-        <span className="text-sm">Interesses <span className={dica}>(vazio = público aberto)</span></span>
+        <span className="text-sm">Segmentação detalhada <span className={dica}>(interesses, comportamentos, cargos, setores, formação, eventos da vida… · vazio = público aberto)</span></span>
         <Busca<Interesse>
-          tipo="interesse" conta={conta} placeholder="Ex.: móveis planejados, arquitetura…"
-          rotuloItem={(x) => x.nome}
+          tipo="interesse" conta={conta} placeholder="Ex.: móveis planejados, arquiteto, recém-casados, empresário…"
+          rotuloItem={(x) => (
+            <span className="flex items-baseline gap-2">
+              <span className="shrink-0 rounded bg-fundo px-1.5 text-[11px] text-texto-3 ring-1 ring-borda">{tipoDe(x)}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block">{x.nome}</span>
+                {x.caminho && <span className="block truncate text-xs text-texto-3">{x.caminho}</span>}
+              </span>
+              {x.publico ? <span className="shrink-0 text-xs text-texto-3">{publico(x.publico)}</span> : null}
+            </span>
+          )}
           onEscolher={(x) => !conjunto.interesses.some((y) => y.id === x.id) && set("interesses", [...conjunto.interesses, x])}
         />
-        <Chips itens={conjunto.interesses} texto={(x) => x.nome} onRemover={(i) => set("interesses", conjunto.interesses.filter((_, j) => j !== i))} />
+        <Chips itens={conjunto.interesses} texto={(x) => `${x.tipo && x.tipo !== "interests" ? `${tipoDe(x)}: ` : ""}${x.nome}`}
+          onRemover={(i) => set("interesses", conjunto.interesses.filter((_, j) => j !== i))} />
       </div>
     </div>
   );

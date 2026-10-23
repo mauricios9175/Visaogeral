@@ -10,7 +10,28 @@ export const OBJETIVOS: Record<ObjetivoMeta, { rotulo: string; descricao: string
 
 /** Local de segmentação (chave do Meta) */
 export type Local = { key: string; nome: string; tipo: "city" | "region" | "country"; raio?: number };
-export type Interesse = { id: string; nome: string };
+/**
+ * Item de segmentação detalhada (interesse, comportamento, cargo, setor, formação, evento da vida…).
+ * `tipo` é a chave usada pelo Meta no flexible_spec (interests, behaviors, work_positions…); sem tipo = interesse.
+ */
+export type Interesse = { id: string; nome: string; tipo?: string; caminho?: string; publico?: number };
+
+/** Como cada tipo de segmentação aparece na tela */
+export const TIPOS_SEGMENTACAO: Record<string, string> = {
+  interests: "Interesse",
+  behaviors: "Comportamento",
+  work_positions: "Cargo",
+  work_employers: "Empregador",
+  industries: "Setor",
+  education_schools: "Escola",
+  education_majors: "Área de estudo",
+  education_statuses: "Escolaridade",
+  life_events: "Evento da vida",
+  family_statuses: "Família",
+  relationship_statuses: "Relacionamento",
+  income: "Renda",
+  user_adclusters: "Interesse",
+};
 
 /** Um conjunto de anúncios do modelo: cada um com o seu público. */
 export type ConjuntoMeta = {
