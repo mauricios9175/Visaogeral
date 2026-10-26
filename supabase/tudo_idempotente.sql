@@ -1,4 +1,4 @@
--- Todas as migrações (0001 a 0013) num script só, seguro para rodar mais de uma vez:
+-- Todas as migrações (0001 a 0014) num script só, seguro para rodar mais de uma vez:
 -- cria apenas o que estiver faltando e não apaga dados.
 
 create extension if not exists pgcrypto;
@@ -349,3 +349,5 @@ create table if not exists modelos (
 alter table clientes add column if not exists padroes_meta jsonb;
 
 alter table modelos enable row level security;
+-- 0014: Qual campo do CRM corresponde a cada UTM (cada cliente nomeia de um jeito: "Campanha", "Criativo", "Público"…).
+alter table crm_conexoes add column if not exists mapa_utm jsonb;  -- {"campaign": "Campanha", "content": "Criativo", …}

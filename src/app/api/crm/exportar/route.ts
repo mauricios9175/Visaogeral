@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { buscarTudo } from "@/lib/consultas";
+import { completarUtms, type MapaUtm } from "@/lib/utm";
 
 // Planilha (CSV) dos negócios do CRM de um cliente no período, com as UTMs.
 // Protegida pelo login do painel (proxy.ts). Separador ";" e vírgula decimal para abrir direto no Excel em português.
@@ -21,7 +22,14 @@ export async function GET(request: NextRequest) {
       .or(`and(criado_em.gte.${inicio},criado_em.lte.${fim}),and(fechado_em.gte.${inicio},fechado_em.lte.${fim})`)
       .order("criado_em").range(a, b),
   );
-  const linhas = await buscar(`${colunas}, utm_source, utm_medium, utm_campaign, utm_content, utm_term`).catch(() => buscar(colunas));
+  const brutas = await buscar(`${colunas}, utm_source, utm_medium, utm_campaign, utm_content, utm_term`).catch(() => buscar(colunas));
+  // UTMs também dos campos personalizados ("Campanha", "Criativo"…), conforme o mapa do cliente
+  const { data: cx } = await banco.from("crm_conexoes").select("mapa_utm").eq("cliente_id", cliente).maybeSingle();
+  const mapa = (cx?.mapa_utm ?? null) as MapaUtm | null;
+  const linhas: Record<string, unknown>[] = brutas.map((l) => {
+    const u = completarUtms(l as Record<string, string | null>, l.campos as Record<string, string> | null, mapa);
+    return { ...l, utm_source: u.source, utm_medium: u.medium, utm_campaign: u.campaign, utm_content: u.content, utm_term: u.term };
+  });
 
   const data = (iso: unknown) =>
     iso ? new Date(String(iso)).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "";

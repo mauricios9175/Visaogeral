@@ -6,8 +6,9 @@ import type { FunilRd } from "@/lib/crm/rd";
 import { listarFunisCrm, NOME_CRM, type ConexaoCrm } from "@/lib/crm/sync";
 import { Aviso } from "@/components/ui";
 import { BotaoEnviar } from "@/components/botao";
-import { removerConexaoCrm, salvarConexaoCrm, salvarFontesCrm, salvarFunilCrm, sincronizarCrmAgora } from "../../../../acoes";
-import { ehFonteAnuncio, fontesDoCliente } from "@/lib/consultas";
+import { removerConexaoCrm, salvarConexaoCrm, salvarFontesCrm, salvarFunilCrm, salvarMapaUtm, sincronizarCrmAgora } from "../../../../acoes";
+import { camposDoClienteCrm, ehFonteAnuncio, fontesDoCliente } from "@/lib/consultas";
+import { detectarMapa, PARAMETROS_UTM, ROTULO_UTM, type MapaUtm } from "@/lib/utm";
 
 export const maxDuration = 300;
 
@@ -26,7 +27,11 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
   if (!cliente) notFound();
   const c = conexao as ConexaoCrm | null;
 
-  const fontes = c ? await fontesDoCliente(id).catch(() => []) : [];
+  const [fontes, camposCrm] = c
+    ? await Promise.all([fontesDoCliente(id).catch(() => []), camposDoClienteCrm(id).catch(() => [])])
+    : [[], []];
+  const mapaSalvo = ((c as { mapa_utm?: MapaUtm } | null)?.mapa_utm ?? {}) as MapaUtm;
+  const mapaAuto = detectarMapa(camposCrm.map((x) => x.nome));
   let funis: FunilRd[] = [];
   let erroFunis: string | null = null;
   if (c) {
@@ -184,7 +189,46 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
         </section>
       )}
 
-      {/* 4. Sincronizar / remover */}
+      {/* 4. UTMs dos campos personalizados */}
+      {c && (
+        <section className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+          <h2 className="font-medium">4. De onde vêm as UTMs?</h2>
+          <p className="text-sm text-texto-2">
+            Além das UTMs que o CRM registra sozinho, o painel lê os campos personalizados dos negócios (no Ávora, também os
+            do contato). Escolha qual campo corresponde a cada UTM; em “automático”, o painel reconhece pelo nome
+            (ex.: utm_campaign, Campanha, Criativo, Público).
+          </p>
+          {camposCrm.length === 0 ? (
+            <p className="text-sm text-texto-3">Nenhum campo personalizado encontrado ainda. Clique em “Sincronizar CRM agora” e volte aqui.</p>
+          ) : (
+            <form action={salvarMapaUtm} className="space-y-3">
+              <input type="hidden" name="cliente_id" value={id} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                {PARAMETROS_UTM.map((p) => (
+                  <label key={p} className="block space-y-1 text-sm">
+                    {ROTULO_UTM[p]}
+                    <select name={`utm_${p}`} defaultValue={mapaSalvo[p] ?? ""} className={`${campo} w-full`}>
+                      <option value="">Automático{mapaAuto[p] ? ` (${mapaAuto[p]})` : " (nenhum campo reconhecido)"}</option>
+                      {camposCrm.map((f) => (
+                        <option key={f.nome} value={f.nome}>{f.nome} · ex.: {f.exemplo.slice(0, 40)}</option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+              <details className="text-xs text-texto-3">
+                <summary className="cursor-pointer">Campos encontrados nos negócios ({camposCrm.length})</summary>
+                <ul className="mt-1 space-y-0.5">
+                  {camposCrm.map((f) => <li key={f.nome}><b className="text-texto-2">{f.nome}</b> · {f.total} negócio(s) · ex.: {f.exemplo.slice(0, 80)}</li>)}
+                </ul>
+              </details>
+              <BotaoEnviar className={botaoPrimario}>Salvar UTMs</BotaoEnviar>
+            </form>
+          )}
+        </section>
+      )}
+
+      {/* 5. Sincronizar / remover */}
       {c && (
         <section className="flex flex-wrap items-start gap-3">
           <form action={sincronizarCrmAgora}>

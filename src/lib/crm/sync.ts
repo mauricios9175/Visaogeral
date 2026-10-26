@@ -47,7 +47,8 @@ type NegocioNormalizado = {
   responsavel: string | null;
   campos: Record<string, string> | null;
   utms: Utms | null;
-  atribuicao: { primeiro: Atribuicao | null; ultimo: Atribuicao | null } | null;
+  // v: versão da leitura do contato (2 = já inclui os campos personalizados do contato)
+  atribuicao: { primeiro: Atribuicao | null; ultimo: Atribuicao | null; v?: number } | null;
   contatoId: string | null;
 };
 
@@ -133,40 +134,47 @@ const MAX_CONTATOS_POR_SYNC = 300;
  * Devolve um aviso (ex.: token sem permissão de contatos) ou null.
  */
 async function completarUtmsPeloContato(c: ConexaoCrm, negocios: NegocioNormalizado[]): Promise<string | null> {
+  type Salvo = { id: string; campos: Record<string, string> | null; atribuicao: NegocioNormalizado["atribuicao"] } & Record<`utm_${"source" | "medium" | "campaign" | "content" | "term"}`, string | null>;
   const ids = negocios.map((n) => `${c.tipo}:${n.idExterno}`);
-  const salvos = new Map<string, { utm_source: string | null; utm_medium: string | null; utm_campaign: string | null; utm_content: string | null; utm_term: string | null; atribuicao: NegocioNormalizado["atribuicao"] }>();
+  const salvos = new Map<string, Salvo>();
   for (let i = 0; i < ids.length; i += 300) {
     const { data, error } = await db().from("crm_negocios")
-      .select("id, utm_source, utm_medium, utm_campaign, utm_content, utm_term, atribuicao")
+      .select("id, campos, utm_source, utm_medium, utm_campaign, utm_content, utm_term, atribuicao")
       .in("id", ids.slice(i, i + 300)).eq("utm_buscada", true);
     if (error) return null; // SQL 0011 não rodou: segue sem UTMs do contato
-    for (const r of data ?? []) salvos.set(r.id, r);
+    for (const r of (data ?? []) as Salvo[]) salvos.set(r.id, r);
   }
   const faltando: NegocioNormalizado[] = [];
   for (const n of negocios) {
-    if (n.atribuicao || n.utms) continue;
+    if (n.utms?.campaign || n.utms?.content) continue; // a oportunidade já trouxe a UTM
     const s = salvos.get(`${c.tipo}:${n.idExterno}`);
-    if (s) {
+    if (s && s.atribuicao?.v === 2) {
+      // contato já lido antes: reaproveita a atribuição e os campos do contato guardados
       n.atribuicao = s.atribuicao;
       n.utms = { source: s.utm_source, medium: s.utm_medium, campaign: s.utm_campaign, content: s.utm_content, term: s.utm_term };
       if (!Object.values(n.utms).some(Boolean)) n.utms = null;
-      n.atribuicao ??= { primeiro: null, ultimo: null }; // marca como já buscado
+      n.campos = { ...(s.campos ?? {}), ...(n.campos ?? {}) };
     } else if (n.contatoId) {
       faltando.push(n);
     }
   }
+  if (!faltando.length) return null;
   // mais recentes primeiro; o resto fica para as próximas sincronizações
   faltando.sort((a, b) => b.criado_em.localeCompare(a.criado_em));
   const fila = faltando.slice(0, MAX_CONTATOS_POR_SYNC);
+  const nomesContato = await nomesCamposHL(c.token, c.location_id ?? "", "contact");
   const cache = new Map<string, Awaited<ReturnType<typeof atribuicaoDoContato>>>();
   let aviso: string | null = null;
   async function trabalhador() {
     for (let n = fila.shift(); n && !aviso; n = fila.shift()) {
       try {
         if (!cache.has(n.contatoId!)) cache.set(n.contatoId!, await atribuicaoDoContato(c.token, n.contatoId!));
-        const atrib = cache.get(n.contatoId!) ?? null;
-        n.atribuicao = atrib ?? { primeiro: null, ultimo: null };
-        n.utms = utmsDe(atrib?.primeiro) ?? utmsDe(atrib?.ultimo);
+        const contato = cache.get(n.contatoId!) ?? null;
+        n.atribuicao = { primeiro: contato?.primeiro ?? null, ultimo: contato?.ultimo ?? null, v: 2 };
+        n.utms = n.utms ?? utmsDe(contato?.primeiro) ?? utmsDe(contato?.ultimo);
+        // campos do contato entram junto com os da oportunidade (os da oportunidade têm prioridade)
+        const doContato = camposDaOportunidade({ customFields: contato?.campos ?? [] }, nomesContato);
+        if (doContato) n.campos = { ...doContato, ...(n.campos ?? {}) };
       } catch (e) {
         if (e instanceof SemPermissaoContatos) aviso = "o token do Ávora não tem permissão para ler contatos (escopo contacts.readonly)";
         // outros erros: tenta de novo na próxima sincronização

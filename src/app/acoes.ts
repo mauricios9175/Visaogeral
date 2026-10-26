@@ -7,6 +7,7 @@ import { COOKIE_SESSAO, criarSessao, senhaCorreta } from "@/lib/auth";
 import { db, EMPRESA_PADRAO } from "@/lib/db";
 import { importarContas } from "@/lib/sync";
 import { importarContasGoogle, sincronizarGoogle } from "@/lib/sync-google";
+import { PARAMETROS_UTM } from "@/lib/utm";
 import { avisosUtm, listarFunisCrm, NOME_CRM, sincronizarCrmCliente, type ConexaoCrm, type TipoCrm } from "@/lib/crm/sync";
 
 export async function entrar(_: unknown, form: FormData) {
@@ -239,3 +240,13 @@ export async function salvarFontesCrm(form: FormData) {
   avisoCrm(clienteId, `Fontes de anúncio salvas (${fontes.length}).`);
 }
 
+/** Qual campo do CRM corresponde a cada UTM (vazio = detectar pelo nome do campo). */
+export async function salvarMapaUtm(form: FormData) {
+  const clienteId = String(form.get("cliente_id"));
+  const mapa = Object.fromEntries(
+    PARAMETROS_UTM.map((p) => [p, String(form.get(`utm_${p}`) ?? "")] as const).filter(([, v]) => v),
+  );
+  const { error } = await db().from("crm_conexoes").update({ mapa_utm: Object.keys(mapa).length ? mapa : null }).eq("cliente_id", clienteId);
+  revalidatePath("/", "layout");
+  avisoCrm(clienteId, error ? `Erro: ${error.message} (rodou o SQL 0014?)` : "Mapa de UTMs salvo. O relatório por UTM já usa os campos escolhidos.");
+}

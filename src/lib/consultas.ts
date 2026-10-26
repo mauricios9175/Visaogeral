@@ -2,6 +2,7 @@ import "server-only";
 import { db, type Cliente, type ContaAnuncio, type Metricas } from "./db";
 import { progressoDoMes, hojeISO, somarDias as somarDiasISO, type Periodo } from "./datas";
 import { dinheiro as dinheiroBR } from "./formato";
+import { completarUtms, type MapaUtm } from "./utm";
 import { saldosGoogle, somarGoogle, type LinhaGoogle, type NumerosGoogle } from "./consultas-google";
 
 const ZERO: Metricas = {
@@ -442,6 +443,7 @@ const COLUNAS_UTM = "utm_source, utm_medium, utm_campaign, utm_content, utm_term
 type ConexaoResumo = {
   cliente_id: string; pipeline_id: string | null; etapa_qualificado_ordem: number | null;
   fontes_anuncio: string[] | null; ultima_sync: string | null; ultimo_erro: string | null;
+  mapa_utm?: MapaUtm | null;
 };
 
 /** Fontes que parecem de anúncio, usadas enquanto o usuário não escolhe as fontes manualmente. */
@@ -513,7 +515,7 @@ const COLUNAS_CONEXAO = "cliente_id, pipeline_id, etapa_qualificado_ordem, fonte
 
 /** Números do CRM por cliente para a visão geral (só clientes com CRM conectado). */
 export async function resumoCrm(atual: Periodo, anterior: Periodo) {
-  const { data: conexoes } = await db().from("crm_conexoes").select(COLUNAS_CONEXAO);
+  const { data: conexoes } = await db().from("crm_conexoes").select(COLUNAS_CONEXAO);  // a visão geral não usa UTMs
   const lista = (conexoes ?? []) as ConexaoResumo[];
   const negocios = await negociosDe(lista.map((c) => c.cliente_id), anterior.desde);
   return new Map(lista.map((cx) => {
@@ -527,10 +529,17 @@ const CAMPO_VALOR = /or[cç]amento|valor|ticket|budget|investimento|pre[cç]o/i;
 
 /** CRM na tela do cliente: totais, quebra por fonte e lista de negócios do período. */
 export async function detalheCrm(clienteId: string, atual: Periodo, anterior: Periodo) {
-  const { data } = await db().from("crm_conexoes").select(COLUNAS_CONEXAO).eq("cliente_id", clienteId).maybeSingle();
+  // mapa_utm vem do SQL 0014; sem ele, segue só com a detecção automática
+  const ler = (colunas: string) => db().from("crm_conexoes").select(colunas).eq("cliente_id", clienteId).maybeSingle();
+  const primeira = await ler(`${COLUNAS_CONEXAO}, mapa_utm`);
+  const { data } = primeira.error ? await ler(COLUNAS_CONEXAO) : primeira;
   if (!data) return null;
-  const cx = data as ConexaoResumo;
-  const negocios = await negociosDe([clienteId], anterior.desde);
+  const cx = data as unknown as ConexaoResumo;
+  // UTMs: atribuição do CRM + campos personalizados ("Campanha", "Criativo", "Público"…), conforme o mapa do cliente
+  const negocios = (await negociosDe([clienteId], anterior.desde)).map((n) => {
+    const u = completarUtms(n, n.campos, cx.mapa_utm);
+    return { ...n, utm_source: u.source, utm_medium: u.medium, utm_campaign: u.campaign, utm_content: u.content, utm_term: u.term };
+  });
 
   const grupos = new Map<string, NegocioCrm[]>();
   for (const n of negocios) {
@@ -587,4 +596,18 @@ export async function fontesDoCliente(clienteId: string) {
   const contagem = new Map<string, number>();
   for (const l of linhas) if (l.origem) contagem.set(l.origem, (contagem.get(l.origem) ?? 0) + 1);
   return [...contagem.entries()].sort((a, b) => b[1] - a[1]).map(([nome, total]) => ({ nome, total }));
+}
+
+/** Campos personalizados que aparecem nos negócios do cliente, com um exemplo de valor (para mapear as UTMs). */
+export async function camposDoClienteCrm(clienteId: string) {
+  const { data } = await db().from("crm_negocios").select("campos").eq("cliente_id", clienteId)
+    .not("campos", "is", null).order("criado_em", { ascending: false }).limit(1000);
+  const mapa = new Map<string, { total: number; exemplo: string }>();
+  for (const { campos } of (data ?? []) as { campos: Record<string, string> }[]) {
+    for (const [nome, valor] of Object.entries(campos ?? {})) {
+      const atual = mapa.get(nome) ?? { total: 0, exemplo: String(valor) };
+      mapa.set(nome, { total: atual.total + 1, exemplo: atual.exemplo });
+    }
+  }
+  return [...mapa.entries()].map(([nome, x]) => ({ nome, ...x })).sort((a, b) => b.total - a.total);
 }

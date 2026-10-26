@@ -104,12 +104,17 @@ export class SemPermissaoContatos extends Error {}
 /** Atribuição guardada no contato (primeiro e último acesso). Precisa do escopo de leitura de contatos. */
 export async function atribuicaoDoContato(token: string, contatoId: string) {
   try {
-    const r = await get<{ contact?: { attributionSource?: Atribuicao | null; lastAttributionSource?: Atribuicao | null } }>(
-      `contacts/${contatoId}`, token, {},
-    );
+    const r = await get<{ contact?: {
+      attributionSource?: Atribuicao | null; lastAttributionSource?: Atribuicao | null; customFields?: CampoValor[];
+    } }>(`contacts/${contatoId}`, token, {});
     const c = r.contact;
-    if (!c?.attributionSource && !c?.lastAttributionSource) return null;
-    return { primeiro: c.attributionSource ?? null, ultimo: c.lastAttributionSource ?? null };
+    if (!c) return null;
+    return {
+      primeiro: c.attributionSource ?? null,
+      ultimo: c.lastAttributionSource ?? null,
+      // campos personalizados do contato: muitos formulários e sites gravam a UTM aqui ("utm_campaign", "Campanha"…)
+      campos: c.customFields ?? [],
+    };
   } catch (e) {
     if (/Token inválido|Sem acesso/.test(String(e))) throw new SemPermissaoContatos(String(e));
     if (/ 404:/.test(String(e))) return null;
@@ -156,11 +161,11 @@ export async function listarOportunidades(token: string, locationId: string, des
   return todas;
 }
 
-/** Nomes dos campos personalizados de oportunidade ({id: nome}). Se faltar permissão, segue sem nomes. */
-export async function nomesCamposHL(token: string, locationId: string) {
+/** Nomes dos campos personalizados ({id: nome}) de oportunidade ou de contato. Se faltar permissão, segue sem nomes. */
+export async function nomesCamposHL(token: string, locationId: string, modelo: "opportunity" | "contact" = "opportunity") {
   try {
     const r = await get<{ customFields?: { id: string; name: string }[] }>(
-      `locations/${locationId}/customFields`, token, { model: "opportunity" },
+      `locations/${locationId}/customFields`, token, { model: modelo },
     );
     return new Map((r.customFields ?? []).map((c) => [c.id, c.name]));
   } catch {
@@ -168,7 +173,7 @@ export async function nomesCamposHL(token: string, locationId: string) {
   }
 }
 
-export function camposDaOportunidade(o: OportunidadeApi, nomes: Map<string, string>) {
+export function camposDaOportunidade(o: Pick<OportunidadeApi, "customFields">, nomes: Map<string, string>) {
   const campos: Record<string, string> = {};
   for (const c of o.customFields ?? []) {
     const v = c.fieldValue ?? c.value ?? c.fieldValueString ?? c.fieldValueNumber;
