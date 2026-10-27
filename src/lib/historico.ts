@@ -93,6 +93,10 @@ export function consolidar(l: LinhaHistorico): MesConsolidado {
   };
 }
 
+/** O mês tem algum número (investimento, leads, passos, vendas ou faturamento)? */
+export const temDados = (m: MesConsolidado) =>
+  m.investimento > 0 || !!m.leads || !!m.vendas || !!m.faturamento || m.passos.some((p) => !!p.valor);
+
 /** Nomes dos passos que aparecem nos meses, na ordem do mês mais recente. */
 export function nomesDosPassos(meses: MesConsolidado[]) {
   const nomes: string[] = [];
@@ -141,7 +145,8 @@ function mesesEntre(desde: string, ate: string) {
 export async function lerHistorico(clienteId: string): Promise<{ meses: MesConsolidado[]; erro: string | null }> {
   const { data, error } = await db().from("historico_mensal").select("*").eq("cliente_id", clienteId).order("mes", { ascending: false });
   if (error) return { meses: [], erro: error.message };
-  return { meses: ((data ?? []) as LinhaHistorico[]).map(consolidar), erro: null };
+  // meses sem nenhum número (antes de o cliente começar, por exemplo) não aparecem
+  return { meses: ((data ?? []) as LinhaHistorico[]).map(consolidar).filter(temDados), erro: null };
 }
 
 /** Funil do relatório do cliente (nomes e passos); sem CRM, só Leads → Vendas. */

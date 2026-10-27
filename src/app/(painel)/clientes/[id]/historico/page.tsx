@@ -39,7 +39,8 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   const anos = [...new Set(meses.map((m) => m.mes.slice(0, 4)))];
   const anoSel = ano && anos.includes(ano) ? ano : null;
   // padrão: últimos 12 meses; ?ano=2025 mostra o ano inteiro
-  const visiveis = anoSel ? meses.filter((m) => m.mes.startsWith(anoSel)) : meses.slice(0, 12);
+  // do mais antigo (em cima) para o mais recente (embaixo)
+  const visiveis = (anoSel ? meses.filter((m) => m.mes.startsWith(anoSel)) : meses.slice(0, 12)).reverse();
   const total = somarMeses(visiveis);
   // colunas dos passos: as do funil atual do cliente e as que aparecem nos meses já gravados
   const passos = [...new Set([...funil.passos.map((p) => p.nome), ...nomesDosPassos(visiveis)])];
@@ -163,7 +164,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
         <>
           <div className="flex flex-wrap items-center gap-1 text-sm">
             <Link href={`/clientes/${id}/historico`} className={`rounded-md px-3 py-1 ${!anoSel ? "bg-superficie font-medium" : "text-texto-2 hover:text-texto"}`}>
-              Últimos 12 meses
+              {meses.length < 12 ? "Todos os meses" : "Últimos 12 meses"}
             </Link>
             {anos.map((a) => (
               <Link key={a} href={`/clientes/${id}/historico?ano=${a}`} className={`rounded-md px-3 py-1 ${anoSel === a ? "bg-superficie font-medium" : "text-texto-2 hover:text-texto"}`}>
@@ -194,7 +195,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
               </tbody>
               {total && visiveis.length > 1 && (
                 <tfoot className="border-t border-borda font-medium">
-                  <LinhaMes m={{ ...total, mes: anoSel ? `Total ${anoSel}` : "Total 12 meses" }} passos={passos} temGoogle={temGoogle} total />
+                  <LinhaMes m={{ ...total, mes: anoSel ? `Total ${anoSel}` : visiveis.length < 12 ? `Total (${visiveis.length} meses)` : "Total 12 meses" }} passos={passos} temGoogle={temGoogle} total />
                 </tfoot>
               )}
             </table>
