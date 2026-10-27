@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // modelo do relatório (pptx) que o painel sobe para o Google Drive
+  outputFileTracingIncludes: {
+    "/clientes/**": ["./modelos/*.pptx"],
+  },
   turbopack: {
     rules: {
       "*.css": {

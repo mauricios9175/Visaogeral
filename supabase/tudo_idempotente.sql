@@ -1,4 +1,4 @@
--- Todas as migrações (0001 a 0015) num script só, seguro para rodar mais de uma vez:
+-- Todas as migrações (0001 a 0016) num script só, seguro para rodar mais de uma vez:
 -- cria apenas o que estiver faltando e não apaga dados.
 
 create extension if not exists pgcrypto;
@@ -380,3 +380,24 @@ alter table crm_conexoes add column if not exists etapa_proposta_nome   text;
 alter table crm_conexoes add column if not exists etapa_proposta_ordem  int;
 alter table crm_conexoes add column if not exists pipeline_proposta_id  text;
 alter table crm_conexoes add column if not exists rotulos               jsonb;  -- {"interessados": "Qualificados", "propostas": "Projetos"}
+-- 0016: Relatório no Google Slides (modelo da Propulsão copiado e preenchido pelo painel).
+
+-- Configurações gerais do painel (ex.: qual apresentação do Drive é o modelo do relatório)
+create table if not exists configuracoes (
+  chave          text primary key,
+  valor          jsonb not null,
+  atualizado_em  timestamptz not null default now()
+);
+
+-- Relatórios gerados (para achar de novo o link)
+create table if not exists relatorios_gerados (
+  id          bigint generated always as identity primary key,
+  cliente_id  uuid references clientes(id) on delete cascade,
+  periodo     text,
+  link        text not null,
+  criado_em   timestamptz not null default now()
+);
+create index if not exists relatorios_gerados_cliente_idx on relatorios_gerados (cliente_id, criado_em desc);
+
+alter table configuracoes      enable row level security;
+alter table relatorios_gerados enable row level security;

@@ -4,7 +4,9 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { CAMPOS_AJUSTAVEIS, gravarHistorico, mesDe, preencherHistorico } from "@/lib/historico";
-import { hojeISO } from "@/lib/datas";
+import { hojeISO, somarDias } from "@/lib/datas";
+import { DIMENSOES_UTM } from "@/lib/consultas";
+import { criarModeloNoDrive, gerarRelatorio, linkApresentacao } from "@/lib/relatorio-slides";
 
 function voltar(clienteId: string, msg: string): never {
   revalidatePath(`/clientes/${clienteId}/historico`);
@@ -57,4 +59,40 @@ export async function salvarAjusteMes(form: FormData) {
     .update({ ajustes: Object.keys(ajustes).length ? ajustes : null, observacao })
     .eq("cliente_id", clienteId).eq("mes", mes);
   voltar(clienteId, error ? `Erro: ${error.message}` : "Mês salvo.");
+}
+
+/** Sobe o modelo da Propulsão para o Drive do login escolhido (uma vez só). */
+export async function criarModeloRelatorio(form: FormData) {
+  const clienteId = String(form.get("cliente_id"));
+  let msg: string;
+  try {
+    const c = await criarModeloNoDrive(String(form.get("token_id")));
+    msg = `Modelo criado no Drive de ${c.email}, na pasta “Relatórios · Visão Geral”: ${linkApresentacao(c.modeloId)}`;
+  } catch (e) {
+    msg = `Erro ao criar o modelo: ${e instanceof Error ? e.message : e}`;
+  }
+  voltar(clienteId, msg);
+}
+
+/** Copia o modelo e preenche com os números do período escolhido. */
+export async function gerarRelatorioSlides(form: FormData) {
+  const clienteId = String(form.get("cliente_id"));
+  const mes = String(form.get("mes") ?? "");
+  let desde = String(form.get("de") ?? "");
+  let ate = String(form.get("ate") ?? "");
+  if (mes !== "livre") {
+    desde = `${mes}-01`;
+    ate = [somarDias(mesDe(desde, 1), -1), hojeISO()].sort()[0];
+  }
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  if (!iso.test(desde) || !iso.test(ate) || desde > ate) voltar(clienteId, "Escolha um período válido.");
+  const dimensao = (DIMENSOES_UTM.find((d) => d.chave === form.get("dimensao")) ?? DIMENSOES_UTM[1]).chave;
+  let msg: string;
+  try {
+    const r = await gerarRelatorio({ clienteId, desde, ate, dimensao });
+    msg = `Relatório de ${r.periodo} pronto: ${r.link}`;
+  } catch (e) {
+    msg = `Erro ao gerar o relatório: ${e instanceof Error ? e.message : e}`;
+  }
+  voltar(clienteId, msg);
 }

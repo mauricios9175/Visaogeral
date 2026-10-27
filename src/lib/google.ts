@@ -1,13 +1,14 @@
 import "server-only";
 
 /**
- * Google Ads API (REST), só leitura.
+ * Google Ads API (REST): leitura, ações rápidas e relatórios no Google Slides.
  * Desde set/2026 o token de desenvolvedor não é mais exigido: o nível de acesso fica no projeto do Google Cloud
  * dono do GOOGLE_CLIENT_ID. Se GOOGLE_ADS_DEVELOPER_TOKEN existir, ele ainda é enviado (é ignorado pela API).
  */
 const VERSAO = process.env.GOOGLE_ADS_API_VERSION?.trim() || "v25";
 const BASE = `https://googleads.googleapis.com/${VERSAO}`;
-const ESCOPOS = "https://www.googleapis.com/auth/adwords openid email";
+// drive.file: só os arquivos que o próprio painel cria (modelo e relatórios no Google Slides), nada mais do Drive
+const ESCOPOS = "https://www.googleapis.com/auth/adwords https://www.googleapis.com/auth/drive.file openid email";
 
 function credenciais() {
   const id = process.env.GOOGLE_CLIENT_ID?.trim();
