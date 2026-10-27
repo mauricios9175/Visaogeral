@@ -40,6 +40,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
   const [formulario, setFormulario] = useState(
     padroes.formulario || (modelosFormulario[0] ? `modelo:${modelosFormulario[0].id}` : ""));
   const [criativos, setCriativos] = useState<Criativo[]>([]);
+  const [manterSemAnuncios, setManterSemAnuncios] = useState(true);
   const [enviando, setEnviando] = useState<string | null>(null);
   const [erroEnvio, setErroEnvio] = useState<string | null>(null);
   const lote = useMemo(() => crypto.randomUUID(), []);
@@ -106,7 +107,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
     return <p className="text-sm">Este cliente não tem conta do Meta vinculada (Configurações → Contas do Meta).</p>;
   }
 
-  const payload = { clienteId, conta, modeloId, objetivo, config, pagina, instagram, formulario, pixel, criativos };
+  const payload = { clienteId, conta, modeloId, objetivo, config, pagina, instagram, formulario, pixel, criativos, manterSemAnuncios };
   const faltando =
     !pagina ? "Escolha a página do Facebook." :
     objetivo === "formulario" && !formulario ? "Escolha o formulário." :
@@ -219,6 +220,10 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
       <form action={enviar} className="space-y-3">
         <input type="hidden" name="payload" value={JSON.stringify(payload)} />
         {faltando && <p className="text-sm text-atencao">▲ {faltando}</p>}
+        <label className="flex items-center gap-2 text-sm text-texto-2">
+          <input type="checkbox" checked={manterSemAnuncios} onChange={(e) => setManterSemAnuncios(e.target.checked)} />
+          Se o Meta barrar os anúncios, manter a campanha, os conjuntos e o formulário criados (pausados) para eu subir o anúncio no Gerenciador
+        </label>
         <button
           disabled={!!faltando || montando || !!enviando}
           onClick={(e) => { if (!confirm(`Criar a campanha de ${clienteNome} no Meta? Tudo vai ser criado PAUSADO.`)) e.preventDefault(); }}

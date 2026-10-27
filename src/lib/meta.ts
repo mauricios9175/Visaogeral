@@ -476,6 +476,13 @@ function erroDeEscrita(e: unknown): Error {
       "Sem permissão para alterar anúncios. Adicione “ads_management” na configuração do Login do app no Meta e clique em “Conectar / reconectar perfil” em Configurações.",
     );
   }
+  if (e instanceof Error && /sem permiss[aã]o\. Para sua prote[cç][aã]o|autenticar sua conta|authenticate your account|unauthorized access/i.test(e.message)) {
+    return new Error(
+      "Bloqueio de segurança do Meta para anúncios criados por app. Ative a autenticação de dois fatores no seu perfil, " +
+      "abra o Gerenciador de Anúncios dessa conta e conclua a verificação “Confirme que é você” (se não aparecer, crie ou edite um anúncio lá), " +
+      "depois clique em “Conectar / reconectar perfil” em Configurações e monte de novo.",
+    );
+  }
   if (e instanceof Error && /modo de desenvolvimento|development mode|in development/i.test(e.message)) {
     return new Error(
       "O app do Meta usado pelo painel está em modo de desenvolvimento, e o Meta só aceita anúncios criados por app em modo público. " +

@@ -388,6 +388,8 @@ export type DadosMontagem = {
   criativos: { caminho: string; nome: string; tipo: string }[];
   /** objetivo formulário: em vez de um formulário existente, cria um novo na página a partir deste modelo */
   modeloFormulario?: ConfigFormulario | null;
+  /** se nenhum anúncio puder ser criado, manter campanha, conjuntos e formulário (pausados) em vez de desfazer */
+  manterSemAnuncios?: boolean;
 };
 
 /**
@@ -518,8 +520,11 @@ export async function montarNoMeta(d: DadosMontagem) {
         falhas.push(`${cr.nome}: ${e instanceof Error ? e.message : e}`);
       }
     }
-    if (!anuncios) throw new Error(`Nenhum anúncio foi criado. ${falhas.join(" | ")}`);
-    return { campanhaId, campanhaNome, conjuntos: conjuntos.length, anuncios, falhas, formularioCriado: arquivarFormulario ? d.formularioId : null };
+    // o mesmo motivo repetido em cada conjunto vira uma linha só
+    const motivos = [...new Set(falhas.map((f) => f.replace(/^.*?: /, "")))];
+    const resumo = motivos.length === 1 && falhas.length > 1 ? [`${falhas.length} anúncio(s): ${motivos[0]}`] : falhas;
+    if (!anuncios && !d.manterSemAnuncios) throw new Error(`Nenhum anúncio foi criado. ${resumo.join(" | ")}`);
+    return { campanhaId, campanhaNome, conjuntos: conjuntos.length, anuncios, falhas: resumo, formularioCriado: arquivarFormulario ? d.formularioId : null };
   } catch (e) {
     // desfaz: apaga a campanha (os conjuntos e os anúncios vão junto) e arquiva o formulário criado agora
     await fetch(`${BASE_META}/${campanhaId}?access_token=${encodeURIComponent(d.token)}`, { method: "DELETE" }).catch(() => null);

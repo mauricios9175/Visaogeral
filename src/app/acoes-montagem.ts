@@ -14,6 +14,7 @@ type Payload = {
   clienteId: string; conta: string; modeloId: string; objetivo: ObjetivoMeta; config: ConfigMeta;
   pagina: string; instagram: string; formulario: string; pixel: string;
   criativos: { caminho: string; nome: string; tipo: string }[];
+  manterSemAnuncios?: boolean;
 };
 
 /** Cria campanha, conjunto e anúncios (tudo pausado) a partir do modelo. Se algo falhar no meio, desfaz o que criou. */
@@ -47,7 +48,7 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
       contaId: conta.id, token, clienteNome: cliente.nome, objetivo: p.objetivo, config,
       paginaId: p.pagina, instagramId: p.instagram || null,
       formularioId: modeloFormulario ? null : p.formulario || null, pixelId: p.pixel || null,
-      criativos: p.criativos, modeloFormulario,
+      criativos: p.criativos, modeloFormulario, manterSemAnuncios: p.manterSemAnuncios !== false,
     });
     // lembra as escolhas deste cliente para a próxima montagem
     await banco.from("clientes").update({
@@ -60,8 +61,11 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
     await apagar(p.criativos.map((c) => c.caminho));
     revalidatePath(`/clientes/${cliente.id}`);
     return {
-      ok: true,
-      mensagem: `Campanha “${r.campanhaNome}” criada PAUSADA com ${r.conjuntos} conjunto(s) e ${r.anuncios} anúncio(s).`,
+      ok: r.anuncios > 0,
+      mensagem: r.anuncios
+        ? `Campanha “${r.campanhaNome}” criada PAUSADA com ${r.conjuntos} conjunto(s) e ${r.anuncios} anúncio(s).`
+        : `Campanha “${r.campanhaNome}” e ${r.conjuntos} conjunto(s) criados PAUSADOS, mas o Meta não deixou criar os anúncios. ` +
+          "Suba o anúncio pelo Gerenciador (link abaixo); o motivo está logo aqui embaixo.",
       detalhes: [
         ...(r.formularioCriado ? [`Formulário novo criado na página (id ${r.formularioCriado}).`] : []),
         ...r.falhas.map((f) => `⚠ ${f}`),
