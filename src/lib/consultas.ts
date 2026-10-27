@@ -490,8 +490,12 @@ export function funilDaConexao(cx: ConexaoResumo): FunilCliente & { teste: ((n: 
 /** Fontes que parecem de anúncio, usadas enquanto o usuário não escolhe as fontes manualmente. */
 const FONTE_ANUNCIO_AUTO = /facebook|meta|instagram|google|tiktok|linkedin|\bads?\b|an[uú]ncio|tr[aá]fego|pago|paid|cpc/i;
 
+/** Opção da lista de fontes para os negócios sem fonte preenchida no CRM. */
+export const SEM_FONTE = "(sem fonte)";
+
 export function ehFonteAnuncio(fonte: string | null, escolhidas: string[] | null) {
-  if (!fonte) return false;
+  // sem fonte: só conta se o usuário marcou "(sem fonte)" na lista
+  if (!fonte?.trim()) return !!escolhidas?.includes(SEM_FONTE);
   return escolhidas ? escolhidas.includes(fonte) : FONTE_ANUNCIO_AUTO.test(fonte);
 }
 
@@ -665,7 +669,10 @@ export async function fontesDoCliente(clienteId: string) {
     db().from("crm_negocios").select("origem").eq("cliente_id", clienteId).range(de, ate),
   );
   const contagem = new Map<string, number>();
-  for (const l of linhas) if (l.origem) contagem.set(l.origem, (contagem.get(l.origem) ?? 0) + 1);
+  for (const l of linhas) {
+    const f = l.origem?.trim() || SEM_FONTE;
+    contagem.set(f, (contagem.get(f) ?? 0) + 1);
+  }
   return [...contagem.entries()].sort((a, b) => b[1] - a[1]).map(([nome, total]) => ({ nome, total }));
 }
 

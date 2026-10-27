@@ -7,7 +7,7 @@ import { listarFunisCrm, NOME_CRM, type ConexaoCrm } from "@/lib/crm/sync";
 import { Aviso } from "@/components/ui";
 import { BotaoEnviar } from "@/components/botao";
 import { removerConexaoCrm, salvarConexaoCrm, salvarFontesCrm, salvarFunilCrm, salvarMapaUtm, sincronizarCrmAgora } from "../../../../acoes";
-import { camposDoClienteCrm, ehFonteAnuncio, fontesDoCliente } from "@/lib/consultas";
+import { camposDoClienteCrm, ehFonteAnuncio, fontesDoCliente, SEM_FONTE } from "@/lib/consultas";
 import { detectarMapa, PARAMETROS_UTM, ROTULO_UTM, type MapaUtm } from "@/lib/utm";
 import { normalizarFunil, type FunilCliente } from "@/lib/funil";
 import { EditorFunil } from "@/components/editor-funil";
@@ -198,7 +198,7 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
                       type="checkbox" name="fonte" value={f.nome}
                       defaultChecked={ehFonteAnuncio(f.nome, c.fontes_anuncio)}
                     />
-                    {f.nome} <span className="text-xs text-texto-3">({f.total})</span>
+                    {f.nome === SEM_FONTE ? <i>Sem fonte preenchida</i> : f.nome} <span className="text-xs text-texto-3">({f.total})</span>
                   </label>
                 ))}
               </div>
