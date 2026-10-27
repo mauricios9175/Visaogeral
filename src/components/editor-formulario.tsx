@@ -90,7 +90,7 @@ export function EditorFormulario({ modelo }: { modelo?: ModeloFormulario }) {
         <legend className="mb-2 text-sm font-medium">Política de privacidade <span className="font-normal text-texto-3">(opcional)</span></legend>
         <label className={rotulo}>Link<input value={f.politicaUrl} onChange={(e) => set("politicaUrl", e.target.value)} placeholder="https://site-do-cliente.com/privacidade" className={campo} /></label>
         <label className={rotulo}>Texto do link<input value={f.politicaTexto} onChange={(e) => set("politicaTexto", e.target.value)} className={campo} /></label>
-        <p className={`${dica} md:col-span-2`}>Deixe em branco para criar o formulário sem política personalizada. Se o Meta recusar nessa página, a mensagem avisa.</p>
+        <p className={`${dica} md:col-span-2`}>Em branco, o painel reaproveita a política do formulário mais recente da página do cliente (como o Gerenciador faz). Só é preciso preencher se a página ainda não tiver nenhum formulário.</p>
       </fieldset>
 
       <fieldset className="grid gap-3 md:grid-cols-2">

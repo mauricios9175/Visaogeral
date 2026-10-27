@@ -224,6 +224,29 @@ export async function formulariosDaPagina(paginaId: string, token: string) {
   return forms.filter((f) => f.status === "ACTIVE").map((f) => ({ id: f.id, nome: f.name }));
 }
 
+/**
+ * A API exige política de privacidade (ou um conteúdo legal já existente). Ordem:
+ * 1. o link do modelo; 2. a política do formulário mais recente da página (o mesmo que o Gerenciador reaproveita).
+ */
+async function politicaDoFormulario(paginaId: string, tokenPagina: string, f: ConfigFormulario): Promise<Record<string, string>> {
+  if (f.politicaUrl) {
+    return { privacy_policy: JSON.stringify({ url: f.politicaUrl, link_text: f.politicaTexto || "Política de privacidade" }) };
+  }
+  type Form = { id: string; privacy_policy_url?: string; legal_content?: { id?: string; privacy_policy?: { url?: string; link_text?: string } } };
+  const forms = await getMeta<{ data: Form[] }>(montarUrl(`${paginaId}/leadgen_forms`, tokenPagina, {
+    fields: "id,privacy_policy_url,legal_content{id,privacy_policy}", limit: "25",
+  })).then((r) => r.data, () => [] as Form[]);
+  for (const x of forms) {
+    if (x.legal_content?.id) return { legal_content_id: x.legal_content.id };
+    const url = x.legal_content?.privacy_policy?.url ?? x.privacy_policy_url;
+    if (url) return { privacy_policy: JSON.stringify({ url, link_text: x.legal_content?.privacy_policy?.link_text || f.politicaTexto || "Política de privacidade" }) };
+  }
+  throw new Error(
+    "o Meta exige uma política de privacidade e esta página ainda não tem formulário com política para reaproveitar. " +
+    "Informe o link da política no modelo de formulário (pode ser a página de privacidade do site do cliente).",
+  );
+}
+
 /** Cria um formulário instantâneo na página a partir do modelo. Devolve o id do formulário. */
 export async function criarFormulario(paginaId: string, token: string, f: ConfigFormulario, vars: Record<string, string>) {
   const tokenPagina = await tokenDaPagina(paginaId, token);
@@ -239,8 +262,7 @@ export async function criarFormulario(paginaId: string, token: string, f: Config
     name: aplicarNome(f.nome, vars),
     locale: "PT_BR",
     questions: JSON.stringify(perguntas),
-    // política de privacidade só se informada (o Meta deixou de exigir em formulários novos)
-    ...(f.politicaUrl && { privacy_policy: JSON.stringify({ url: f.politicaUrl, link_text: f.politicaTexto || "Política de privacidade" }) }),
+    ...(await politicaDoFormulario(paginaId, tokenPagina, f)),
     ...(f.tituloPerguntas && { question_page_custom_headline: f.tituloPerguntas }),
     is_optimized_for_quality: f.tipo === "intencao" ? "true" : "false",
     ...(f.introTitulo && {
