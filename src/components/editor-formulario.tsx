@@ -52,6 +52,9 @@ export function EditorFormulario({ modelo }: { modelo?: ModeloFormulario }) {
 
       <fieldset className="space-y-3">
         <legend className="mb-2 text-sm font-medium">Perguntas</legend>
+        <label className={rotulo}>Título da página de perguntas <span className={dica}>(opcional)</span>
+          <input value={f.tituloPerguntas} onChange={(e) => set("tituloPerguntas", e.target.value)} placeholder="Ex.: Conte um pouco sobre o seu projeto" className={campo} />
+        </label>
         <div className="flex flex-wrap gap-3 text-sm">
           {PERGUNTAS_PADRAO.map((p) => (
             <label key={p.tipo} className="flex items-center gap-1">
@@ -84,10 +87,10 @@ export function EditorFormulario({ modelo }: { modelo?: ModeloFormulario }) {
       </fieldset>
 
       <fieldset className="grid gap-3 md:grid-cols-2">
-        <legend className="mb-2 text-sm font-medium">Política de privacidade <span className="font-normal text-critico">(obrigatória no Meta)</span></legend>
+        <legend className="mb-2 text-sm font-medium">Política de privacidade <span className="font-normal text-texto-3">(opcional)</span></legend>
         <label className={rotulo}>Link<input value={f.politicaUrl} onChange={(e) => set("politicaUrl", e.target.value)} placeholder="https://site-do-cliente.com/privacidade" className={campo} /></label>
         <label className={rotulo}>Texto do link<input value={f.politicaTexto} onChange={(e) => set("politicaTexto", e.target.value)} className={campo} /></label>
-        <p className={`${dica} md:col-span-2`}>Se cada cliente tem a sua política, deixe um link genérico aqui e ajuste no formulário criado, ou crie um modelo por cliente.</p>
+        <p className={`${dica} md:col-span-2`}>Deixe em branco para criar o formulário sem política personalizada. Se o Meta recusar nessa página, a mensagem avisa.</p>
       </fieldset>
 
       <fieldset className="grid gap-3 md:grid-cols-2">

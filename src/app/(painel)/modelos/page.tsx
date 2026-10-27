@@ -91,7 +91,6 @@ export default async function Modelos({ searchParams }: PageProps<"/modelos">) {
                     <div className="font-medium">{f.nome}</div>
                     <div className="text-xs text-texto-3">
                       {f.config.tipo === "intencao" ? "Maior intenção" : "Mais volume"} · {f.config.perguntas.length} pergunta(s)
-                      {!f.config.politicaUrl && <span className="text-critico"> · falta o link da política de privacidade</span>}
                     </div>
                   </div>
                   <Link href={`/modelos?editarForm=${f.id}#editor-formulario`} className={botao}>Editar</Link>

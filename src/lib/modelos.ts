@@ -173,7 +173,7 @@ export function normalizarConfig(c: (Partial<ConfigMeta> & Legado) | null | unde
 export const OBJETIVO_FORMULARIO = "modelo_formulario"; // valor da coluna "objetivo" na tabela modelos
 
 export type PerguntaForm = {
-  tipo: "FULL_NAME" | "PHONE" | "EMAIL" | "CITY" | "STATE" | "CUSTOM";
+  tipo: "FULL_NAME" | "PHONE" | "EMAIL" | "CITY" | "STATE" | "ZIP" | "DOB" | "JOB_TITLE" | "COMPANY_NAME" | "CUSTOM";
   rotulo: string;      // só para CUSTOM
   opcoes: string[];    // CUSTOM de múltipla escolha; vazio = resposta livre
 };
@@ -183,8 +183,9 @@ export type ConfigFormulario = {
   tipo: "volume" | "intencao"; // intenção = etapa extra de revisão (leads mais qualificados)
   introTitulo: string;
   introTexto: string;
+  tituloPerguntas: string;   // título da página de perguntas (opcional)
   perguntas: PerguntaForm[];
-  politicaUrl: string;
+  politicaUrl: string;       // opcional: sem link, o formulário vai sem política personalizada
   politicaTexto: string;
   agradecimentoTitulo: string;
   agradecimentoTexto: string;
@@ -200,6 +201,10 @@ export const PERGUNTAS_PADRAO: { tipo: PerguntaForm["tipo"]; rotulo: string }[] 
   { tipo: "EMAIL", rotulo: "E-mail" },
   { tipo: "CITY", rotulo: "Cidade" },
   { tipo: "STATE", rotulo: "Estado" },
+  { tipo: "ZIP", rotulo: "CEP" },
+  { tipo: "DOB", rotulo: "Data de nascimento" },
+  { tipo: "JOB_TITLE", rotulo: "Cargo" },
+  { tipo: "COMPANY_NAME", rotulo: "Empresa" },
 ];
 
 export const FORMULARIO_PADRAO: ConfigFormulario = {
@@ -207,6 +212,7 @@ export const FORMULARIO_PADRAO: ConfigFormulario = {
   tipo: "intencao",
   introTitulo: "",
   introTexto: "",
+  tituloPerguntas: "",
   perguntas: [
     { tipo: "FULL_NAME", rotulo: "", opcoes: [] },
     { tipo: "PHONE", rotulo: "", opcoes: [] },

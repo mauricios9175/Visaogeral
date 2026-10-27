@@ -197,7 +197,6 @@ export async function formulariosDaPagina(paginaId: string, token: string) {
 
 /** Cria um formulário instantâneo na página a partir do modelo. Devolve o id do formulário. */
 export async function criarFormulario(paginaId: string, token: string, f: ConfigFormulario, vars: Record<string, string>) {
-  if (!f.politicaUrl) throw new Error("O modelo de formulário precisa do link da política de privacidade.");
   const tokenPagina = await tokenDaPagina(paginaId, token);
   const perguntas = f.perguntas.map((p, i) => {
     if (p.tipo !== "CUSTOM") return { type: p.tipo };
@@ -211,7 +210,9 @@ export async function criarFormulario(paginaId: string, token: string, f: Config
     name: aplicarNome(f.nome, vars),
     locale: "PT_BR",
     questions: JSON.stringify(perguntas),
-    privacy_policy: JSON.stringify({ url: f.politicaUrl, link_text: f.politicaTexto || "Política de privacidade" }),
+    // política de privacidade só se informada (o Meta deixou de exigir em formulários novos)
+    ...(f.politicaUrl && { privacy_policy: JSON.stringify({ url: f.politicaUrl, link_text: f.politicaTexto || "Política de privacidade" }) }),
+    ...(f.tituloPerguntas && { question_page_custom_headline: f.tituloPerguntas }),
     is_optimized_for_quality: f.tipo === "intencao" ? "true" : "false",
     ...(f.introTitulo && {
       context_card: JSON.stringify({ title: f.introTitulo, style: "PARAGRAPH_STYLE", content: [f.introTexto || f.introTitulo] }),
