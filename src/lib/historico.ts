@@ -3,7 +3,8 @@ import { db, type ContaAnuncio } from "./db";
 import { extrairResultados, insightsMensais } from "./meta";
 import { metricasMensais, tokenDeAcesso } from "./google";
 import { tokenDaConta } from "./sync";
-import { sincronizarCrmCliente, type ConexaoCrm } from "./crm/sync";
+import { sincronizarCrmLote, type ConexaoCrm } from "./crm/sync";
+import type { CursorHL } from "./crm/highlevel";
 import { funilDaConexao, negociosDe, numerosCrm, TIPOS_CONVERSAO, type ConexaoResumo } from "./consultas";
 import { FUNIL_PADRAO, type FunilCliente } from "./funil";
 import { hojeISO } from "./datas";
@@ -255,13 +256,14 @@ export async function gravarHistorico(clienteId: string, desdeMes: string, ateMe
 const round = (v: number) => Math.round(v * 100) / 100;
 
 /**
- * "Buscar o passado", 1ª parte: traz do CRM os negócios dos últimos `n` meses.
+ * "Buscar o passado", 1ª parte: traz do CRM os negócios dos últimos `n` meses, em partes de até 40 páginas
+ * (o Ávora pode ter dezenas de milhares de oportunidades). Devolve o cursor para continuar, ou null no fim.
  * Sem consultar contatos (as UTMs não entram no histórico), para caber no tempo de uma chamada.
  */
-export async function trazerCrmDoPeriodo(clienteId: string, n: number) {
+export async function trazerCrmDoPeriodo(clienteId: string, n: number, cursor: CursorHL | null = null) {
   const { data: conexao } = await db().from("crm_conexoes").select("*").eq("cliente_id", clienteId).maybeSingle();
-  if (!conexao) return 0;
-  return sincronizarCrmCliente(conexao as ConexaoCrm, n * 31 + 5, 0);
+  if (!conexao) return { linhas: 0, cursor: null };
+  return sincronizarCrmLote(conexao as ConexaoCrm, n * 31 + 5, 0, { cursor, maxPaginas: 40 });
 }
 
 /** "Buscar o passado", 2ª parte: grava os meses em blocos (cada bloco é uma chamada). */

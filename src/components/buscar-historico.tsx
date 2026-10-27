@@ -25,8 +25,20 @@ export function BuscarHistorico({ clienteId, temMeses }: { clienteId: string; te
     const avisos: string[] = [];
     try {
       setAndamento("Trazendo os negócios do CRM…");
-      // se o CRM falhar, os meses ainda saem com Meta e Google (o funil usa o que já estiver no banco)
-      await etapa({ etapa: "crm", clienteId, meses }).catch((e) => avisos.push(`CRM: ${e.message}`));
+      // em partes: CRMs grandes têm dezenas de milhares de oportunidades.
+      // Se o CRM falhar, os meses ainda saem com Meta e Google (o funil usa o que já estiver no banco).
+      let cursor: unknown = null, negocios = 0;
+      try {
+        for (let parte = 1; parte <= 100; parte++) {
+          const r = await etapa({ etapa: "crm", clienteId, meses, cursor });
+          negocios += r.linhas;
+          cursor = r.cursor;
+          if (!cursor) break;
+          setAndamento(`Trazendo os negócios do CRM (parte ${parte + 1}, ${negocios.toLocaleString("pt-BR")} até agora)…`);
+        }
+      } catch (e) {
+        avisos.push(`CRM: ${e instanceof Error ? e.message : e}`);
+      }
       const { blocos } = await etapa({ etapa: "blocos", meses });
       let gravados = 0;
       for (const [i, b] of (blocos as { desde: string; ate: string }[]).entries()) {

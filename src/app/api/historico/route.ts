@@ -4,7 +4,7 @@ import { blocosDeMeses, gravarHistorico, trazerCrmDoPeriodo } from "@/lib/histor
 export const maxDuration = 300;
 
 // "Buscar o passado" em etapas, cada uma numa chamada (protegido pelo login do painel):
-//   { etapa: "crm", clienteId, meses }              → traz do CRM os negócios do período
+//   { etapa: "crm", clienteId, meses, cursor? }     → traz do CRM uma parte dos negócios; repetir com o cursor até vir null
 //   { etapa: "meses", clienteId, desde, ate }       → grava um bloco de meses (Meta + Google + funil do CRM)
 //   { etapa: "blocos", meses }                      → lista os blocos de meses a gravar
 export async function POST(request: NextRequest) {
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
       case "blocos":
         return NextResponse.json({ blocos: blocosDeMeses(meses) });
       case "crm":
-        return NextResponse.json({ negocios: await trazerCrmDoPeriodo(clienteId, meses) });
+        return NextResponse.json(await trazerCrmDoPeriodo(clienteId, meses, corpo.cursor ?? null));
       case "meses":
         return NextResponse.json(await gravarHistorico(clienteId, String(corpo.desde), String(corpo.ate)));
       default:

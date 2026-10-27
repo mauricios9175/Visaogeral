@@ -3,7 +3,7 @@ import { db } from "../db";
 import { diasAtras, hojeISO } from "../datas";
 import { camposDoNegocio, campanhaDoNegocio, idNegocio, listarFunis, listarNegocios, utmsDoNegocioRd, type FunilRd } from "./rd";
 import {
-  atribuicaoDoContato, atribuicoesDaOportunidade, camposDaOportunidade, listarFunisHL, listarOportunidades, nomesCamposHL,
+  atribuicaoDoContato, atribuicoesDaOportunidade, camposDaOportunidade, listarFunisHL, listarOportunidades, nomesCamposHL, type CursorHL,
   SemPermissaoContatos, utmsDe, type Atribuicao, type Utms,
 } from "./highlevel";
 
@@ -62,10 +62,10 @@ export function listarFunisCrm(c: Pick<ConexaoCrm, "tipo" | "token" | "location_
   throw new Error(`${NOME_CRM[c.tipo]} ainda não está disponível.`);
 }
 
-async function buscarNegocios(c: ConexaoCrm, dias: number): Promise<NegocioNormalizado[]> {
+async function buscarNegocios(c: ConexaoCrm, dias: number, lote?: { cursor: CursorHL | null; maxPaginas: number }): Promise<{ negocios: NegocioNormalizado[]; cursor: CursorHL | null }> {
   if (c.tipo === "rd_crm") {
     const negocios = await listarNegocios(c.token, diasAtras(dias), hojeISO(), null);
-    return negocios.map((d) => ({
+    return { cursor: null, negocios: negocios.map((d) => ({
       idExterno: idNegocio(d),
       nome: d.name ?? null,
       criado_em: d.created_at,
@@ -82,14 +82,14 @@ async function buscarNegocios(c: ConexaoCrm, dias: number): Promise<NegocioNorma
       utms: utmsDoNegocioRd(d),
       atribuicao: null,
       contatoId: null,
-    }));
+    })) };
   }
   if (c.tipo === "highlevel" && c.location_id) {
-    const [ops, nomes] = await Promise.all([
-      listarOportunidades(c.token, c.location_id, diasAtras(dias)),
+    const [{ itens: ops, cursor }, nomes] = await Promise.all([
+      listarOportunidades(c.token, c.location_id, diasAtras(dias), lote ?? {}),
       nomesCamposHL(c.token, c.location_id),
     ]);
-    return ops.map((o) => ({
+    return { cursor, negocios: ops.map((o) => ({
       idExterno: o.id,
       nome: o.name ?? o.contact?.name ?? null,
       criado_em: o.createdAt,
@@ -108,7 +108,7 @@ async function buscarNegocios(c: ConexaoCrm, dias: number): Promise<NegocioNorma
         return { atribuicao: atrib, utms: utmsDe(atrib?.primeiro) ?? utmsDe(atrib?.ultimo) };
       })(),
       contatoId: o.contactId ?? o.contact?.id ?? null,
-    }));
+    })) };
   }
   throw new Error(`${NOME_CRM[c.tipo]} ainda não está disponível.`);
 }
@@ -188,6 +188,16 @@ async function completarUtmsPeloContato(c: ConexaoCrm, negocios: NegocioNormaliz
 /** Traz os negócios de um cliente criados ou fechados nos últimos `dias` dias. */
 /** `maxContatos`: quantos contatos consultar para completar as UTMs (0 = só reaproveita o que já está no banco). */
 export async function sincronizarCrmCliente(c: ConexaoCrm, dias: number, maxContatos = MAX_CONTATOS_POR_SYNC) {
+  return (await sincronizarCrmLote(c, dias, maxContatos)).linhas;
+}
+
+/**
+ * Igual a sincronizarCrmCliente, mas em partes quando o CRM tem muitos negócios (Ávora com milhares de oportunidades):
+ * passe `lote` para ler até `maxPaginas` páginas a partir do cursor; o cursor devolvido continua na próxima chamada.
+ */
+export async function sincronizarCrmLote(
+  c: ConexaoCrm, dias: number, maxContatos = MAX_CONTATOS_POR_SYNC, lote?: { cursor: CursorHL | null; maxPaginas: number },
+): Promise<{ linhas: number; cursor: CursorHL | null }> {
   const banco = db();
   try {
     const funis = await listarFunisCrm(c);
@@ -196,7 +206,7 @@ export async function sincronizarCrmCliente(c: ConexaoCrm, dias: number, maxCont
       funis.flatMap((f) => f.etapas.map((e) => [e.id, { ordem: e.ordem, nome: e.nome, funilId: f.id, funilNome: f.nome }] as const)),
     );
     // Sempre todos os funis: leads entram por um funil (ex.: SDR) e podem passar para outro (consultores).
-    const negocios = await buscarNegocios(c, dias);
+    const { negocios, cursor } = await buscarNegocios(c, dias, lote);
     const avisoUtm = c.tipo === "highlevel" && (await colunasUtm()) ? await completarUtmsPeloContato(c, negocios, maxContatos) : null;
     const agora = new Date().toISOString();
     // sem o SQL 0011 as colunas de UTM não existem: salva o resto normalmente
@@ -240,7 +250,7 @@ export async function sincronizarCrmCliente(c: ConexaoCrm, dias: number, maxCont
     await banco.from("crm_conexoes").update({ ultima_sync: agora, ultimo_erro: null }).eq("cliente_id", c.cliente_id);
     if (avisoUtm) avisosUtm.set(c.cliente_id, avisoUtm);
     else avisosUtm.delete(c.cliente_id);
-    return linhas.length;
+    return { linhas: linhas.length, cursor };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await banco.from("crm_conexoes").update({ ultimo_erro: msg }).eq("cliente_id", c.cliente_id);

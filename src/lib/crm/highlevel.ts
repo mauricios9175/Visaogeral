@@ -128,19 +128,31 @@ type PaginaOportunidades = {
 };
 
 /** Busca as oportunidades da subconta (todas as páginas, até um limite de segurança). */
-export async function listarOportunidades(token: string, locationId: string, desde: string) {
+/** Onde parou a leitura das oportunidades (para continuar na próxima chamada). */
+export type CursorHL = { startAfter: string; startAfterId: string; chaveLocal: string };
+
+/**
+ * Oportunidades criadas ou com mudança de status desde `desde`. O Ávora devolve 100 por página e não filtra por data,
+ * então a leitura vai até `maxPaginas`; se sobrar, devolve o cursor para continuar numa próxima chamada.
+ */
+export async function listarOportunidades(
+  token: string, locationId: string, desde: string,
+  opcoes: { cursor?: CursorHL | null; maxPaginas?: number } = {},
+): Promise<{ itens: OportunidadeApi[]; cursor: CursorHL | null }> {
   const todas: OportunidadeApi[] = [];
   const vistos = new Set<string>();
   const limiteData = Date.parse(`${desde}T00:00:00-03:00`);
-  let cursor: { startAfter?: string; startAfterId?: string } = {};
+  let cursor: { startAfter?: string; startAfterId?: string } = opcoes.cursor
+    ? { startAfter: opcoes.cursor.startAfter, startAfterId: opcoes.cursor.startAfterId } : {};
   // A documentação já usou "location_id" e "locationId"; tenta um e, se recusado, o outro.
-  let chaveLocal = "location_id";
-  for (let pagina = 0; pagina < 100; pagina++) {
+  let chaveLocal = opcoes.cursor?.chaveLocal ?? "location_id";
+  const maxPaginas = opcoes.maxPaginas ?? 100;
+  for (let pagina = 0; pagina < maxPaginas; pagina++) {
     let r: PaginaOportunidades;
     try {
       r = await get<PaginaOportunidades>("opportunities/search", token, { [chaveLocal]: locationId, limit: "100", ...cursor });
     } catch (e) {
-      if (pagina > 0 || chaveLocal === "locationId" || !/ 4(00|22):/.test(String(e))) throw e;
+      if (pagina > 0 || opcoes.cursor || chaveLocal === "locationId" || !/ 4(00|22):/.test(String(e))) throw e;
       chaveLocal = "locationId";
       r = await get<PaginaOportunidades>("opportunities/search", token, { [chaveLocal]: locationId, limit: "100", ...cursor });
     }
@@ -155,10 +167,11 @@ export async function listarOportunidades(token: string, locationId: string, des
       if (Date.parse(o.createdAt) >= limiteData || mudou >= limiteData) todas.push(o);
     }
     const m = r.meta;
-    if (!lote.length || !novos || !m?.startAfterId || m.nextPage == null) break;
+    if (!lote.length || !novos || !m?.startAfterId || m.nextPage == null) return { itens: todas, cursor: null };
     cursor = { startAfter: String(m.startAfter ?? ""), startAfterId: m.startAfterId };
   }
-  return todas;
+  // ainda há páginas: continua de onde parou
+  return { itens: todas, cursor: { startAfter: cursor.startAfter ?? "", startAfterId: cursor.startAfterId ?? "", chaveLocal } };
 }
 
 /** Nomes dos campos personalizados ({id: nome}) de oportunidade ou de contato. Se faltar permissão, segue sem nomes. */
