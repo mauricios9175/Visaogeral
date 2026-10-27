@@ -60,6 +60,15 @@ export async function trocarCodigoGoogle(code: string, redirect: string) {
   return { refreshToken: t.refresh_token, email: String(payload.email ?? "conta Google") };
 }
 
+/**
+ * Token só com permissão de arquivos do painel (drive.file), para o seletor de pastas do Google no navegador.
+ * Vale 1 hora e não dá acesso ao Google Ads.
+ */
+export async function tokenSoDrive(refreshToken: string) {
+  const t = await token({ refresh_token: refreshToken, grant_type: "refresh_token", scope: "https://www.googleapis.com/auth/drive.file" });
+  return t.access_token;
+}
+
 const cacheAcesso = new Map<string, { token: string; expira: number }>();
 
 export async function tokenDeAcesso(refreshToken: string) {

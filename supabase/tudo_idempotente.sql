@@ -1,4 +1,4 @@
--- Todas as migrações (0001 a 0016) num script só, seguro para rodar mais de uma vez:
+-- Todas as migrações (0001 a 0017) num script só, seguro para rodar mais de uma vez:
 -- cria apenas o que estiver faltando e não apaga dados.
 
 create extension if not exists pgcrypto;
@@ -401,3 +401,5 @@ create index if not exists relatorios_gerados_cliente_idx on relatorios_gerados 
 
 alter table configuracoes      enable row level security;
 alter table relatorios_gerados enable row level security;
+-- 0017: Pasta do Google Drive de cada cliente, onde os relatórios são salvos ({"id": "...", "nome": "Relatórios Midas"}).
+alter table clientes add column if not exists pasta_drive jsonb;

@@ -96,3 +96,10 @@ export async function gerarRelatorioSlides(form: FormData) {
   }
   voltar(clienteId, msg);
 }
+
+/** Pasta do Drive onde ficam os relatórios deste cliente (escolhida no seletor do Google). */
+export async function salvarPastaCliente(clienteId: string, pasta: { id: string; nome: string } | null) {
+  const { error } = await db().from("clientes").update({ pasta_drive: pasta }).eq("id", clienteId);
+  if (error) throw new Error(`${error.message} (rode o SQL 0017 no Supabase)`);
+  revalidatePath(`/clientes/${clienteId}/historico`);
+}

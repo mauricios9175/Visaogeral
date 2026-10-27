@@ -8,6 +8,7 @@ import { DIMENSOES_UTM } from "@/lib/consultas";
 import { hojeISO } from "@/lib/datas";
 import { Aviso } from "@/components/ui";
 import { BotaoEnviar } from "@/components/botao";
+import { EscolherPasta } from "@/components/escolher-pasta";
 import { atualizarMesesRecentes, buscarHistorico, criarModeloRelatorio, gerarRelatorioSlides, salvarAjusteMes } from "../../../../acoes-historico";
 
 export const maxDuration = 300;
@@ -22,7 +23,9 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   const { id } = await params;
   const { msg, ano } = (await searchParams) as { msg?: string; ano?: string };
   const [{ data: cliente }, { meses, erro }, rotulos, { data: ultima }, config, { data: logins }, { data: gerados }] = await Promise.all([
-    db().from("clientes").select("id, nome").eq("id", id).maybeSingle(),
+    // pasta_drive vem do SQL 0017
+    db().from("clientes").select("id, nome, pasta_drive").eq("id", id).maybeSingle()
+      .then((r) => (r.error ? db().from("clientes").select("id, nome").eq("id", id).maybeSingle() : r)),
     lerHistorico(id),
     rotulosDoCliente(id),
     db().from("historico_mensal").select("atualizado_em").eq("cliente_id", id).order("atualizado_em", { ascending: false }).limit(1),
@@ -113,6 +116,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
           </>
         ) : (
           <>
+            <EscolherPasta clienteId={id} atual={(cliente as { pasta_drive?: { id: string; nome: string } | null }).pasta_drive ?? null} />
             <form action={gerarRelatorioSlides} className="flex flex-wrap items-end gap-3">
               <input type="hidden" name="cliente_id" value={id} />
               <label className="flex flex-col gap-1 text-sm">

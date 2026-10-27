@@ -2,7 +2,7 @@ import "server-only";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "./db";
-import { tokenDeAcesso } from "./google";
+import { tokenDeAcesso, tokenSoDrive } from "./google";
 import { detalheCliente, detalheCrm, DIMENSOES_UTM, type DimensaoUtm, type LinhaTabela } from "./consultas";
 import { detalheGoogle } from "./consultas-google";
 import { lerHistorico, mesDe, nomeMes, rotulosDoCliente, somarMeses, type MesConsolidado } from "./historico";
@@ -75,6 +75,23 @@ export async function criarModeloNoDrive(tokenId: string) {
   const { error } = await db().from("configuracoes").upsert({ chave: "relatorio_slides", valor, atualizado_em: new Date().toISOString() });
   if (error) throw new Error(`${error.message} (rode o SQL 0016 no Supabase)`);
   return valor;
+}
+
+/** Dados para o seletor de pastas do Google (Google Picker) no navegador. */
+export async function dadosSeletorPasta() {
+  const config = await configRelatorio();
+  if (!config) throw new Error("Crie primeiro o modelo no Drive.");
+  const chave = process.env.GOOGLE_API_KEY?.trim();
+  if (!chave) throw new Error("Falta a variável GOOGLE_API_KEY na Vercel (chave de API do Google Cloud).");
+  const { data } = await db().from("tokens_google").select("refresh_token").eq("id", config.tokenId).maybeSingle();
+  if (!data) throw new Error("Login do Google do relatório não encontrado.");
+  return {
+    token: await tokenSoDrive(data.refresh_token as string),
+    chave,
+    // número do projeto do Google Cloud = começo do client ID; o Picker usa para liberar a pasta escolhida ao painel
+    appId: (process.env.GOOGLE_CLIENT_ID ?? "").split("-")[0],
+    email: config.email,
+  };
 }
 
 export const linkApresentacao = (id: string) => `https://docs.google.com/presentation/d/${id}/edit`;
@@ -277,7 +294,11 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
   const config = await configRelatorio();
   if (!config) throw new Error("Crie primeiro o modelo no Drive (botão logo acima).");
   const banco = db();
-  const { data: cliente } = await banco.from("clientes").select("id, nome").eq("id", p.clienteId).maybeSingle();
+  // pasta_drive vem do SQL 0017; sem ele, segue sem a pasta do cliente
+  const lerCliente = (colunas: string) => banco.from("clientes").select(colunas).eq("id", p.clienteId).maybeSingle();
+  const primeira = await lerCliente("id, nome, pasta_drive");
+  const { data: clienteRaw } = primeira.error ? await lerCliente("id, nome") : primeira;
+  const cliente = clienteRaw as unknown as { id: string; nome: string; pasta_drive?: { id: string; nome: string } | null } | null;
   if (!cliente) throw new Error("Cliente não encontrado.");
   const atual = periodo(p.desde, p.ate);
   const [meta, crm, google, { meses }, rotulos, acoes] = await Promise.all([
@@ -312,9 +333,16 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
 
   // copia o modelo e lê onde estão os marcadores
   const { acesso } = await acessoDoToken(config.tokenId);
-  const copia = await api<{ id: string }>(acesso, `${DRIVE}/files/${config.modeloId}/copy?fields=id`, {
+  // pasta do cliente escolhida no painel; sem ela, a pasta "Relatórios · Visão Geral"
+  const pasta = (cliente.pasta_drive as { id: string } | null)?.id ?? config.pastaId;
+  const copia = await api<{ id: string }>(acesso, `${DRIVE}/files/${config.modeloId}/copy?fields=id&supportsAllDrives=true`, {
     method: "POST",
-    body: JSON.stringify({ name: `Relatório ${cliente.nome} · ${rotuloPer}`, ...(config.pastaId && { parents: [config.pastaId] }) }),
+    body: JSON.stringify({ name: `Relatório ${cliente.nome} · ${rotuloPer}`, ...(pasta && { parents: [pasta] }) }),
+  }).catch((e) => {
+    if (pasta !== config.pastaId && /not found|não encontrado|File not found|insufficient/i.test(String(e))) {
+      throw new Error("Não consegui salvar na pasta escolhida para este cliente. Escolha a pasta de novo (botão “Escolher pasta”).");
+    }
+    throw e;
   });
   type Elemento = {
     objectId: string;
