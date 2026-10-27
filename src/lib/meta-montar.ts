@@ -224,27 +224,39 @@ export async function formulariosDaPagina(paginaId: string, token: string) {
   return forms.filter((f) => f.status === "ACTIVE").map((f) => ({ id: f.id, nome: f.name }));
 }
 
+type Politica = { rotulo: string; params: Record<string, string> };
+
 /**
- * A API exige política de privacidade (ou um conteúdo legal já existente). Ordem:
- * 1. o link do modelo; 2. a política do formulário mais recente da página (o mesmo que o Gerenciador reaproveita).
+ * A API exige política de privacidade (ou um conteúdo legal já existente). Candidatas, nesta ordem:
+ * 1. o link do modelo; 2. o conteúdo legal e o link dos formulários da página (o que o Gerenciador reaproveita);
+ * 3. o site cadastrado na página do Facebook. A criação tenta uma por uma até o Meta aceitar.
  */
-async function politicaDoFormulario(paginaId: string, tokenPagina: string, f: ConfigFormulario): Promise<Record<string, string>> {
-  if (f.politicaUrl) {
-    return { privacy_policy: JSON.stringify({ url: f.politicaUrl, link_text: f.politicaTexto || "Política de privacidade" }) };
+async function politicasCandidatas(paginaId: string, tokenPagina: string, f: ConfigFormulario): Promise<Politica[]> {
+  const texto = f.politicaTexto || "Política de privacidade";
+  const porLink = (rotulo: string, url: string, linkText = texto): Politica =>
+    ({ rotulo, params: { privacy_policy: JSON.stringify({ url, link_text: linkText }) } });
+  const lista: Politica[] = [];
+  if (f.politicaUrl) lista.push(porLink("link do modelo", f.politicaUrl));
+
+  type Form = { id: string; name?: string; privacy_policy_url?: string; legal_content?: { id?: string; privacy_policy?: { url?: string; link_text?: string } } };
+  // dois jeitos de ler: o campo legal_content pode não estar disponível em todas as versões/páginas
+  const ler = (campos: string) => getMeta<{ data: Form[] }>(montarUrl(`${paginaId}/leadgen_forms`, tokenPagina, { fields: campos, limit: "25" }))
+    .then((r) => r.data, () => [] as Form[]);
+  const [completos, simples] = await Promise.all([ler("id,name,legal_content{id,privacy_policy}"), ler("id,name,privacy_policy_url")]);
+  for (const x of completos) {
+    const url = x.legal_content?.privacy_policy?.url;
+    if (url) lista.push(porLink(`política do formulário “${x.name ?? x.id}”`, url, x.legal_content?.privacy_policy?.link_text || texto));
+    if (x.legal_content?.id) lista.push({ rotulo: `conteúdo legal do formulário “${x.name ?? x.id}”`, params: { legal_content_id: x.legal_content.id } });
   }
-  type Form = { id: string; privacy_policy_url?: string; legal_content?: { id?: string; privacy_policy?: { url?: string; link_text?: string } } };
-  const forms = await getMeta<{ data: Form[] }>(montarUrl(`${paginaId}/leadgen_forms`, tokenPagina, {
-    fields: "id,privacy_policy_url,legal_content{id,privacy_policy}", limit: "25",
-  })).then((r) => r.data, () => [] as Form[]);
-  for (const x of forms) {
-    if (x.legal_content?.id) return { legal_content_id: x.legal_content.id };
-    const url = x.legal_content?.privacy_policy?.url ?? x.privacy_policy_url;
-    if (url) return { privacy_policy: JSON.stringify({ url, link_text: x.legal_content?.privacy_policy?.link_text || f.politicaTexto || "Política de privacidade" }) };
-  }
-  throw new Error(
-    "o Meta exige uma política de privacidade e esta página ainda não tem formulário com política para reaproveitar. " +
-    "Informe o link da política no modelo de formulário (pode ser a página de privacidade do site do cliente).",
-  );
+  for (const x of simples) if (x.privacy_policy_url) lista.push(porLink(`política do formulário “${x.name ?? x.id}”`, x.privacy_policy_url));
+
+  const site = await getMeta<{ website?: string }>(montarUrl(paginaId, tokenPagina, { fields: "website" })).then((r) => r.website, () => undefined);
+  const primeiroSite = site?.split(/\s+/).find((u) => /^https?:\/\//i.test(u)) ?? (site && /^[\w.-]+\.[a-z]{2,}/i.test(site) ? `https://${site.split(/\s+/)[0]}` : undefined);
+  if (primeiroSite) lista.push(porLink("site cadastrado na página", primeiroSite));
+
+  // sem repetidos (o mesmo link pode aparecer em vários formulários)
+  const vistos = new Set<string>();
+  return lista.filter((p) => { const k = JSON.stringify(p.params); return !vistos.has(k) && !!vistos.add(k); }).slice(0, 6);
 }
 
 /** Cria um formulário instantâneo na página a partir do modelo. Devolve o id do formulário. */
@@ -258,11 +270,10 @@ export async function criarFormulario(paginaId: string, token: string, f: Config
       ...(opcoes.length && { options: opcoes.map((o, j) => ({ key: `opcao_${i + 1}_${j + 1}`, value: o })) }),
     };
   });
-  const r = await postMeta(`${paginaId}/leadgen_forms`, tokenPagina, {
+  const base = {
     name: aplicarNome(f.nome, vars),
     locale: "PT_BR",
     questions: JSON.stringify(perguntas),
-    ...(await politicaDoFormulario(paginaId, tokenPagina, f)),
     ...(f.tituloPerguntas && { question_page_custom_headline: f.tituloPerguntas }),
     is_optimized_for_quality: f.tipo === "intencao" ? "true" : "false",
     ...(f.introTitulo && {
@@ -275,8 +286,26 @@ export async function criarFormulario(paginaId: string, token: string, f: Config
         ? { button_type: "VIEW_WEBSITE", button_text: f.botaoTexto || "Saiba mais", website_url: f.botaoUrl }
         : { button_type: "VIEW_ON_FACEBOOK", button_text: f.botaoTexto || "Ver página" }),
     }),
-  });
-  return { id: String(r.id), arquivar: () => postMeta(String(r.id), tokenPagina, { status: "ARCHIVED" }).catch(() => null) };
+  };
+  const politicas = await politicasCandidatas(paginaId, tokenPagina, f);
+  if (!politicas.length) {
+    throw new Error(
+      "o Meta exige uma política de privacidade e não encontrei nenhuma para reaproveitar nesta página " +
+      "(nenhum formulário com política e nenhum site cadastrado na página). Informe o link da política no modelo de formulário.",
+    );
+  }
+  // tenta cada política até o Meta aceitar; outros erros (pergunta inválida etc.) param na hora
+  const tentativas: string[] = [];
+  for (const pol of politicas) {
+    try {
+      const r = await postMeta(`${paginaId}/leadgen_forms`, tokenPagina, { ...base, ...pol.params });
+      return { id: String(r.id), arquivar: () => postMeta(String(r.id), tokenPagina, { status: "ARCHIVED" }).catch(() => null) };
+    } catch (e) {
+      if (!/privacy|legal_content|privacidade|conte[uú]do legal/i.test(msgErro(e))) throw e;
+      tentativas.push(`${pol.rotulo}: ${msgErro(e)}`);
+    }
+  }
+  throw new Error(`o Meta recusou as políticas de privacidade encontradas. Tentativas: ${tentativas.join(" | ")}. Informe o link da política no modelo de formulário.`);
 }
 
 // ---------- mídia ----------
