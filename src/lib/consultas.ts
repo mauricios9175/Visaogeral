@@ -509,7 +509,18 @@ export type NumerosCrm = {
   funil: NumerosFunil;                // funil do relatório (só anúncio, se o cliente estiver configurado assim)
 };
 
-const diaSP = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date(iso));
+// um formatador só (criar um por negócio deixava o histórico de clientes grandes lento demais)
+const formatoDiaSP = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" });
+const diasSP = new Map<string, string>();
+const diaSP = (iso: string) => {
+  let d = diasSP.get(iso);
+  if (!d) {
+    d = formatoDiaSP.format(new Date(iso));
+    if (diasSP.size > 200_000) diasSP.clear();
+    diasSP.set(iso, d);
+  }
+  return d;
+};
 const noPeriodo = (iso: string | null, p: { desde: string; ate: string }) => { if (!iso) return false; const d = diaSP(iso); return d >= p.desde && d <= p.ate; };
 
 /**

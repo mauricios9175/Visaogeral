@@ -260,22 +260,11 @@ const round = (v: number) => Math.round(v * 100) / 100;
  * (o Ávora pode ter dezenas de milhares de oportunidades). Devolve o cursor para continuar, ou null no fim.
  * Sem consultar contatos (as UTMs não entram no histórico), para caber no tempo de uma chamada.
  */
-export async function trazerCrmDoPeriodo(clienteId: string, n: number, cursor: CursorHL | null = null) {
+export async function trazerCrmDoPeriodo(clienteId: string, desdeMes: string, cursor: CursorHL | null = null) {
   const { data: conexao } = await db().from("crm_conexoes").select("*").eq("cliente_id", clienteId).maybeSingle();
   if (!conexao) return { linhas: 0, cursor: null };
-  return sincronizarCrmLote(conexao as ConexaoCrm, n * 31 + 5, 0, { cursor, maxPaginas: 40 });
-}
-
-/** "Buscar o passado", 2ª parte: grava os meses em blocos (cada bloco é uma chamada). */
-export function blocosDeMeses(n: number, tamanho = 6) {
-  const hoje = hojeISO();
-  const blocos: { desde: string; ate: string }[] = [];
-  for (let i = n - 1; i >= 0; i -= tamanho) {
-    const desde = mesDe(hoje, -i);
-    const fim = mesDe(hoje, -Math.max(i - tamanho + 1, 0));
-    blocos.push({ desde, ate: fim === mesDe(hoje) ? hoje : ultimoDia(fim) });
-  }
-  return blocos;
+  const dias = Math.ceil((Date.parse(hojeISO()) - Date.parse(mesDe(desdeMes))) / 86_400_000) + 2;
+  return sincronizarCrmLote(conexao as ConexaoCrm, dias, 0, { cursor, maxPaginas: 40 });
 }
 
 /** Rotina diária: mês atual de todos os clientes ativos, e o mês anterior até o dia 10 (o CRM ainda anda). */

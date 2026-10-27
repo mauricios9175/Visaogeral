@@ -37,6 +37,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   ]);
   if (!cliente) notFound();
 
+  const hoje = hojeISO();
   const anos = [...new Set(meses.map((m) => m.mes.slice(0, 4)))];
   const anoSel = ano && anos.includes(ano) ? ano : null;
   // padrão: últimos 12 meses; ?ano=2025 mostra o ano inteiro
@@ -47,7 +48,6 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   const passos = [...new Set([...funil.passos.map((p) => p.nome), ...nomesDosPassos(visiveis)])];
   const temGoogle = meses.some((m) => m.gastoGoogle > 0);
   // relatório: até o dia 10 o padrão é o mês passado; depois, o mês atual
-  const hoje = hojeISO();
   const opcoesMes = Array.from({ length: 13 }, (_, i) => mesDe(hoje, -i));
   const mesPadrao = Number(hoje.slice(8, 10)) <= 10 ? mesDe(hoje, -1) : mesDe(hoje);
 
@@ -66,7 +66,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
       {erro && <Aviso>Rode o SQL 0015 no Supabase para usar o histórico ({erro}).</Aviso>}
 
       <section className="flex flex-wrap items-end gap-3 rounded-xl border border-borda bg-superficie p-4">
-        <BuscarHistorico clienteId={id} temMeses={meses.length > 0} />
+        <BuscarHistorico clienteId={id} opcoes={Array.from({ length: 37 }, (_, i) => mesDe(hoje, -i))} gravados={meses.map((m) => m.mes)} />
         {meses.length > 0 && (
           <form action={atualizarMesesRecentes}>
             <input type="hidden" name="cliente_id" value={id} />
