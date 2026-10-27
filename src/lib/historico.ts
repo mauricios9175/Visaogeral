@@ -254,20 +254,26 @@ export async function gravarHistorico(clienteId: string, desdeMes: string, ateMe
 
 const round = (v: number) => Math.round(v * 100) / 100;
 
-/** "Buscar histórico": traz do CRM os negócios do período inteiro e grava os últimos `n` meses. */
-export async function preencherHistorico(clienteId: string, n: number) {
-  const hoje = hojeISO();
-  const erros: string[] = [];
+/**
+ * "Buscar o passado", 1ª parte: traz do CRM os negócios dos últimos `n` meses.
+ * Sem consultar contatos (as UTMs não entram no histórico), para caber no tempo de uma chamada.
+ */
+export async function trazerCrmDoPeriodo(clienteId: string, n: number) {
   const { data: conexao } = await db().from("crm_conexoes").select("*").eq("cliente_id", clienteId).maybeSingle();
-  if (conexao) {
-    try {
-      await sincronizarCrmCliente(conexao as ConexaoCrm, n * 31 + 5);
-    } catch (e) {
-      erros.push(`CRM: ${e instanceof Error ? e.message : e}`);
-    }
+  if (!conexao) return 0;
+  return sincronizarCrmCliente(conexao as ConexaoCrm, n * 31 + 5, 0);
+}
+
+/** "Buscar o passado", 2ª parte: grava os meses em blocos (cada bloco é uma chamada). */
+export function blocosDeMeses(n: number, tamanho = 6) {
+  const hoje = hojeISO();
+  const blocos: { desde: string; ate: string }[] = [];
+  for (let i = n - 1; i >= 0; i -= tamanho) {
+    const desde = mesDe(hoje, -i);
+    const fim = mesDe(hoje, -Math.max(i - tamanho + 1, 0));
+    blocos.push({ desde, ate: fim === mesDe(hoje) ? hoje : ultimoDia(fim) });
   }
-  const r = await gravarHistorico(clienteId, mesDe(hoje, -(n - 1)), hoje);
-  return { meses: r.meses, erros: [...erros, ...r.erros] };
+  return blocos;
 }
 
 /** Rotina diária: mês atual de todos os clientes ativos, e o mês anterior até o dia 10 (o CRM ainda anda). */

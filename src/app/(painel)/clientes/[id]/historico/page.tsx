@@ -10,7 +10,8 @@ import { hojeISO } from "@/lib/datas";
 import { Aviso } from "@/components/ui";
 import { BotaoEnviar } from "@/components/botao";
 import { EscolherPasta } from "@/components/escolher-pasta";
-import { atualizarMesesRecentes, buscarHistorico, criarModeloRelatorio, gerarRelatorioSlides, salvarAjusteMes } from "../../../../acoes-historico";
+import { BuscarHistorico } from "@/components/buscar-historico";
+import { atualizarMesesRecentes, criarModeloRelatorio, gerarRelatorioSlides, salvarAjusteMes } from "../../../../acoes-historico";
 
 export const maxDuration = 300;
 
@@ -65,22 +66,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
       {erro && <Aviso>Rode o SQL 0015 no Supabase para usar o histórico ({erro}).</Aviso>}
 
       <section className="flex flex-wrap items-end gap-3 rounded-xl border border-borda bg-superficie p-4">
-        <form action={buscarHistorico} className="flex flex-wrap items-end gap-2">
-          <input type="hidden" name="cliente_id" value={id} />
-          <label className="flex flex-col gap-1 text-sm">
-            Buscar o passado
-            <select name="meses" defaultValue={meses.length ? "3" : "12"} className={campo}>
-              <option value="3">últimos 3 meses</option>
-              <option value="6">últimos 6 meses</option>
-              <option value="12">últimos 12 meses</option>
-              <option value="24">últimos 24 meses</option>
-              <option value="37">tudo que o Meta guarda (37 meses)</option>
-            </select>
-          </label>
-          <BotaoEnviar className={botaoPrimario} aguardando="Buscando…" aviso="Pode levar 1 a 3 minutos (traz o CRM do período).">
-            Buscar e gravar
-          </BotaoEnviar>
-        </form>
+        <BuscarHistorico clienteId={id} temMeses={meses.length > 0} />
         {meses.length > 0 && (
           <form action={atualizarMesesRecentes}>
             <input type="hidden" name="cliente_id" value={id} />

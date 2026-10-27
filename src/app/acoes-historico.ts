@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { CAMPOS_AJUSTAVEIS, gravarHistorico, mesDe, preencherHistorico } from "@/lib/historico";
+import { CAMPOS_AJUSTAVEIS, gravarHistorico, mesDe } from "@/lib/historico";
 import { hojeISO, somarDias } from "@/lib/datas";
 import { DIMENSOES_UTM } from "@/lib/consultas";
 import { criarModeloNoDrive, gerarRelatorio, linkApresentacao } from "@/lib/relatorio-slides";
@@ -18,20 +18,6 @@ const numero = (v: FormDataEntryValue | null) => {
   if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
   return s === "" || Number.isNaN(Number(s)) ? null : Number(s);
 };
-
-/** Busca no Meta, Google e CRM os últimos N meses e grava no histórico. */
-export async function buscarHistorico(form: FormData) {
-  const clienteId = String(form.get("cliente_id"));
-  const n = Math.min(Math.max(Number(form.get("meses")) || 12, 1), 37);
-  let msg: string;
-  try {
-    const r = await preencherHistorico(clienteId, n);
-    msg = `Histórico gravado: ${r.meses} mês(es).` + (r.erros.length ? ` Avisos: ${r.erros.join(" · ")}` : "");
-  } catch (e) {
-    msg = `Erro: ${e instanceof Error ? e.message : e}`;
-  }
-  voltar(clienteId, msg);
-}
 
 /** Recalcula só o mês atual e o anterior (sem buscar o CRM inteiro de novo). */
 export async function atualizarMesesRecentes(form: FormData) {

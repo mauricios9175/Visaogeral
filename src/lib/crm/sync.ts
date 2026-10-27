@@ -133,7 +133,7 @@ const MAX_CONTATOS_POR_SYNC = 300;
  * Contatos já consultados antes não são consultados de novo: reaproveita o que está no banco.
  * Devolve um aviso (ex.: token sem permissão de contatos) ou null.
  */
-async function completarUtmsPeloContato(c: ConexaoCrm, negocios: NegocioNormalizado[]): Promise<string | null> {
+async function completarUtmsPeloContato(c: ConexaoCrm, negocios: NegocioNormalizado[], maxContatos = MAX_CONTATOS_POR_SYNC): Promise<string | null> {
   type Salvo = { id: string; campos: Record<string, string> | null; atribuicao: NegocioNormalizado["atribuicao"] } & Record<`utm_${"source" | "medium" | "campaign" | "content" | "term"}`, string | null>;
   const ids = negocios.map((n) => `${c.tipo}:${n.idExterno}`);
   const salvos = new Map<string, Salvo>();
@@ -158,10 +158,10 @@ async function completarUtmsPeloContato(c: ConexaoCrm, negocios: NegocioNormaliz
       faltando.push(n);
     }
   }
-  if (!faltando.length) return null;
+  if (!faltando.length || maxContatos <= 0) return null;
   // mais recentes primeiro; o resto fica para as próximas sincronizações
   faltando.sort((a, b) => b.criado_em.localeCompare(a.criado_em));
-  const fila = faltando.slice(0, MAX_CONTATOS_POR_SYNC);
+  const fila = faltando.slice(0, maxContatos);
   const nomesContato = await nomesCamposHL(c.token, c.location_id ?? "", "contact");
   const cache = new Map<string, Awaited<ReturnType<typeof atribuicaoDoContato>>>();
   let aviso: string | null = null;
@@ -186,7 +186,8 @@ async function completarUtmsPeloContato(c: ConexaoCrm, negocios: NegocioNormaliz
 }
 
 /** Traz os negócios de um cliente criados ou fechados nos últimos `dias` dias. */
-export async function sincronizarCrmCliente(c: ConexaoCrm, dias: number) {
+/** `maxContatos`: quantos contatos consultar para completar as UTMs (0 = só reaproveita o que já está no banco). */
+export async function sincronizarCrmCliente(c: ConexaoCrm, dias: number, maxContatos = MAX_CONTATOS_POR_SYNC) {
   const banco = db();
   try {
     const funis = await listarFunisCrm(c);
@@ -196,7 +197,7 @@ export async function sincronizarCrmCliente(c: ConexaoCrm, dias: number) {
     );
     // Sempre todos os funis: leads entram por um funil (ex.: SDR) e podem passar para outro (consultores).
     const negocios = await buscarNegocios(c, dias);
-    const avisoUtm = c.tipo === "highlevel" && (await colunasUtm()) ? await completarUtmsPeloContato(c, negocios) : null;
+    const avisoUtm = c.tipo === "highlevel" && (await colunasUtm()) ? await completarUtmsPeloContato(c, negocios, maxContatos) : null;
     const agora = new Date().toISOString();
     // sem o SQL 0011 as colunas de UTM não existem: salva o resto normalmente
     const comUtm = await colunasUtm();
