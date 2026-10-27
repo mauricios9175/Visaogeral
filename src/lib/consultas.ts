@@ -418,7 +418,7 @@ export async function alertasContas(): Promise<AlertaConta[]> {
 
 // ---------- CRM ----------
 
-type NegocioCrm = {
+export type NegocioCrm = {
   id: string; cliente_id: string; nome: string | null;
   pipeline_id: string | null; pipeline_nome: string | null; etapa_nome: string | null;
   criado_em: string; fechado_em: string | null; etapa_ordem: number | null;
@@ -440,10 +440,13 @@ export type DimensaoUtm = (typeof DIMENSOES_UTM)[number]["chave"];
 
 const COLUNAS_NEGOCIO = "id, cliente_id, nome, pipeline_id, pipeline_nome, etapa_nome, criado_em, fechado_em, etapa_ordem, ganho, valor, campanha, origem, responsavel, campos";
 const COLUNAS_UTM = "utm_source, utm_medium, utm_campaign, utm_content, utm_term";
-type ConexaoResumo = {
+export type ConexaoResumo = {
   cliente_id: string; pipeline_id: string | null; etapa_qualificado_ordem: number | null;
   fontes_anuncio: string[] | null; ultima_sync: string | null; ultimo_erro: string | null;
   mapa_utm?: MapaUtm | null;
+  // segunda etapa do funil (SQL 0015): propostas, projetos, agendamentos…
+  pipeline_proposta_id?: string | null;
+  etapa_proposta_ordem?: number | null;
 };
 
 /** Fontes que parecem de anúncio, usadas enquanto o usuário não escolhe as fontes manualmente. */
@@ -459,6 +462,7 @@ export type NumerosCrm = {
   leadsAnuncio: number;
   qualificados: number | null;        // null = etapa de qualificação não configurada
   qualificadosAnuncio: number | null;
+  propostas: number | null;           // null = etapa de propostas não configurada
   vendas: number;
   vendasAnuncio: number;
   faturamento: number;
@@ -467,19 +471,23 @@ export type NumerosCrm = {
 };
 
 const diaSP = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date(iso));
-const noPeriodo = (iso: string | null, p: Periodo) => { if (!iso) return false; const d = diaSP(iso); return d >= p.desde && d <= p.ate; };
+const noPeriodo = (iso: string | null, p: { desde: string; ate: string }) => { if (!iso) return false; const d = diaSP(iso); return d >= p.desde && d <= p.ate; };
 
 /**
  * Leads e qualificados: negócios CRIADOS no período, em qualquer funil.
  * Qualificado: chegou no funil de qualificação (na etapa escolhida ou depois) ou foi ganho.
  * Vendas e faturamento: negócios GANHOS com data de fechamento no período.
  */
-function numerosCrm(negocios: NegocioCrm[], cx: ConexaoResumo, p: Periodo): NumerosCrm {
+export function numerosCrm(negocios: NegocioCrm[], cx: ConexaoResumo, p: { desde: string; ate: string }): NumerosCrm {
   const anuncio = (n: NegocioCrm) => ehFonteAnuncio(n.origem, cx.fontes_anuncio);
   const qualificado = (n: NegocioCrm) =>
     n.ganho === true ||
     (cx.etapa_qualificado_ordem != null && (!cx.pipeline_id || n.pipeline_id === cx.pipeline_id) &&
       (n.etapa_ordem ?? -1) >= cx.etapa_qualificado_ordem);
+  const proposta = (n: NegocioCrm) =>
+    n.ganho === true ||
+    ((!cx.pipeline_proposta_id || n.pipeline_id === cx.pipeline_proposta_id) &&
+      (n.etapa_ordem ?? -1) >= (cx.etapa_proposta_ordem ?? Infinity));
   const criados = negocios.filter((n) => noPeriodo(n.criado_em, p));
   const ganhos = negocios.filter((n) => n.ganho === true && noPeriodo(n.fechado_em, p));
   const semEtapa = cx.etapa_qualificado_ordem == null;
@@ -488,6 +496,7 @@ function numerosCrm(negocios: NegocioCrm[], cx: ConexaoResumo, p: Periodo): Nume
     leadsAnuncio: criados.filter(anuncio).length,
     qualificados: semEtapa ? null : criados.filter(qualificado).length,
     qualificadosAnuncio: semEtapa ? null : criados.filter((n) => anuncio(n) && qualificado(n)).length,
+    propostas: cx.etapa_proposta_ordem == null ? null : criados.filter(proposta).length,
     vendas: ganhos.length,
     vendasAnuncio: ganhos.filter(anuncio).length,
     faturamento: ganhos.reduce((s, n) => s + Number(n.valor), 0),
@@ -496,7 +505,7 @@ function numerosCrm(negocios: NegocioCrm[], cx: ConexaoResumo, p: Periodo): Nume
   };
 }
 
-async function negociosDe(clienteIds: string[], desde: string) {
+export async function negociosDe(clienteIds: string[], desde: string) {
   if (!clienteIds.length) return [];
   // margem de 1 dia por causa do fuso
   const limite = `${somarDiasISO(desde, -1)}T00:00:00Z`;

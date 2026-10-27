@@ -192,6 +192,21 @@ export type LinhaCampanhaDia = {
 };
 
 /** Métricas diárias por campanha + conversões separadas por ação de conversão. */
+/** Gasto e conversões da conta por mês (para o histórico mensal): uma consulta só, mesmo para anos. */
+export async function metricasMensais(
+  acesso: string, customerId: string, loginCustomerId: string | null, desde: string, ate: string,
+): Promise<{ mes: string; gasto: number; conversoes: number }[]> {
+  const linhas = await consultar(acesso, customerId, loginCustomerId, `
+    SELECT segments.month, metrics.cost_micros, metrics.conversions
+    FROM customer
+    WHERE segments.date BETWEEN '${desde}' AND '${ate}'`);
+  return linhas.map((l) => ({
+    mes: String(l.segments.month).slice(0, 10),
+    gasto: Number(l.metrics?.costMicros ?? 0) / 1_000_000,
+    conversoes: Number(l.metrics?.conversions ?? 0),
+  }));
+}
+
 export async function metricasPorCampanha(
   acesso: string, customerId: string, loginCustomerId: string | null, desde: string, ate: string,
 ): Promise<LinhaCampanhaDia[]> {

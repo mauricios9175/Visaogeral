@@ -88,6 +88,8 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
             {" · "}
             <Link href={`${base}/diagnostico`} className="text-destaque underline">Diagnóstico de resultados</Link>
             {" · "}
+            <Link href={`${base}/historico`} className="text-destaque underline">Histórico e relatório</Link>
+            {" · "}
             <Link href={`${base}/crm`} className="text-destaque underline">{crm && !("erro" in crm) ? "Configurar CRM" : "Conectar CRM"}</Link>
           </p>
         </div>

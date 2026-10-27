@@ -172,6 +172,33 @@ export async function insightsPorAnuncio(contaId: string, token: string, desde: 
   }
 }
 
+/**
+ * Totais por conjunto e por mês (para o histórico mensal). Uma chamada leve por conta,
+ * mesmo para 3 anos: o Meta guarda até 37 meses.
+ */
+export async function insightsMensais(contaId: string, token: string, desde: string, ate: string) {
+  const buscar = (campos: string[]) =>
+    todasPaginas<LinhaInsight>(
+      montarUrl(`${contaId}/insights`, token, {
+        level: "adset",
+        time_increment: "monthly",
+        time_range: JSON.stringify({ since: desde, until: ate }),
+        fields: campos.join(","),
+        limit: "500",
+      }),
+    );
+  const base = ["adset_id", "spend", "actions", "action_values"];
+  if (aceitaExtras) {
+    try {
+      return await buscar([...base, ...CAMPOS_EXTRAS]);
+    } catch (e) {
+      if (!(e instanceof MetaErro && e.codigo === 100)) throw e;
+      aceitaExtras = false;
+    }
+  }
+  return buscar(base);
+}
+
 /** Soma os valores de uma lista de ações do Meta (ex.: video_p25_watched_actions). */
 export function somaAcoes(lista?: Acao[], tipo?: string) {
   return (lista ?? []).filter((a) => !tipo || a.action_type === tipo).reduce((s, a) => s + Number(a.value ?? 0), 0);

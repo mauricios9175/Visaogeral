@@ -54,3 +54,14 @@ jobs:
           curl -sS --fail-with-body --max-time 300 \
             -H "Authorization: Bearer $CRON_SECRET" \
             "$APP_URL/api/cron/sync?modo=crm&dias=$DIAS"
+
+      # Histórico mensal (substitui a planilha): de madrugada, depois do CRM.
+      - name: Atualizar histórico mensal
+        if: always() && (github.event.schedule == '17 6 * * *' || github.event_name == 'workflow_dispatch')
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -sS --fail-with-body --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/sync?modo=historico"

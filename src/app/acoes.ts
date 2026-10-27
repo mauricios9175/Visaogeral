@@ -250,3 +250,24 @@ export async function salvarMapaUtm(form: FormData) {
   revalidatePath("/", "layout");
   avisoCrm(clienteId, error ? `Erro: ${error.message} (rodou o SQL 0014?)` : "Mapa de UTMs salvo. O relatório por UTM já usa os campos escolhidos.");
 }
+
+/** Segunda etapa do funil (Propostas, Projetos, Agendamentos…) e como o cliente chama cada etapa no relatório. */
+export async function salvarEtapaProposta(form: FormData) {
+  const clienteId = String(form.get("cliente_id"));
+  // valor no formato "funilId|funilNome|etapaId|etapaNome|etapaOrdem" (vazio = sem etapa de propostas)
+  const [pipelineId, , etapaId, etapaNome, etapaOrdem] = String(form.get("escolha") ?? "").split("|");
+  const rotulos = Object.fromEntries(
+    ["leads", "interessados", "propostas", "vendas"]
+      .map((k) => [k, String(form.get(`rotulo_${k}`) ?? "").trim()] as const)
+      .filter(([, v]) => v),
+  );
+  const { error } = await db().from("crm_conexoes").update({
+    pipeline_proposta_id: pipelineId || null,
+    etapa_proposta: etapaId || null,
+    etapa_proposta_nome: etapaNome || null,
+    etapa_proposta_ordem: etapaOrdem ? Number(etapaOrdem) : null,
+    rotulos: Object.keys(rotulos).length ? rotulos : null,
+  }).eq("cliente_id", clienteId);
+  revalidatePath("/", "layout");
+  avisoCrm(clienteId, error ? `Erro: ${error.message} (rodou o SQL 0015?)` : "Etapas do funil salvas.");
+}
