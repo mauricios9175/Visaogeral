@@ -89,12 +89,11 @@ export async function ativosDaConta(contaId: string, token: string) {
       return [] as T[];
     }
   };
-  const paginas = new Map<string, string>();
-  const instagram = new Map<string, string>();
-  const somarPaginas = (lista: { id: string; name?: string }[]) => lista.forEach((p) => p.id && paginas.set(p.id, p.name ?? paginas.get(p.id) ?? p.id));
+  type Pg = { id: string; name?: string; instagram_business_account?: { id: string; username?: string } };
+  const listar = (caminho: string) => todasPaginas<Pg>(montarUrl(caminho, token, { fields: "id,name,instagram_business_account{id,username}", limit: "100" }));
 
-  const [promovidas, contasIg, pixels, criativos] = await Promise.all([
-    tentar("páginas da conta", () => todasPaginas<{ id: string; name: string }>(montarUrl(`${contaId}/promote_pages`, token, { fields: "id,name", limit: "100" }))),
+  const [promovidas, contasIg, pixels, criativos, conta, doPerfil] = await Promise.all([
+    tentar("páginas da conta", () => listar(`${contaId}/promote_pages`)),
     tentar("Instagram da conta", () => todasPaginas<{ id: string; username?: string }>(montarUrl(`${contaId}/instagram_accounts`, token, { fields: "id,username", limit: "100" }))),
     tentar("pixels", () => todasPaginas<{ id: string; name: string }>(montarUrl(`${contaId}/adspixels`, token, { fields: "id,name", limit: "100" }))),
     // anúncios que já existem na conta: de onde vêm a página e o Instagram usados
@@ -105,51 +104,76 @@ export async function ativosDaConta(contaId: string, token: string) {
       fields: "object_story_spec{page_id,instagram_user_id,instagram_actor_id},effective_object_story_id,instagram_user_id,instagram_actor_id",
       limit: "100",
     }))).data),
+    getMeta<{ name?: string; business?: { id: string } }>(montarUrl(contaId, token, { fields: "name,business" })).catch(() => null),
+    tentar("páginas do perfil", () => listar("me/accounts")),
   ]);
-  somarPaginas(promovidas);
-  for (const i of contasIg) instagram.set(i.id, i.username ? `@${i.username}` : i.id);
-  const doCriativo = new Set<string>();
+  // páginas da BM dona da conta (servem também para descobrir nomes)
+  const daBm = conta?.business?.id
+    ? (await Promise.all(["owned_pages", "client_pages"].map((b) => tentar(`páginas da BM (${b})`, () => listar(`${conta.business!.id}/${b}`))))).flat()
+    : [];
+
+  // dicionários de nomes: tudo o que veio com nome, de qualquer fonte
+  const nomePagina = new Map<string, string>();
+  const nomeIg = new Map<string, string>();
+  const igDaPagina = new Map<string, string>();
+  for (const p of [...promovidas, ...daBm, ...doPerfil]) {
+    if (p.name) nomePagina.set(p.id, p.name);
+    const ig = p.instagram_business_account;
+    if (ig) {
+      igDaPagina.set(p.id, ig.id);
+      if (ig.username) nomeIg.set(ig.id, `@${ig.username}`);
+    }
+  }
+  for (const i of contasIg) if (i.username) nomeIg.set(i.id, `@${i.username}`);
+
+  // páginas e Instagram que importam para esta conta: os promovidos e os usados nos anúncios
+  const paginas = new Set(promovidas.map((p) => p.id));
+  const instagram = new Set(contasIg.map((i) => i.id));
+  const postDaPagina = new Map<string, string>();
   for (const c of criativos) {
     const pg = c.object_story_spec?.page_id ?? c.effective_object_story_id?.split("_")[0];
-    if (pg) doCriativo.add(pg);
-    const ig = c.object_story_spec?.instagram_user_id ?? c.instagram_user_id ?? c.object_story_spec?.instagram_actor_id ?? c.instagram_actor_id;
-    if (ig && !instagram.has(ig)) instagram.set(ig, ig);
-  }
-  // nomes das páginas encontradas nos anúncios
-  const semNome = [...doCriativo].filter((id) => !paginas.has(id));
-  if (semNome.length) {
-    const r = await getMeta<Record<string, { id: string; name?: string }>>(montarUrl("", token, { ids: semNome.slice(0, 50).join(","), fields: "id,name" }))
-      .catch(() => ({} as Record<string, { id: string; name?: string }>));
-    for (const id of semNome) paginas.set(id, r[id]?.name ?? `Página ${id}`);
-  }
-  if (!paginas.size) {
-    // BM dona da conta e, por último, as páginas do perfil
-    const bm = await getMeta<{ business?: { id: string } }>(montarUrl(contaId, token, { fields: "business" })).catch(() => null);
-    if (bm?.business?.id) {
-      for (const borda of ["owned_pages", "client_pages"]) {
-        somarPaginas(await tentar(`páginas da BM (${borda})`, () =>
-          todasPaginas<{ id: string; name: string }>(montarUrl(`${bm.business!.id}/${borda}`, token, { fields: "id,name", limit: "100" }))));
-      }
+    if (pg) {
+      paginas.add(pg);
+      if (c.effective_object_story_id && !postDaPagina.has(pg)) postDaPagina.set(pg, c.effective_object_story_id);
     }
-    if (!paginas.size) somarPaginas(await tentar("páginas do perfil", () => todasPaginas<{ id: string; name: string }>(montarUrl("me/accounts", token, { fields: "id,name", limit: "100" }))));
+    const ig = c.object_story_spec?.instagram_user_id ?? c.instagram_user_id ?? c.object_story_spec?.instagram_actor_id ?? c.instagram_actor_id;
+    if (ig) instagram.add(ig);
   }
-  // nome do Instagram: o @ da conta conectada a cada página
-  const igSemNome = [...instagram].filter(([id, nome]) => id === nome).map(([id]) => id);
-  if (igSemNome.length) {
-    const r = await getMeta<Record<string, { id: string; username?: string }>>(montarUrl("", token, { ids: igSemNome.slice(0, 50).join(","), fields: "id,username" }))
-      .catch(() => ({} as Record<string, { id: string; username?: string }>));
-    for (const id of igSemNome) instagram.set(id, r[id]?.username ? `@${r[id].username}` : `Instagram ${id}`);
+  // sem nada na conta: as páginas da BM e, por último, as do perfil
+  if (!paginas.size) for (const p of daBm.length ? daBm : doPerfil) paginas.add(p.id);
+  for (const id of paginas) {
+    const ig = igDaPagina.get(id);
+    if (ig) instagram.add(ig);
   }
-  if (!instagram.size && paginas.size) {
-    const ligados = await Promise.all([...paginas.keys()].slice(0, 20).map((id) =>
-      getMeta<{ instagram_business_account?: { id: string; username?: string } }>(montarUrl(id, token, { fields: "instagram_business_account{id,username}" }))
-        .then((r) => r.instagram_business_account ?? null, () => null)));
-    for (const i of ligados) if (i) instagram.set(i.id, i.username ? `@${i.username}` : i.id);
-  }
-  const lista = (m: Map<string, string>): Opcao[] => [...m].map(([id, nome]) => ({ id, nome })).sort((a, b) => a.nome.localeCompare(b.nome));
+
+  // nomes que faltam: um por um (uma recusa não derruba os outros) e, para páginas, quem publicou o post do anúncio
+  await Promise.all([...paginas].filter((id) => !nomePagina.has(id)).slice(0, 20).map(async (id) => {
+    const r = await getMeta<Pg>(montarUrl(id, token, { fields: "name,instagram_business_account{id,username}" })).catch(() => null);
+    const nome = r?.name ?? (postDaPagina.has(id)
+      ? (await getMeta<{ from?: { name?: string } }>(montarUrl(postDaPagina.get(id)!, token, { fields: "from{name}" })).catch(() => null))?.from?.name
+      : undefined);
+    if (nome) nomePagina.set(id, nome);
+    if (r?.instagram_business_account) {
+      instagram.add(r.instagram_business_account.id);
+      if (r.instagram_business_account.username) nomeIg.set(r.instagram_business_account.id, `@${r.instagram_business_account.username}`);
+    }
+  }));
+  await Promise.all([...instagram].filter((id) => !nomeIg.has(id)).slice(0, 20).map(async (id) => {
+    const r = await getMeta<{ username?: string; name?: string }>(montarUrl(id, token, { fields: "username,name" })).catch(() => null);
+    if (r?.username) nomeIg.set(id, `@${r.username}`);
+  }));
+
+  // sem nome mesmo assim: um rótulo que diz de onde veio, em vez do número solto
+  const deOnde = conta?.name ? ` de ${conta.name}` : "";
+  const semNomePg = [...paginas].filter((id) => !nomePagina.has(id));
+  const semNomeIg = [...instagram].filter((id) => !nomeIg.has(id));
+  const rotulo = (base: string, lista: string[], id: string) =>
+    `${base}${deOnde}${lista.length > 1 ? ` (${lista.indexOf(id) + 1})` : ""}`;
+  const opcoes = (ids: Set<string>, nomes: Map<string, string>, base: string, sem: string[]): Opcao[] =>
+    [...ids].map((id) => ({ id, nome: nomes.get(id) ?? rotulo(base, sem, id) })).sort((a, b) => a.nome.localeCompare(b.nome));
   return {
-    paginas: lista(paginas),
-    instagram: lista(instagram),
+    paginas: opcoes(paginas, nomePagina, "Página usada nos anúncios", semNomePg),
+    instagram: opcoes(instagram, nomeIg, "Instagram usado nos anúncios", semNomeIg),
     pixels: pixels.map((p) => ({ id: p.id, nome: p.name })),
     erro: paginas.size ? undefined : `Nenhuma página encontrada para esta conta. ${erros.join(" · ")}`,
   };
