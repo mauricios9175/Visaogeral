@@ -180,10 +180,39 @@ export async function ativosDaConta(contaId: string, token: string) {
 }
 
 /** O Meta exige o token da própria página para listar e criar formulários. */
+/**
+ * Por que o login do Facebook não dá acesso à página: falta a permissão ou a página não foi escolhida no
+ * "Login com Facebook para Empresas" (ele pergunta quais páginas liberar). Usa o debug_token do app.
+ */
+async function diagnosticoPagina(paginaId: string, token: string) {
+  const app = `${process.env.META_APP_ID ?? ""}|${process.env.META_APP_SECRET ?? ""}`;
+  const d = await getMeta<{ data?: { scopes?: string[]; granular_scopes?: { scope: string; target_ids?: string[] }[] } }>(
+    montarUrl("debug_token", app, { input_token: token }),
+  ).then((r) => r.data, () => null);
+  if (!d) return "Não consegui conferir as permissões do login do Facebook.";
+  const faltando = ["pages_show_list", "pages_manage_ads"].filter((p) => !d.scopes?.includes(p));
+  if (faltando.length) {
+    return `O login do Facebook conectado no painel não tem a permissão ${faltando.join(" e ")}. ` +
+      "Confira se elas estão na configuração do Login do app no Meta e clique em “Conectar / reconectar perfil” em Configurações, aceitando tudo.";
+  }
+  const alvos = d.granular_scopes?.find((g) => g.scope === "pages_manage_ads" || g.scope === "pages_show_list")?.target_ids;
+  if (alvos && !alvos.includes(paginaId)) {
+    return "Esta página não foi liberada no login do Facebook. Em Configurações, clique em “Conectar / reconectar perfil” e, " +
+      "na tela de escolher as páginas, marque esta página (ou “todas as páginas atuais e futuras”).";
+  }
+  return "O Meta não liberou o acesso à página para o painel.";
+}
+
+/** O Meta exige o token da própria página para listar e criar formulários. */
 async function tokenDaPagina(paginaId: string, token: string) {
-  const { access_token: t } = await getMeta<{ access_token?: string }>(montarUrl(paginaId, token, { fields: "access_token" }));
-  if (!t) throw new Error("Sem acesso aos formulários desta página (seu perfil precisa ter acesso à página com permissão de anúncios).");
-  return t;
+  const direto = await getMeta<{ access_token?: string }>(montarUrl(paginaId, token, { fields: "access_token" }))
+    .then((r) => r.access_token, () => undefined);
+  if (direto) return direto;
+  // segundo caminho: a lista de páginas do perfil traz o token de cada uma
+  const doPerfil = await todasPaginas<{ id: string; access_token?: string }>(montarUrl("me/accounts", token, { fields: "id,access_token", limit: "100" }))
+    .then((l) => l.find((p) => p.id === paginaId)?.access_token, () => undefined);
+  if (doPerfil) return doPerfil;
+  throw new Error(`Sem acesso aos formulários desta página. ${await diagnosticoPagina(paginaId, token)}`);
 }
 
 /** Formulários instantâneos ativos da página. */
