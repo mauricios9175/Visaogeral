@@ -8,6 +8,7 @@ import { db, EMPRESA_PADRAO } from "@/lib/db";
 import { importarContas } from "@/lib/sync";
 import { importarContasGoogle, sincronizarGoogle } from "@/lib/sync-google";
 import { PARAMETROS_UTM } from "@/lib/utm";
+import { normalizarFunil } from "@/lib/funil";
 import { avisosUtm, listarFunisCrm, NOME_CRM, sincronizarCrmCliente, type ConexaoCrm, type TipoCrm } from "@/lib/crm/sync";
 
 export async function entrar(_: unknown, form: FormData) {
@@ -251,23 +252,20 @@ export async function salvarMapaUtm(form: FormData) {
   avisoCrm(clienteId, error ? `Erro: ${error.message} (rodou o SQL 0014?)` : "Mapa de UTMs salvo. O relatório por UTM já usa os campos escolhidos.");
 }
 
-/** Segunda etapa do funil (Propostas, Projetos, Agendamentos…) e como o cliente chama cada etapa no relatório. */
-export async function salvarEtapaProposta(form: FormData) {
+/** Funil do relatório do cliente: passos com as etapas do CRM que contam em cada um. */
+export async function salvarFunilCliente(form: FormData) {
   const clienteId = String(form.get("cliente_id"));
-  // valor no formato "funilId|funilNome|etapaId|etapaNome|etapaOrdem" (vazio = sem etapa de propostas)
-  const [pipelineId, , etapaId, etapaNome, etapaOrdem] = String(form.get("escolha") ?? "").split("|");
-  const rotulos = Object.fromEntries(
-    ["leads", "interessados", "propostas", "vendas"]
-      .map((k) => [k, String(form.get(`rotulo_${k}`) ?? "").trim()] as const)
-      .filter(([, v]) => v),
-  );
-  const { error } = await db().from("crm_conexoes").update({
-    pipeline_proposta_id: pipelineId || null,
-    etapa_proposta: etapaId || null,
-    etapa_proposta_nome: etapaNome || null,
-    etapa_proposta_ordem: etapaOrdem ? Number(etapaOrdem) : null,
-    rotulos: Object.keys(rotulos).length ? rotulos : null,
-  }).eq("cliente_id", clienteId);
+  let funil;
+  try {
+    funil = normalizarFunil(JSON.parse(String(form.get("funil") ?? "{}")));
+  } catch {
+    avisoCrm(clienteId, "Não foi possível ler o funil.");
+  }
+  const vazio = funil.passos.find((p) => !p.etapas.length);
+  if (vazio) avisoCrm(clienteId, `Marque pelo menos uma etapa do CRM no passo “${vazio.nome}”.`);
+  const { error } = await db().from("crm_conexoes").update({ funil }).eq("cliente_id", clienteId);
   revalidatePath("/", "layout");
-  avisoCrm(clienteId, error ? `Erro: ${error.message} (rodou o SQL 0015?)` : "Etapas do funil salvas.");
+  avisoCrm(clienteId, error
+    ? `Erro: ${error.message} (rodou o SQL 0018?)`
+    : `Funil salvo: ${[funil.leads, ...funil.passos.map((p) => p.nome), funil.vendas].join(" → ")}. No histórico, clique em “Buscar e gravar” para recalcular os meses.`);
 }

@@ -3,6 +3,7 @@ import { db, type Cliente, type ContaAnuncio, type Metricas } from "./db";
 import { progressoDoMes, hojeISO, somarDias as somarDiasISO, type Periodo } from "./datas";
 import { dinheiro as dinheiroBR } from "./formato";
 import { completarUtms, type MapaUtm } from "./utm";
+import { normalizarFunil, type FunilCliente, type NumerosFunil } from "./funil";
 import { saldosGoogle, somarGoogle, type LinhaGoogle, type NumerosGoogle } from "./consultas-google";
 
 const ZERO: Metricas = {
@@ -420,7 +421,7 @@ export async function alertasContas(): Promise<AlertaConta[]> {
 
 export type NegocioCrm = {
   id: string; cliente_id: string; nome: string | null;
-  pipeline_id: string | null; pipeline_nome: string | null; etapa_nome: string | null;
+  pipeline_id: string | null; pipeline_nome: string | null; etapa_id?: string | null; etapa_nome: string | null;
   criado_em: string; fechado_em: string | null; etapa_ordem: number | null;
   ganho: boolean | null; valor: number; campanha: string | null; origem: string | null;
   responsavel: string | null; campos: Record<string, string> | null;
@@ -438,7 +439,7 @@ export const DIMENSOES_UTM = [
 ] as const;
 export type DimensaoUtm = (typeof DIMENSOES_UTM)[number]["chave"];
 
-const COLUNAS_NEGOCIO = "id, cliente_id, nome, pipeline_id, pipeline_nome, etapa_nome, criado_em, fechado_em, etapa_ordem, ganho, valor, campanha, origem, responsavel, campos";
+const COLUNAS_NEGOCIO = "id, cliente_id, nome, pipeline_id, pipeline_nome, etapa_id, etapa_nome, criado_em, fechado_em, etapa_ordem, ganho, valor, campanha, origem, responsavel, campos";
 const COLUNAS_UTM = "utm_source, utm_medium, utm_campaign, utm_content, utm_term";
 export type ConexaoResumo = {
   cliente_id: string; pipeline_id: string | null; etapa_qualificado_ordem: number | null;
@@ -447,7 +448,44 @@ export type ConexaoResumo = {
   // segunda etapa do funil (SQL 0015): propostas, projetos, agendamentos…
   pipeline_proposta_id?: string | null;
   etapa_proposta_ordem?: number | null;
+  // funil do relatório montado pelo usuário (SQL 0018) e nomes antigos das etapas (SQL 0015)
+  funil?: Partial<FunilCliente> | null;
+  rotulos?: { leads?: string; interessados?: string; propostas?: string; vendas?: string } | null;
 };
+
+/**
+ * Funil do relatório do cliente. Sem funil montado, usa a configuração antiga
+ * (etapa de qualificação e de propostas, contando pela ordem das etapas).
+ */
+export function funilDaConexao(cx: ConexaoResumo): FunilCliente & { teste: ((n: NegocioCrm) => boolean)[] } {
+  if (cx.funil) {
+    const f = normalizarFunil(cx.funil);
+    // conta no passo quem está numa etapa dele ou de qualquer passo seguinte (já passou por ele), ou foi ganho
+    const teste = f.passos.map((_, i) => {
+      const etapas = new Set(f.passos.slice(i).flatMap((p) => p.etapas));
+      return (n: NegocioCrm) => n.ganho === true || (!!n.etapa_id && etapas.has(n.etapa_id));
+    });
+    return { ...f, teste };
+  }
+  const r = cx.rotulos ?? {};
+  const passos: { nome: string; teste: (n: NegocioCrm) => boolean }[] = [];
+  if (cx.etapa_qualificado_ordem != null) {
+    passos.push({
+      nome: r.interessados || "Interessados",
+      teste: (n) => n.ganho === true || ((!cx.pipeline_id || n.pipeline_id === cx.pipeline_id) && (n.etapa_ordem ?? -1) >= cx.etapa_qualificado_ordem!),
+    });
+  }
+  if (cx.etapa_proposta_ordem != null) {
+    passos.push({
+      nome: r.propostas || "Propostas",
+      teste: (n) => n.ganho === true || ((!cx.pipeline_proposta_id || n.pipeline_id === cx.pipeline_proposta_id) && (n.etapa_ordem ?? -1) >= cx.etapa_proposta_ordem!),
+    });
+  }
+  return {
+    soAnuncio: true, leads: r.leads || "Leads", vendas: r.vendas || "Vendas",
+    passos: passos.map((p) => ({ nome: p.nome, etapas: [] })), teste: passos.map((p) => p.teste),
+  };
+}
 
 /** Fontes que parecem de anúncio, usadas enquanto o usuário não escolhe as fontes manualmente. */
 const FONTE_ANUNCIO_AUTO = /facebook|meta|instagram|google|tiktok|linkedin|\bads?\b|an[uú]ncio|tr[aá]fego|pago|paid|cpc/i;
@@ -468,6 +506,7 @@ export type NumerosCrm = {
   faturamento: number;
   faturamentoAnuncio: number;
   emNegociacao: number;               // valor dos negócios em aberto criados no período
+  funil: NumerosFunil;                // funil do relatório (só anúncio, se o cliente estiver configurado assim)
 };
 
 const diaSP = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date(iso));
@@ -491,7 +530,16 @@ export function numerosCrm(negocios: NegocioCrm[], cx: ConexaoResumo, p: { desde
   const criados = negocios.filter((n) => noPeriodo(n.criado_em, p));
   const ganhos = negocios.filter((n) => n.ganho === true && noPeriodo(n.fechado_em, p));
   const semEtapa = cx.etapa_qualificado_ordem == null;
+  const f = funilDaConexao(cx);
+  const doFunil = (ns: NegocioCrm[]) => (f.soAnuncio ? ns.filter(anuncio) : ns);
+  const criadosF = doFunil(criados), ganhosF = doFunil(ganhos);
   return {
+    funil: {
+      leads: criadosF.length,
+      passos: f.passos.map((p, i) => ({ nome: p.nome, valor: criadosF.filter(f.teste[i]).length })),
+      vendas: ganhosF.length,
+      faturamento: ganhosF.reduce((s, n) => s + Number(n.valor), 0),
+    },
     leads: criados.length,
     leadsAnuncio: criados.filter(anuncio).length,
     qualificados: semEtapa ? null : criados.filter(qualificado).length,
@@ -540,8 +588,11 @@ const CAMPO_VALOR = /or[cç]amento|valor|ticket|budget|investimento|pre[cç]o/i;
 export async function detalheCrm(clienteId: string, atual: Periodo, anterior: Periodo) {
   // mapa_utm vem do SQL 0014; sem ele, segue só com a detecção automática
   const ler = (colunas: string) => db().from("crm_conexoes").select(colunas).eq("cliente_id", clienteId).maybeSingle();
-  const primeira = await ler(`${COLUNAS_CONEXAO}, mapa_utm`);
-  const { data } = primeira.error ? await ler(COLUNAS_CONEXAO) : primeira;
+  // funil/rótulos (SQL 0015 e 0018) e mapa_utm (SQL 0014): cada um que faltar, tenta sem
+  let resp = await ler(`${COLUNAS_CONEXAO}, mapa_utm, funil, rotulos, pipeline_proposta_id, etapa_proposta_ordem`);
+  if (resp.error) resp = await ler(`${COLUNAS_CONEXAO}, mapa_utm`);
+  if (resp.error) resp = await ler(COLUNAS_CONEXAO);
+  const { data } = resp;
   if (!data) return null;
   const cx = data as unknown as ConexaoResumo;
   // UTMs: atribuição do CRM + campos personalizados ("Campanha", "Criativo", "Público"…), conforme o mapa do cliente

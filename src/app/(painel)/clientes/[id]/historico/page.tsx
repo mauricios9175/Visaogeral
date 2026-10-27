@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
-import { lerHistorico, mesDe, nomeMes, rotulosDoCliente, somarMeses, type CampoAjustavel, type MesConsolidado } from "@/lib/historico";
+import { chavePasso, funilDoCliente, lerHistorico, mesDe, nomeMes, nomesDosPassos, somarMeses, type MesConsolidado } from "@/lib/historico";
+import type { FunilCliente } from "@/lib/funil";
 import { configRelatorio, linkApresentacao } from "@/lib/relatorio-slides";
 import { DIMENSOES_UTM } from "@/lib/consultas";
 import { hojeISO } from "@/lib/datas";
@@ -22,12 +23,12 @@ const taxa = (v: number | null) => pct(v == null ? null : v * 100);
 export default async function Historico({ params, searchParams }: PageProps<"/clientes/[id]/historico">) {
   const { id } = await params;
   const { msg, ano } = (await searchParams) as { msg?: string; ano?: string };
-  const [{ data: cliente }, { meses, erro }, rotulos, { data: ultima }, config, { data: logins }, { data: gerados }] = await Promise.all([
+  const [{ data: cliente }, { meses, erro }, funil, { data: ultima }, config, { data: logins }, { data: gerados }] = await Promise.all([
     // pasta_drive vem do SQL 0017
     db().from("clientes").select("id, nome, pasta_drive").eq("id", id).maybeSingle()
       .then((r) => (r.error ? db().from("clientes").select("id, nome").eq("id", id).maybeSingle() : r)),
     lerHistorico(id),
-    rotulosDoCliente(id),
+    funilDoCliente(id),
     db().from("historico_mensal").select("atualizado_em").eq("cliente_id", id).order("atualizado_em", { ascending: false }).limit(1),
     configRelatorio().catch(() => null),
     db().from("tokens_google").select("id, email").order("email"),
@@ -40,7 +41,8 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   // padrão: últimos 12 meses; ?ano=2025 mostra o ano inteiro
   const visiveis = anoSel ? meses.filter((m) => m.mes.startsWith(anoSel)) : meses.slice(0, 12);
   const total = somarMeses(visiveis);
-  const temPropostas = meses.some((m) => m.propostas != null);
+  // colunas dos passos: as do funil atual do cliente e as que aparecem nos meses já gravados
+  const passos = [...new Set([...funil.passos.map((p) => p.nome), ...nomesDosPassos(visiveis)])];
   const temGoogle = meses.some((m) => m.gastoGoogle > 0);
   // relatório: até o dia 10 o padrão é o mês passado; depois, o mês atual
   const hoje = hojeISO();
@@ -85,8 +87,10 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
           </form>
         )}
         <p className="basis-full text-xs text-texto-3">
-          Só precisa buscar o passado uma vez. Os nomes das etapas ({rotulos.interessados}, {rotulos.propostas}) e qual etapa
-          conta como cada uma ficam na <Link href={`/clientes/${id}/crm`} className="underline">configuração do CRM</Link>.
+          Só precisa buscar o passado uma vez. O funil ({[funil.leads, ...funil.passos.map((p) => p.nome), funil.vendas].join(" → ")})
+          {funil.soAnuncio ? ", contando só os leads de anúncio," : ""} é montado na{" "}
+          <Link href={`/clientes/${id}/crm#funil`} className="underline">configuração do CRM</Link>. Mudou o funil? Clique em
+          “Buscar e gravar” de novo para recalcular os meses.
         </p>
       </section>
 
@@ -174,25 +178,23 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
                 <tr className="border-b border-borda">
                   <th className="px-3 py-2 font-normal">Mês</th>
                   <th className="px-3 py-2 text-right font-normal">Investimento</th>
-                  <th className="px-3 py-2 text-right font-normal">{rotulos.leads}</th>
-                  <th className="px-3 py-2 text-right font-normal">{rotulos.interessados}</th>
-                  {temPropostas && <th className="px-3 py-2 text-right font-normal">{rotulos.propostas}</th>}
-                  <th className="px-3 py-2 text-right font-normal">{rotulos.vendas}</th>
+                  <th className="px-3 py-2 text-right font-normal">{funil.leads}</th>
+                  {passos.map((p) => <th key={p} className="px-3 py-2 text-right font-normal">{p}</th>)}
+                  <th className="px-3 py-2 text-right font-normal">{funil.vendas}</th>
                   <th className="px-3 py-2 text-right font-normal">Valor das vendas</th>
-                  <th className="px-3 py-2 text-right font-normal">Tx. qualificação</th>
-                  {temPropostas && <th className="px-3 py-2 text-right font-normal">Tx. {rotulos.propostas.toLowerCase()}</th>}
-                  <th className="px-3 py-2 text-right font-normal">Conv. em vendas</th>
+                  {passos.map((p) => <th key={p} className="px-3 py-2 text-right font-normal">Tx. {p.toLowerCase()}</th>)}
+                  <th className="px-3 py-2 text-right font-normal">Conv. em {funil.vendas.toLowerCase()}</th>
                   <th className="px-3 py-2 text-right font-normal">ROAS</th>
                   <th className="px-3 py-2 text-right font-normal">CPL</th>
                   <th className="px-3 py-2 text-right font-normal">CPL qualificado</th>
                 </tr>
               </thead>
               <tbody>
-                {visiveis.map((m) => <LinhaMes key={m.mes} m={m} temPropostas={temPropostas} temGoogle={temGoogle} />)}
+                {visiveis.map((m) => <LinhaMes key={m.mes} m={m} passos={passos} temGoogle={temGoogle} />)}
               </tbody>
               {total && visiveis.length > 1 && (
                 <tfoot className="border-t border-borda font-medium">
-                  <LinhaMes m={{ ...total, mes: anoSel ? `Total ${anoSel}` : "Total 12 meses" }} temPropostas={temPropostas} temGoogle={temGoogle} total />
+                  <LinhaMes m={{ ...total, mes: anoSel ? `Total ${anoSel}` : "Total 12 meses" }} passos={passos} temGoogle={temGoogle} total />
                 </tfoot>
               )}
             </table>
@@ -205,7 +207,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
               sobrescritos pela atualização automática.
             </p>
             <div className="space-y-2">
-              {visiveis.map((m) => <EditarMes key={m.mes} clienteId={id} m={m} temPropostas={temPropostas} rotulos={rotulos} />)}
+              {visiveis.map((m) => <EditarMes key={m.mes} clienteId={id} m={m} passos={passos} funil={funil} />)}
             </div>
           </section>
         </>
@@ -214,9 +216,10 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   );
 }
 
-function LinhaMes({ m, temPropostas, temGoogle, total }: { m: MesConsolidado; temPropostas: boolean; temGoogle: boolean; total?: boolean }) {
+function LinhaMes({ m, passos, temGoogle, total }: { m: MesConsolidado; passos: string[]; temGoogle: boolean; total?: boolean }) {
   const celula = "px-3 py-2 text-right tabular-nums";
-  const marca = (c: CampoAjustavel) => (m.ajustado.includes(c) ? <span className="text-destaque" title="corrigido à mão">*</span> : null);
+  const passo = (nome: string) => m.passos.find((p) => p.nome === nome);
+  const marca = (c: string) => (m.ajustado.includes(c) ? <span className="text-destaque" title="corrigido à mão">*</span> : null);
   return (
     <tr className={total ? "" : "border-b border-borda/60 last:border-0"}>
       <td className="px-3 py-2 capitalize">
@@ -230,12 +233,10 @@ function LinhaMes({ m, temPropostas, temGoogle, total }: { m: MesConsolidado; te
         )}
       </td>
       <td className={celula}>{inteiro(m.leads)}{marca("leads")}</td>
-      <td className={celula}>{inteiro(m.interessados)}{marca("interessados")}</td>
-      {temPropostas && <td className={celula}>{inteiro(m.propostas)}{marca("propostas")}</td>}
+      {passos.map((p) => <td key={p} className={celula}>{inteiro(passo(p)?.valor)}{marca(chavePasso(p))}</td>)}
       <td className={celula}>{inteiro(m.vendas)}{marca("vendas")}</td>
       <td className={celula}>{dinheiro(m.faturamento)}{marca("faturamento")}</td>
-      <td className={celula}>{taxa(m.taxaQualificacao)}</td>
-      {temPropostas && <td className={celula}>{taxa(m.taxaPropostas)}</td>}
+      {passos.map((p) => <td key={p} className={celula}>{taxa(passo(p)?.taxa ?? null)}</td>)}
       <td className={celula}>{taxa(m.conversaoVendas)}</td>
       <td className={celula}>{m.roas == null ? "—" : `${m.roas.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}x`}</td>
       <td className={celula}>{dinheiro(m.cpl)}</td>
@@ -244,15 +245,12 @@ function LinhaMes({ m, temPropostas, temGoogle, total }: { m: MesConsolidado; te
   );
 }
 
-function EditarMes({ clienteId, m, temPropostas, rotulos }: {
-  clienteId: string; m: MesConsolidado; temPropostas: boolean; rotulos: Awaited<ReturnType<typeof rotulosDoCliente>>;
-}) {
-  const campos: { nome: CampoAjustavel; rotulo: string; valor: number | null }[] = [
+function EditarMes({ clienteId, m, passos, funil }: { clienteId: string; m: MesConsolidado; passos: string[]; funil: FunilCliente }) {
+  const campos: { nome: string; rotulo: string; valor: number | null }[] = [
     { nome: "investimento", rotulo: "Investimento (R$)", valor: m.investimento },
-    { nome: "leads", rotulo: rotulos.leads, valor: m.leads },
-    { nome: "interessados", rotulo: rotulos.interessados, valor: m.interessados },
-    ...(temPropostas ? [{ nome: "propostas" as const, rotulo: rotulos.propostas, valor: m.propostas }] : []),
-    { nome: "vendas", rotulo: rotulos.vendas, valor: m.vendas },
+    { nome: "leads", rotulo: funil.leads, valor: m.leads },
+    ...passos.map((p) => ({ nome: chavePasso(p), rotulo: p, valor: m.passos.find((x) => x.nome === p)?.valor ?? null })),
+    { nome: "vendas", rotulo: funil.vendas, valor: m.vendas },
     { nome: "faturamento", rotulo: "Valor das vendas (R$)", valor: m.faturamento },
   ];
   return (
@@ -263,6 +261,7 @@ function EditarMes({ clienteId, m, temPropostas, rotulos }: {
       <form action={salvarAjusteMes} className="space-y-3 border-t border-borda p-4">
         <input type="hidden" name="cliente_id" value={clienteId} />
         <input type="hidden" name="mes" value={m.mes} />
+        <input type="hidden" name="campos" value={campos.map((c) => c.nome).join("|")} />
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {campos.map((c) => (
             <label key={c.nome} className="flex flex-col gap-1 text-sm">
@@ -270,7 +269,7 @@ function EditarMes({ clienteId, m, temPropostas, rotulos }: {
               <input
                 name={c.nome} inputMode="decimal" className={campo}
                 defaultValue={m.ajustado.includes(c.nome) ? String(c.valor ?? "") : ""}
-                placeholder={c.valor == null ? "—" : `auto: ${c.valor.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}`}
+                placeholder={c.valor == null || m.ajustado.includes(c.nome) ? "automático" : `auto: ${c.valor.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}`}
               />
             </label>
           ))}

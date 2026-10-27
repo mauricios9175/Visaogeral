@@ -4,7 +4,8 @@ import { extrairResultados, insightsMensais } from "./meta";
 import { metricasMensais, tokenDeAcesso } from "./google";
 import { tokenDaConta } from "./sync";
 import { sincronizarCrmCliente, type ConexaoCrm } from "./crm/sync";
-import { negociosDe, numerosCrm, TIPOS_CONVERSAO, type ConexaoResumo } from "./consultas";
+import { funilDaConexao, negociosDe, numerosCrm, TIPOS_CONVERSAO, type ConexaoResumo } from "./consultas";
+import { FUNIL_PADRAO, type FunilCliente } from "./funil";
 import { hojeISO } from "./datas";
 
 // Histórico mensal de cada cliente (o que antes ficava na planilha): investimento, leads, funil do CRM e vendas.
@@ -19,22 +20,22 @@ export type LinhaHistorico = {
   resultados_google: number;
   crm: boolean;
   leads: number | null;
-  interessados: number | null;
+  interessados: number | null; // versão antiga (antes do funil por cliente)
   propostas: number | null;
+  passos?: { nome: string; valor: number }[] | null; // passos do meio do funil do cliente (SQL 0018)
   vendas: number | null;
   faturamento: number | null;
-  ajustes: Partial<Record<CampoAjustavel, number>> | null;
+  ajustes: Record<string, number> | null; // "investimento", "leads", "vendas", "faturamento" e "passo:<nome>"
   observacao: string | null;
   atualizado_em: string;
 };
 
-/** Campos que dá para corrigir à mão (vazio = usa o número automático). */
-export const CAMPOS_AJUSTAVEIS = ["investimento", "leads", "interessados", "propostas", "vendas", "faturamento"] as const;
-export type CampoAjustavel = (typeof CAMPOS_AJUSTAVEIS)[number];
+/** Campos fixos que dá para corrigir à mão (os passos do funil usam a chave "passo:<nome>"). */
+export const CAMPOS_AJUSTAVEIS = ["investimento", "leads", "vendas", "faturamento"] as const;
+export const chavePasso = (nome: string) => `passo:${nome}`;
 
-/** Como cada cliente chama as etapas do funil (configurado na tela do CRM). */
-export type Rotulos = { leads: string; interessados: string; propostas: string; vendas: string };
-export const ROTULOS_PADRAO: Rotulos = { leads: "Leads", interessados: "Interessados", propostas: "Propostas", vendas: "Vendas" };
+/** Passo do funil no mês, com a taxa em relação ao passo anterior. */
+export type PassoMes = { nome: string; valor: number | null; taxa: number | null };
 
 /** Mês com os números finais (ajustes manuais aplicados) e as taxas da planilha. */
 export type MesConsolidado = {
@@ -43,17 +44,14 @@ export type MesConsolidado = {
   gastoMeta: number;
   gastoGoogle: number;
   leads: number | null;
-  interessados: number | null;
-  propostas: number | null;
+  passos: PassoMes[];
   vendas: number | null;
   faturamento: number | null;
-  taxaQualificacao: number | null; // interessados / leads
-  taxaPropostas: number | null;    // propostas / interessados
-  conversaoVendas: number | null;  // vendas / propostas (ou / interessados, sem etapa de propostas)
+  conversaoVendas: number | null;  // vendas / último passo (ou / leads, sem passos)
   roas: number | null;
   cpl: number | null;
-  cplQualificado: number | null;
-  ajustado: CampoAjustavel[];
+  cplQualificado: number | null;   // investimento / primeiro passo
+  ajustado: string[];
   observacao: string | null;
   crm: boolean;
 };
@@ -65,8 +63,18 @@ export function consolidar(l: LinhaHistorico): MesConsolidado {
   const investimento = aj.investimento ?? Number(l.gasto_meta) + Number(l.gasto_google);
   // sem CRM, "leads" são os resultados das plataformas (formulários, conversas…)
   const leads = aj.leads ?? (l.crm ? l.leads : Math.round(Number(l.resultados_meta) + Number(l.resultados_google)));
-  const interessados = aj.interessados ?? l.interessados;
-  const propostas = aj.propostas ?? l.propostas;
+  // meses gravados antes do funil por cliente: interessados e propostas viram os passos
+  const brutos = l.passos ?? [
+    ...(l.interessados != null ? [{ nome: "Interessados", valor: l.interessados }] : []),
+    ...(l.propostas != null ? [{ nome: "Propostas", valor: l.propostas }] : []),
+  ];
+  let anterior = leads;
+  const passos: PassoMes[] = brutos.map((p) => {
+    const valor = aj[chavePasso(p.nome)] ?? p.valor;
+    const passo = { nome: p.nome, valor, taxa: div(valor, anterior) };
+    anterior = valor;
+    return passo;
+  });
   const vendas = aj.vendas ?? l.vendas;
   const faturamento = aj.faturamento ?? (l.faturamento == null ? null : Number(l.faturamento));
   return {
@@ -74,32 +82,39 @@ export function consolidar(l: LinhaHistorico): MesConsolidado {
     investimento,
     gastoMeta: Number(l.gasto_meta),
     gastoGoogle: Number(l.gasto_google),
-    leads, interessados, propostas, vendas, faturamento,
-    taxaQualificacao: div(interessados, leads),
-    taxaPropostas: div(propostas, interessados),
-    conversaoVendas: propostas != null ? div(vendas, propostas) : div(vendas, interessados),
+    leads, passos, vendas, faturamento,
+    conversaoVendas: div(vendas, anterior),
     roas: faturamento ? div(faturamento, investimento) : null,
     cpl: div(investimento, leads),
-    cplQualificado: div(investimento, interessados),
-    ajustado: CAMPOS_AJUSTAVEIS.filter((c) => aj[c] != null),
+    cplQualificado: passos.length ? div(investimento, passos[0].valor) : null,
+    ajustado: Object.keys(aj),
     observacao: l.observacao,
     crm: l.crm,
   };
 }
 
+/** Nomes dos passos que aparecem nos meses, na ordem do mês mais recente. */
+export function nomesDosPassos(meses: MesConsolidado[]) {
+  const nomes: string[] = [];
+  for (const m of meses) for (const p of m.passos) if (!nomes.includes(p.nome)) nomes.push(p.nome);
+  return nomes;
+}
+
 /** Soma vários meses (para o total do período) e recalcula as taxas. */
 export function somarMeses(meses: MesConsolidado[]): MesConsolidado | null {
   if (!meses.length) return null;
-  const soma = (k: "leads" | "interessados" | "propostas" | "vendas" | "faturamento") =>
-    meses.some((m) => m[k] != null) ? meses.reduce((t, m) => t + (m[k] ?? 0), 0) : null;
+  const soma = (f: (m: MesConsolidado) => number | null) =>
+    meses.some((m) => f(m) != null) ? meses.reduce((t, m) => t + (f(m) ?? 0), 0) : null;
   const linha: LinhaHistorico = {
-    cliente_id: "", mes: "total", crm: true, ajustes: null, observacao: null, atualizado_em: "",
+    cliente_id: "", mes: "total", crm: true, observacao: null, atualizado_em: "",
     gasto_meta: meses.reduce((t, m) => t + m.gastoMeta, 0), gasto_google: meses.reduce((t, m) => t + m.gastoGoogle, 0),
-    resultados_meta: 0, resultados_google: 0,
-    leads: soma("leads"), interessados: soma("interessados"), propostas: soma("propostas"), vendas: soma("vendas"), faturamento: soma("faturamento"),
+    resultados_meta: 0, resultados_google: 0, interessados: null, propostas: null,
+    leads: soma((m) => m.leads), vendas: soma((m) => m.vendas), faturamento: soma((m) => m.faturamento),
+    passos: nomesDosPassos(meses).map((nome) => ({ nome, valor: soma((m) => m.passos.find((p) => p.nome === nome)?.valor ?? null) ?? 0 })),
+    // investimento pode ter ajuste manual em algum mês: soma o valor final de cada mês
+    ajustes: { investimento: meses.reduce((t, m) => t + m.investimento, 0) },
   };
-  // investimento pode ter ajuste manual em algum mês: soma o valor final de cada mês
-  return { ...consolidar({ ...linha, ajustes: { investimento: meses.reduce((t, m) => t + m.investimento, 0) } }), ajustado: [] };
+  return { ...consolidar(linha), ajustado: [] };
 }
 
 const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
@@ -129,9 +144,13 @@ export async function lerHistorico(clienteId: string): Promise<{ meses: MesConso
   return { meses: ((data ?? []) as LinhaHistorico[]).map(consolidar), erro: null };
 }
 
-export async function rotulosDoCliente(clienteId: string): Promise<Rotulos> {
-  const { data } = await db().from("crm_conexoes").select("rotulos").eq("cliente_id", clienteId).maybeSingle();
-  return { ...ROTULOS_PADRAO, ...((data?.rotulos as Partial<Rotulos> | null) ?? {}) };
+/** Funil do relatório do cliente (nomes e passos); sem CRM, só Leads → Vendas. */
+export async function funilDoCliente(clienteId: string): Promise<FunilCliente> {
+  const { data } = await db().from("crm_conexoes").select("*").eq("cliente_id", clienteId).maybeSingle();
+  if (!data) return FUNIL_PADRAO;
+  const { teste, ...f } = funilDaConexao(data as ConexaoResumo);
+  void teste;
+  return f;
 }
 
 /**
@@ -215,8 +234,10 @@ export async function gravarHistorico(clienteId: string, desdeMes: string, ateMe
       ...(metaOk && { gasto_meta: round(meta[mes].gasto), resultados_meta: meta[mes].resultados }),
       ...(googleOk && { gasto_google: round(google[mes].gasto), resultados_google: round(google[mes].resultados) }),
       ...(cx && negocios && {
-        crm: true, leads: crm!.leads, interessados: crm!.qualificados, propostas: crm!.propostas,
-        vendas: crm!.vendas, faturamento: crm!.faturamento,
+        // funil do relatório do cliente (por padrão, só os leads de anúncio)
+        crm: true, leads: crm!.funil.leads, passos: crm!.funil.passos,
+        interessados: crm!.funil.passos[0]?.valor ?? null, propostas: crm!.funil.passos[1]?.valor ?? null,
+        vendas: crm!.funil.vendas, faturamento: crm!.funil.faturamento,
       }),
       ...(!cx && { crm: false }),
     };

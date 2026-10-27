@@ -6,10 +6,11 @@ import type { FunilRd } from "@/lib/crm/rd";
 import { listarFunisCrm, NOME_CRM, type ConexaoCrm } from "@/lib/crm/sync";
 import { Aviso } from "@/components/ui";
 import { BotaoEnviar } from "@/components/botao";
-import { removerConexaoCrm, salvarConexaoCrm, salvarFontesCrm, salvarFunilCrm, salvarEtapaProposta, salvarMapaUtm, sincronizarCrmAgora } from "../../../../acoes";
+import { removerConexaoCrm, salvarConexaoCrm, salvarFontesCrm, salvarFunilCrm, salvarMapaUtm, sincronizarCrmAgora } from "../../../../acoes";
 import { camposDoClienteCrm, ehFonteAnuncio, fontesDoCliente } from "@/lib/consultas";
 import { detectarMapa, PARAMETROS_UTM, ROTULO_UTM, type MapaUtm } from "@/lib/utm";
-import { ROTULOS_PADRAO, type Rotulos } from "@/lib/historico";
+import { normalizarFunil, type FunilCliente } from "@/lib/funil";
+import { EditorFunil } from "@/components/editor-funil";
 
 export const maxDuration = 300;
 
@@ -50,15 +51,18 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
           return f && e ? `${f.id}|${f.nome}|${e.id}|${e.nome}|${e.ordem}` : "";
         })()
       : "";
-  const extra = c as (ConexaoCrm & { etapa_proposta?: string | null; pipeline_proposta_id?: string | null; rotulos?: Partial<Rotulos> | null }) | null;
-  const propostaAtual = extra?.etapa_proposta
-    ? (() => {
-        const f = funis.find((x) => x.id === extra.pipeline_proposta_id);
-        const e = f?.etapas.find((x) => x.id === extra.etapa_proposta);
-        return f && e ? `${f.id}|${f.nome}|${e.id}|${e.nome}|${e.ordem}` : "";
-      })()
-    : "";
-  const rotulos = { ...ROTULOS_PADRAO, ...(extra?.rotulos ?? {}) };
+  // funil do relatório: o salvo (SQL 0018) ou, para começar, o da configuração antiga (qualificação e propostas)
+  const extra = c as (ConexaoCrm & { funil?: Partial<FunilCliente> | null; etapa_proposta?: string | null;
+    rotulos?: { leads?: string; interessados?: string; propostas?: string; vendas?: string } | null }) | null;
+  const funilInicial: FunilCliente = extra?.funil
+    ? normalizarFunil(extra.funil)
+    : {
+        soAnuncio: true, leads: extra?.rotulos?.leads || "Leads", vendas: extra?.rotulos?.vendas || "Vendas",
+        passos: [
+          ...(extra?.etapa_qualificado ? [{ nome: extra.rotulos?.interessados || "Interessados", etapas: [extra.etapa_qualificado] }] : []),
+          ...(extra?.etapa_proposta ? [{ nome: extra.rotulos?.propostas || "Propostas", etapas: [extra.etapa_proposta] }] : []),
+        ],
+      };
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -164,42 +168,15 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
         </section>
       )}
 
-      {/* 2b. Funil do relatório */}
+      {/* Funil do relatório */}
       {c && !erroFunis && (
-        <section className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+        <section id="funil" className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
           <h2 className="font-medium">Funil do relatório e do histórico</h2>
           <p className="text-sm text-texto-2">
-            Como este cliente chama cada etapa (ex.: Projetos, Agendamentos, Visitas) e a partir de qual etapa o negócio
-            conta como proposta. Esses nomes aparecem no histórico mensal e no relatório.
+            Monte o funil do jeito que você apresenta para este cliente: crie os passos (Interessados, Propostas, Agendamentos…)
+            e marque quais etapas do CRM contam em cada um. É esse funil que aparece no histórico mensal e no relatório.
           </p>
-          <form action={salvarEtapaProposta} className="space-y-3">
-            <input type="hidden" name="cliente_id" value={id} />
-            <div className="grid gap-3 sm:grid-cols-4">
-              {(["leads", "interessados", "propostas", "vendas"] as const).map((k) => (
-                <label key={k} className="flex flex-col gap-1 text-sm">
-                  Nome para “{ROTULOS_PADRAO[k]}”
-                  <input name={`rotulo_${k}`} defaultValue={rotulos[k] === ROTULOS_PADRAO[k] ? "" : rotulos[k]} placeholder={ROTULOS_PADRAO[k]} className={campo} />
-                </label>
-              ))}
-            </div>
-            <label className="flex flex-col gap-1 text-sm">
-              A partir de qual etapa conta como <b>{rotulos.propostas.toLowerCase()}</b>?
-              <select name="escolha" defaultValue={propostaAtual} className={campo}>
-                <option value="">Não usar esta etapa</option>
-                {funis.map((f) => (
-                  <optgroup key={f.id} label={`Funil: ${f.nome}`}>
-                    {f.etapas.map((e) => (
-                      <option key={e.id} value={`${f.id}|${f.nome}|${e.id}|${e.nome}|${e.ordem}`}>{e.ordem}. {e.nome}</option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
-            <p className="text-xs text-texto-3">
-              “{rotulos.interessados}” usa a etapa de qualificação escolhida acima. Negócios ganhos contam em todas as etapas.
-            </p>
-            <BotaoEnviar className={botaoPrimario}>Salvar funil</BotaoEnviar>
-          </form>
+          <EditorFunil clienteId={id} funis={funis} inicial={funilInicial} />
         </section>
       )}
 

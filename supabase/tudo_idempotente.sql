@@ -1,4 +1,4 @@
--- Todas as migrações (0001 a 0017) num script só, seguro para rodar mais de uma vez:
+-- Todas as migrações (0001 a 0018) num script só, seguro para rodar mais de uma vez:
 -- cria apenas o que estiver faltando e não apaga dados.
 
 create extension if not exists pgcrypto;
@@ -403,3 +403,8 @@ alter table configuracoes      enable row level security;
 alter table relatorios_gerados enable row level security;
 -- 0017: Pasta do Google Drive de cada cliente, onde os relatórios são salvos ({"id": "...", "nome": "Relatórios Midas"}).
 alter table clientes add column if not exists pasta_drive jsonb;
+-- 0018: Funil do relatório montado por cliente (passos com as etapas do CRM que contam em cada um).
+-- {"soAnuncio": true, "leads": "Leads", "vendas": "Vendas", "passos": [{"nome": "Interessados", "etapas": ["id1"]}, …]}
+alter table crm_conexoes    add column if not exists funil  jsonb;
+-- Valores de cada passo no mês: [{"nome": "Interessados", "valor": 8}, {"nome": "Propostas", "valor": 6}]
+alter table historico_mensal add column if not exists passos jsonb;

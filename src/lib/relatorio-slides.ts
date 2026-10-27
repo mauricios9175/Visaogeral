@@ -5,7 +5,7 @@ import { db } from "./db";
 import { tokenDeAcesso, tokenSoDrive } from "./google";
 import { detalheCliente, detalheCrm, DIMENSOES_UTM, type DimensaoUtm, type LinhaTabela } from "./consultas";
 import { detalheGoogle } from "./consultas-google";
-import { lerHistorico, mesDe, nomeMes, rotulosDoCliente, somarMeses, type MesConsolidado } from "./historico";
+import { funilDoCliente, lerHistorico, mesDe, nomeMes, somarMeses, type MesConsolidado } from "./historico";
 import { dinheiro, inteiro, pct } from "./formato";
 import { hojeISO, somarDias, type Periodo } from "./datas";
 
@@ -112,7 +112,7 @@ const propriedades = (pagina: string, c: Caixa) => ({
 });
 
 const ROXO = "6900AF";
-const PALETA = ["6900AF", "B57BEE", "1FB5CC", "F2A900"];
+const PALETA = ["6900AF", "B57BEE", "1FB5CC", "F2A900", "E0559B", "4C7BE0", "2FA36B"];
 const FONTE = "Saira";
 
 let seq = 0;
@@ -242,6 +242,84 @@ function grafico(pagina: string, c: Caixa, titulo: string, categorias: string[],
   return reqs;
 }
 
+/** Caixa arredondada com duas linhas (rótulo e valor), no estilo do slide de pipeline. */
+function caixaFunil(pagina: string, c: Caixa, rotulo: string, valor: string, cheia: boolean): Req[] {
+  const id = novoId("f");
+  const corTexto = cheia ? "FFFFFF" : "4B0A86";
+  const textoTodo = `${rotulo}\n${valor}`;
+  return [
+    { createShape: { objectId: id, shapeType: "ROUND_RECTANGLE", elementProperties: propriedades(pagina, c) } },
+    {
+      updateShapeProperties: {
+        objectId: id,
+        shapeProperties: {
+          shapeBackgroundFill: { solidFill: { color: cor(cheia ? ROXO : "FFFFFF") } },
+          outline: cheia ? { propertyState: "NOT_RENDERED" } : { outlineFill: { solidFill: { color: cor(ROXO) } }, weight: { magnitude: 2.25, unit: "PT" }, propertyState: "RENDERED" },
+          contentAlignment: "MIDDLE",
+        },
+        fields: cheia ? "shapeBackgroundFill.solidFill.color,outline.propertyState,contentAlignment"
+          : "shapeBackgroundFill.solidFill.color,outline.outlineFill.solidFill.color,outline.weight,outline.propertyState,contentAlignment",
+      },
+    },
+    { insertText: { objectId: id, text: textoTodo } },
+    {
+      updateTextStyle: {
+        objectId: id, textRange: { type: "ALL" },
+        style: { fontFamily: "Montserrat", fontSize: { magnitude: 11, unit: "PT" }, bold: false, foregroundColor: { opaqueColor: cor(corTexto) } },
+        fields: "fontFamily,fontSize,bold,foregroundColor",
+      },
+    },
+    {
+      updateTextStyle: {
+        objectId: id, textRange: { type: "FIXED_RANGE", startIndex: rotulo.length + 1, endIndex: textoTodo.length },
+        style: { fontFamily: "Arial", fontSize: { magnitude: 15, unit: "PT" }, bold: true },
+        fields: "fontFamily,fontSize,bold",
+      },
+    },
+    { updateParagraphStyle: { objectId: id, textRange: { type: "ALL" }, style: { alignment: "CENTER", spaceAbove: { magnitude: 0, unit: "PT" }, spaceBelow: { magnitude: 0, unit: "PT" } }, fields: "alignment,spaceAbove,spaceBelow" } },
+  ];
+}
+
+/**
+ * Slide de pipeline com quantos passos o funil do cliente tiver: caixas roxas que afunilam,
+ * a linha ligando o primeiro ao último passo, o valor investido e o valor das vendas.
+ */
+function desenharFunil(pagina: string, larg: number, alt: number, passos: { nome: string; valor: string; taxa: string | null }[], investido: string, valorVendas: string): Req[] {
+  const reqs: Req[] = [];
+  const n = passos.length;
+  const topo = alt * 0.19, fundo = alt * 0.9;
+  const h = Math.min(alt * 0.12, ((fundo - topo) / n) * 0.72);
+  const passo = n > 1 ? (fundo - topo - h) / (n - 1) : 0;
+  const centro = larg * 0.42;
+  const largura = (i: number) => larg * (n > 1 ? 0.31 - (0.15 * i) / (n - 1) : 0.31);
+  const caixas = passos.map((_, i) => ({ x: centro - largura(i) / 2, y: topo + i * passo, w: largura(i), h }));
+  // linha à esquerda ligando o primeiro e o último passo
+  const xLinha = caixas[0].x - larg * 0.04;
+  const espessura = 28_575;
+  if (n > 1) {
+    const yIni = caixas[0].y + h / 2, yFim = caixas[n - 1].y + h / 2;
+    reqs.push(...retangulo(pagina, { x: xLinha, y: yIni, w: espessura, h: yFim - yIni + espessura }, ROXO));
+    reqs.push(...retangulo(pagina, { x: xLinha, y: yIni, w: caixas[0].x - xLinha, h: espessura }, ROXO));
+    reqs.push(...retangulo(pagina, { x: xLinha, y: yFim, w: caixas[n - 1].x - xLinha, h: espessura }, ROXO));
+  }
+  passos.forEach((p, i) => {
+    reqs.push(...caixaFunil(pagina, caixas[i], p.nome, p.valor, true));
+    // taxa de passagem do passo anterior para este, ao lado da caixa
+    if (i > 0 && p.taxa) {
+      // no último passo sai uma linha para o valor das vendas: a taxa fica acima dela
+      const y = i === n - 1 ? caixas[i].y : caixas[i].y + h * 0.25;
+      reqs.push(...texto(pagina, { x: caixas[i].x + caixas[i].w + larg * 0.01, y, w: larg * 0.09, h: h * 0.45 }, `${p.taxa}`, { tamanho: 10, cor: "8A5BB5", alinhar: "START" }));
+    }
+  });
+  const larguraValor = larg * 0.25;
+  reqs.push(...caixaFunil(pagina, { x: larg * 0.66, y: caixas[0].y, w: larguraValor, h }, "Valor investido", investido, false));
+  const ultima = caixas[n - 1];
+  const xVendas = Math.max(larg * 0.62, ultima.x + ultima.w + larg * 0.1);
+  reqs.push(...retangulo(pagina, { x: ultima.x + ultima.w, y: ultima.y + h / 2, w: xVendas - (ultima.x + ultima.w), h: 12_700 }, ROXO));
+  reqs.push(...caixaFunil(pagina, { x: xVendas, y: ultima.y, w: Math.min(larguraValor, larg * 0.96 - xVendas), h }, "Valor das vendas", valorVendas, false));
+  return reqs;
+}
+
 // ---------- Dados do relatório ----------
 
 export type PedidoRelatorio = { clienteId: string; desde: string; ate: string; dimensao: DimensaoUtm };
@@ -301,35 +379,37 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
   const cliente = clienteRaw as unknown as { id: string; nome: string; pasta_drive?: { id: string; nome: string } | null } | null;
   if (!cliente) throw new Error("Cliente não encontrado.");
   const atual = periodo(p.desde, p.ate);
-  const [meta, crm, google, { meses }, rotulos, acoes] = await Promise.all([
+  const [meta, crm, google, { meses }, funil, acoes] = await Promise.all([
     detalheCliente(p.clienteId, atual, atual),
     detalheCrm(p.clienteId, atual, atual).catch(() => null),
     detalheGoogle(p.clienteId, atual, atual).catch(() => null),
     lerHistorico(p.clienteId),
-    rotulosDoCliente(p.clienteId),
+    funilDoCliente(p.clienteId),
     acoesDoPeriodo(p.clienteId, p.desde, p.ate),
   ]);
   if (!meta) throw new Error("Cliente não encontrado.");
   const rotuloPer = rotuloPeriodo(p.desde, p.ate);
+  const taxa = (a: number | null | undefined, b: number | null | undefined) => (a != null && b ? (a / b) * 100 : null);
 
   // funil: meses fechados vêm do histórico (respeita as correções manuais); período quebrado é calculado na hora
   const doHistorico = meses.filter((m) => m.mes >= mesDe(p.desde) && m.mes <= p.ate);
   const cobreMeses = p.desde.endsWith("-01") && doHistorico.length > 0 && doHistorico.length === mesesNoIntervalo(p.desde, p.ate);
   const soma = cobreMeses ? somarMeses(doHistorico) : null;
   const gasto = soma?.investimento ?? meta.atual.gasto + (google?.atual.gasto ?? 0);
-  const leads = soma ? soma.leads : crm ? crm.atual.leads : Math.round(meta.atual.resultados + (google?.atual.conversoes ?? 0));
-  const interessados = soma ? soma.interessados : crm?.atual.qualificados ?? null;
-  const propostas = soma ? soma.propostas : crm?.atual.propostas ?? null;
-  const vendas = soma ? soma.vendas : crm?.atual.vendas ?? null;
-  const faturamento = soma ? soma.faturamento : crm?.atual.faturamento ?? null;
+  const aoVivo = crm?.atual.funil;
+  const leads = soma ? soma.leads : aoVivo ? aoVivo.leads : Math.round(meta.atual.resultados + (google?.atual.conversoes ?? 0));
+  const valorPasso = (nome: string) => (soma ? soma.passos.find((x) => x.nome === nome)?.valor ?? null : aoVivo?.passos.find((x) => x.nome === nome)?.valor ?? null);
+  const nomesPassos = funil.passos.map((x) => x.nome);
+  const vendas = soma ? soma.vendas : aoVivo?.vendas ?? null;
+  const faturamento = soma ? soma.faturamento : aoVivo?.faturamento ?? null;
+  const temCrm = !!crm || !!soma?.crm;
 
   // gráficos: até 6 meses do histórico terminando no mês do relatório
   const serie: MesConsolidado[] = meses.filter((m) => m.mes <= p.ate).slice(0, 6).reverse();
   const usaHistorico = serie.length > 0;
   const categorias = usaHistorico ? serie.map((m) => { const n = nomeMes(m.mes, false); return n[0].toUpperCase() + n.slice(1); }) : [rotuloPer];
   const valoresDe = (f: (m: MesConsolidado) => number | null, atualV: number | null) => (usaHistorico ? serie.map(f) : [atualV]);
-  const temPropostas = usaHistorico ? serie.some((m) => m.propostas != null) : propostas != null;
-  const taxa = (a: number | null, b: number | null) => (a != null && b ? (a / b) * 100 : null);
+  const passoDoMes = (m: MesConsolidado, nome: string) => m.passos.find((x) => x.nome === nome);
 
   // copia o modelo e lê onde estão os marcadores
   const { acesso } = await acessoDoToken(config.tokenId);
@@ -349,11 +429,16 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
     size?: { width?: { magnitude?: number }; height?: { magnitude?: number } };
     transform?: { scaleX?: number; scaleY?: number; translateX?: number; translateY?: number };
     shape?: { text?: { textElements?: { textRun?: { content?: string } }[] } };
+    image?: unknown;
   };
   const apresentacao = await api<{ slides: { objectId: string; pageElements?: Elemento[] }[]; pageSize: { height: { magnitude: number } } }>(
     acesso, `${SLIDES}/${copia.id}`,
   );
   const alturaSlide = apresentacao.pageSize.height.magnitude;
+  const larguraSlide = (apresentacao as { pageSize: { width?: { magnitude?: number } } }).pageSize.width?.magnitude ?? 9_144_000;
+  const textoDe = (el: Elemento) => (el.shape?.text?.textElements ?? []).map((x) => x.textRun?.content ?? "").join("");
+  // slide do pipeline: o que tem {{leads}}; as caixas fixas do modelo são trocadas pelo funil do cliente
+  const slideFunil = apresentacao.slides.find((s) => (s.pageElements ?? []).some((el) => textoDe(el).includes("{{leads}}")));
   const marcadores = new Map<string, { slide: string; elemento: string; caixa: Caixa }>();
   for (const s of apresentacao.slides) {
     for (const el of s.pageElements ?? []) {
@@ -375,16 +460,26 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
   const trocar = (de: string, para: string) => reqs.push({ replaceAllText: { containsText: { text: de, matchCase: true }, replaceText: para } });
   trocar("{{cliente}}", cliente.nome);
   trocar("{{periodo}}", rotuloPer);
-  trocar("{{rotulo:leads}}", rotulos.leads);
-  trocar("{{rotulo:interessados}}", rotulos.interessados);
-  trocar("{{rotulo:propostas}}", rotulos.propostas);
-  trocar("{{rotulo:vendas}}", rotulos.vendas);
-  trocar("{{leads}}", inteiro(leads));
-  trocar("{{interessados}}", inteiro(interessados));
-  trocar("{{propostas}}", inteiro(propostas));
-  trocar("{{vendas}}", inteiro(vendas));
-  trocar("{{valor_vendas}}", dinheiro(faturamento));
   trocar("{{investimento}}", dinheiro(gasto));
+  if (slideFunil) {
+    // apaga as caixas do modelo (fica o título e as imagens, como o foguete) e desenha o funil do cliente
+    for (const el of slideFunil.pageElements ?? []) {
+      if (el.image || /PIPELINE|\{\{periodo\}\}/i.test(textoDe(el))) continue;
+      reqs.push({ deleteObject: { objectId: el.objectId } });
+    }
+    const etapas = temCrm
+      ? [
+          { nome: funil.leads, valor: leads, taxa: null as string | null },
+          ...nomesPassos.map((nome, i) => {
+            const v = valorPasso(nome);
+            return { nome, valor: v, taxa: pctOuNada(taxa(v, i === 0 ? leads : valorPasso(nomesPassos[i - 1]))) };
+          }),
+          { nome: funil.vendas, valor: vendas, taxa: pctOuNada(taxa(vendas, nomesPassos.length ? valorPasso(nomesPassos.at(-1)!) : leads)) },
+        ]
+      : [{ nome: funil.leads, valor: leads, taxa: null }];
+    reqs.push(...desenharFunil(slideFunil.objectId, larguraSlide, alturaSlide,
+      etapas.map((e) => ({ nome: e.nome, valor: inteiro(e.valor), taxa: e.taxa })), dinheiro(gasto), dinheiro(faturamento)));
+  }
   trocar("{{acoes}}", [...acoes, "Próximos passos: "].join("\n"));
 
   /** Troca o marcador pelo conteúdo; sem conteúdo, apaga o slide inteiro. */
@@ -418,24 +513,33 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
         campanhasG.slice(0, 12).map((x) => [curto(x.nome), inteiro(x.conversoes), dinheiro(x.cpa), dinheiro(x.gasto), inteiro(x.impressoes), inteiro(x.cliques), dinheiro(x.cpc), pct(x.ctr)]),
         { total: ["Total", inteiro(google!.atual.conversoes), dinheiro(google!.atual.cpa), dinheiro(google!.atual.gasto), inteiro(google!.atual.impressoes), inteiro(google!.atual.cliques), dinheiro(google!.atual.cpc), pct(google!.atual.ctr)], larguraPrimeira: 0.32 })
     : null);
-  const utm = crm?.porUtm[p.dimensao] ?? [];
+  const utm = (crm?.porUtm[p.dimensao] ?? []).filter((x) => x.funil.leads || x.funil.vendas);
   const dim = DIMENSOES_UTM.find((d) => d.chave === p.dimensao)!;
   preencher("tabela:qualificacao", utm.length
-    ? (pg, c) => tabela(pg, c, [dim.rotulo, rotulos.leads, rotulos.interessados, rotulos.vendas, `${rotulos.leads} → ${rotulos.vendas.toLowerCase()}`, "Valor das vendas"],
-        utm.slice(0, 12).map((x) => [curto(x.nome, 70), inteiro(x.leads), inteiro(x.qualificados), inteiro(x.vendas), pct(taxa(x.vendas, x.leads)), dinheiro(x.faturamento)]),
-        { larguraPrimeira: 0.42 })
+    ? (pg, c) => tabela(pg, c, [dim.rotulo, funil.leads, ...nomesPassos, funil.vendas, `${funil.leads} → ${funil.vendas.toLowerCase()}`, "Valor das vendas"],
+        utm.slice(0, 12).map((x) => [
+          curto(x.nome, 60), inteiro(x.funil.leads), ...nomesPassos.map((n) => inteiro(x.funil.passos.find((y) => y.nome === n)?.valor)),
+          inteiro(x.funil.vendas), pct(taxa(x.funil.vendas, x.funil.leads)), dinheiro(x.funil.faturamento),
+        ]),
+        { larguraPrimeira: nomesPassos.length > 2 ? 0.3 : 0.38 })
     : null);
   preencher("grafico:oportunidades", (pg, c) => grafico(pg, c, "Evolução das oportunidades", categorias, [
-    { nome: `Nº ${rotulos.leads}`, valores: valoresDe((m) => m.leads, leads) },
-    { nome: `Nº ${rotulos.interessados}`, valores: valoresDe((m) => m.interessados, interessados) },
-    ...(temPropostas ? [{ nome: `Nº ${rotulos.propostas}`, valores: valoresDe((m) => m.propostas, propostas) }] : []),
-    { nome: `Nº ${rotulos.vendas}`, valores: valoresDe((m) => m.vendas, vendas) },
+    { nome: `Nº ${funil.leads}`, valores: valoresDe((m) => m.leads, leads) },
+    ...nomesPassos.map((n) => ({ nome: `Nº ${n}`, valores: valoresDe((m) => passoDoMes(m, n)?.valor ?? null, valorPasso(n)) })),
+    ...(temCrm ? [{ nome: `Nº ${funil.vendas}`, valores: valoresDe((m) => m.vendas, vendas) }] : []),
   ], (v) => inteiro(v)));
-  preencher("grafico:taxas", (pg, c) => grafico(pg, c, "Evolução das taxas", categorias, [
-    { nome: "Qualificação", valores: valoresDe((m) => (m.taxaQualificacao == null ? null : m.taxaQualificacao * 100), taxa(interessados, leads)) },
-    ...(temPropostas ? [{ nome: rotulos.propostas, valores: valoresDe((m) => (m.taxaPropostas == null ? null : m.taxaPropostas * 100), taxa(propostas, interessados)) }] : []),
-    { nome: rotulos.vendas, valores: valoresDe((m) => (m.conversaoVendas == null ? null : m.conversaoVendas * 100), taxa(vendas, propostas ?? interessados)) },
-  ], (v) => pct(v)));
+  preencher("grafico:taxas", temCrm ? (pg, c) => grafico(pg, c, "Evolução das taxas", categorias, [
+    ...nomesPassos.map((n, i) => ({
+      nome: n,
+      valores: valoresDe((m) => { const t = passoDoMes(m, n)?.taxa; return t == null ? null : t * 100; },
+        taxa(valorPasso(n), i === 0 ? leads : valorPasso(nomesPassos[i - 1]))),
+    })),
+    {
+      nome: funil.vendas,
+      valores: valoresDe((m) => (m.conversaoVendas == null ? null : m.conversaoVendas * 100),
+        taxa(vendas, nomesPassos.length ? valorPasso(nomesPassos.at(-1)!) : leads)),
+    },
+  ], (v) => pct(v)) : null);
   preencher("grafico:investimento", (pg, c) => grafico(pg, c, "Investimento em anúncios", categorias, [
     { nome: "Investimento", valores: valoresDe((m) => m.investimento, gasto) },
   ], moedaCurta));
@@ -448,6 +552,8 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
   await banco.from("relatorios_gerados").insert({ cliente_id: p.clienteId, periodo: rotuloPer, link }).then(() => null, () => null);
   return { link, periodo: rotuloPer };
 }
+
+const pctOuNada = (v: number | null) => (v == null ? null : pct(v));
 
 function mesesNoIntervalo(desde: string, ate: string) {
   let n = 0;
