@@ -476,6 +476,12 @@ function erroDeEscrita(e: unknown): Error {
       "Sem permissão para alterar anúncios. Adicione “ads_management” na configuração do Login do app no Meta e clique em “Conectar / reconectar perfil” em Configurações.",
     );
   }
+  if (e instanceof Error && /modo de desenvolvimento|development mode|in development/i.test(e.message)) {
+    return new Error(
+      "O app do Meta usado pelo painel está em modo de desenvolvimento, e o Meta só aceita anúncios criados por app em modo público. " +
+      "Em developers.facebook.com → seu app, mude o “Modo do app” para “Ao vivo” (publicar). Depois é só montar de novo.",
+    );
+  }
   return e instanceof Error ? e : new Error(String(e));
 }
 

@@ -27,7 +27,7 @@ export default function Privacidade() {
         O uso e a transferência de informações recebidas das APIs do Google seguem a Política de Dados do Usuário dos
         Serviços de API do Google, incluindo os requisitos de uso limitado.
       </p>
-      <h2 className="font-semibold">Remoção</h2>
+      <h2 id="remocao" className="font-semibold">Remoção e exclusão de dados</h2>
       <p>
         O acesso pode ser revogado a qualquer momento em myaccount.google.com/permissions. Para pedir a exclusão dos
         dados, escreva para mauricios9175@gmail.com.
