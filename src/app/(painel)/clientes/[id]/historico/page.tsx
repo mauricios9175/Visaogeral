@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
 import { chavePasso, conferirMes, funilDoCliente, lerHistorico, mesDe, nomeMes, nomesDosPassos, somarMeses, type MesConsolidado } from "@/lib/historico";
 import type { FunilCliente } from "@/lib/funil";
-import { configRelatorio, linkApresentacao } from "@/lib/relatorio-slides";
+import { configRelatorio, linkApresentacao, ORDEM_QUALIFICACAO, TITULO_QUALIFICACAO } from "@/lib/relatorio-slides";
 import { DIMENSOES_UTM } from "@/lib/consultas";
 import { hojeISO } from "@/lib/datas";
 import { Aviso } from "@/components/ui";
@@ -120,12 +120,17 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
               </label>
               <label className="flex flex-col gap-1 text-sm">De<input type="date" name="de" className={campo} /></label>
               <label className="flex flex-col gap-1 text-sm">Até<input type="date" name="ate" className={campo} /></label>
-              <label className="flex flex-col gap-1 text-sm">
-                Qualificação por
-                <select name="dimensao" defaultValue="utm_medium" className={campo}>
-                  {DIMENSOES_UTM.map((d) => <option key={d.chave} value={d.chave}>{d.rotulo}</option>)}
-                </select>
-              </label>
+              <fieldset className="flex flex-col gap-1 text-sm">
+                <legend className="mb-1">Qualificação por <span className="text-xs text-texto-3">(um slide para cada; nenhuma = sem qualificação)</span></legend>
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  {ORDEM_QUALIFICACAO.map((d) => (
+                    <label key={d} className="flex items-center gap-1.5" title={DIMENSOES_UTM.find((x) => x.chave === d)?.dica}>
+                      <input type="checkbox" name="qualificacao" value={d} defaultChecked={d === "utm_medium" || d === "utm_content"} />
+                      {TITULO_QUALIFICACAO[d]} <span className="text-xs text-texto-3">({d})</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
               <label className="flex items-center gap-2 self-center text-sm">
                 <input type="checkbox" name="agrupar" defaultChecked />
                 Juntar públicos e anúncios de mesmo nome

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "./db";
 import { tokenDeAcesso, tokenSoDrive } from "./google";
-import { detalheCliente, detalheCrm, DIMENSOES_UTM, type DimensaoUtm, type LinhaTabela } from "./consultas";
+import { detalheCliente, detalheCrm, type DimensaoUtm, type LinhaTabela } from "./consultas";
 import { detalheGoogle } from "./consultas-google";
 import { funilDoCliente, lerHistorico, mesDe, nomeMes, somarMeses, type MesConsolidado } from "./historico";
 import { dinheiro, inteiro, pct } from "./formato";
@@ -336,7 +336,8 @@ function desenharFunil(
 // ---------- Dados do relatório ----------
 
 export type PedidoRelatorio = {
-  clienteId: string; desde: string; ate: string; dimensao: DimensaoUtm;
+  clienteId: string; desde: string; ate: string;
+  qualificacoes: DimensaoUtm[]; // um slide de qualificação por UTM escolhida; vazio = sem qualificação
   agrupar: boolean; // junta públicos e anúncios de mesmo nome (duplicados para teste)
 };
 
@@ -397,6 +398,14 @@ function linhasMeta(ls: LinhaTabela[], ordenar: "gasto" | "resultados", juntar: 
 }
 // sem "Alcance": o alcance somado de vários conjuntos não é o alcance real, e assim os valores cabem sem quebrar
 const CABECALHO_META = ["", "Resultados", "Custo por resultado", "Valor gasto", "Impressões", "Cliques no link", "CPC", "CTR", "CPM"];
+
+/** Ordem dos slides de qualificação: público e anúncio primeiro. */
+export const ORDEM_QUALIFICACAO: DimensaoUtm[] = ["utm_medium", "utm_content", "utm_campaign", "utm_term", "utm_source"];
+
+/** Como cada UTM aparece no título e na tabela do slide de qualificação. */
+export const TITULO_QUALIFICACAO: Record<DimensaoUtm, string> = {
+  utm_medium: "Público", utm_content: "Anúncio", utm_campaign: "Campanha", utm_term: "Termo", utm_source: "Origem",
+};
 
 /** Soma o funil de vários grupos de UTM (passos pelo nome). */
 function somarFunil(a: NumerosFunil, b: NumerosFunil): NumerosFunil {
@@ -573,28 +582,46 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
         campanhasG.slice(0, LINHAS_POR_TABELA + 1).map((x) => [curto(x.nome), inteiro(x.conversoes), dinheiro(x.cpa), dinheiro(x.gasto), inteiro(x.impressoes), inteiro(x.cliques), dinheiro(x.cpc), pct(x.ctr)]),
         { total: ["Total", inteiro(google!.atual.conversoes), dinheiro(google!.atual.cpa), dinheiro(google!.atual.gasto), inteiro(google!.atual.impressoes), inteiro(google!.atual.cliques), dinheiro(google!.atual.cpc), pct(google!.atual.ctr)], larguraPrimeira: 0.32 })
     : null);
-  // UTMs com o nome do conjunto/anúncio: junta os do mesmo público, como nas tabelas do Meta
-  const utmBruto = (crm?.porUtm[p.dimensao] ?? []).filter((x) => x.funil.leads || x.funil.vendas);
-  const juntarUtm = p.agrupar && p.dimensao !== "utm_source";
-  const utmGrupos = (juntarUtm
-    ? agruparPorNome(utmBruto.map((x) => ({ nome: x.nome, funil: x.funil })), (x) => x.nome,
-        (n) => (n === "(sem UTM)" ? n : p.dimensao === "utm_content" ? nomeDoAnuncio(n) : nomeDoPublico(n)),
-        (a, b) => ({ nome: a.nome, funil: somarFunil(a.funil, b.funil) }))
-        .map((g) => ({ nome: g.juntos > 1 ? `${curto(g.nome, 40)} (${g.juntos}x)` : g.nome, funil: g.item.funil }))
-    : utmBruto.map((x) => ({ nome: x.nome, funil: x.funil })))
-    .sort((a, b) => Number(a.nome === "(sem UTM)") - Number(b.nome === "(sem UTM)") || b.funil.faturamento - a.funil.faturamento || b.funil.vendas - a.funil.vendas || b.funil.leads - a.funil.leads);
-  const utmMostrados = utmGrupos.length > LINHAS_POR_TABELA + 1 ? utmGrupos.slice(0, LINHAS_POR_TABELA) : utmGrupos;
-  const utmResto = utmGrupos.slice(utmMostrados.length);
-  const utm = [...utmMostrados, ...(utmResto.length ? [{ nome: `Outros (${utmResto.length})`, funil: utmResto.map((x) => x.funil).reduce(somarFunil) }] : [])];
-  const dim = DIMENSOES_UTM.find((d) => d.chave === p.dimensao)!;
-  preencher("tabela:qualificacao", utm.length
-    ? (pg, c) => tabela(pg, c, [dim.rotulo, funil.leads, ...nomesPassos, funil.vendas, `${funil.leads} → ${funil.vendas.toLowerCase()}`, "Valor das vendas"],
-        utm.map((x) => [
-          curto(x.nome, nomesPassos.length > 2 ? 46 : 56), inteiro(x.funil.leads), ...nomesPassos.map((n) => inteiro(x.funil.passos.find((y) => y.nome === n)?.valor)),
-          inteiro(x.funil.vendas), pct(taxa(x.funil.vendas, x.funil.leads)), dinheiro(x.funil.faturamento),
-        ]),
-        { larguraPrimeira: nomesPassos.length > 2 ? 0.3 : 0.38 })
-    : null);
+  // Qualificação: um slide para cada UTM escolhida (público, anúncio, campanha…); nenhuma = sem o slide
+  const linhasQualificacao = (d: DimensaoUtm) => {
+    const bruto = (crm?.porUtm[d] ?? []).filter((x) => x.funil.leads || x.funil.vendas);
+    // UTMs com o nome do conjunto/anúncio: junta os do mesmo público, como nas tabelas do Meta
+    const grupos = (p.agrupar && d !== "utm_source"
+      ? agruparPorNome(bruto.map((x) => ({ nome: x.nome, funil: x.funil })), (x) => x.nome,
+          (n) => (n === "(sem UTM)" ? n : d === "utm_content" ? nomeDoAnuncio(n) : nomeDoPublico(n)),
+          (a, b) => ({ nome: a.nome, funil: somarFunil(a.funil, b.funil) }))
+          .map((g) => ({ nome: g.juntos > 1 ? `${curto(g.nome, 40)} (${g.juntos}x)` : g.nome, funil: g.item.funil }))
+      : bruto.map((x) => ({ nome: x.nome, funil: x.funil })))
+      .sort((a, b) => Number(a.nome === "(sem UTM)") - Number(b.nome === "(sem UTM)") || b.funil.faturamento - a.funil.faturamento || b.funil.vendas - a.funil.vendas || b.funil.leads - a.funil.leads);
+    const mostrados = grupos.length > LINHAS_POR_TABELA + 1 ? grupos.slice(0, LINHAS_POR_TABELA) : grupos;
+    const resto = grupos.slice(mostrados.length);
+    return [...mostrados, ...(resto.length ? [{ nome: `Outros (${resto.length})`, funil: resto.map((x) => x.funil).reduce(somarFunil) }] : [])];
+  };
+  const qualificacoes = p.qualificacoes.map((d) => ({ d, linhas: linhasQualificacao(d) })).filter((q) => q.linhas.length);
+  const mq = marcadores.get("tabela:qualificacao");
+  if (mq) {
+    if (!qualificacoes.length) reqs.push({ deleteObject: { objectId: mq.slide } });
+    else {
+      // o primeiro usa o slide do modelo; os outros são cópias dele (na ordem escolhida, logo depois)
+      const slides = qualificacoes.map((_, i) => (i === 0 ? { slide: mq.slide, elemento: mq.elemento } : { slide: novoId("q"), elemento: novoId("qm") }));
+      for (let i = qualificacoes.length - 1; i > 0; i--) {
+        reqs.push({ duplicateObject: { objectId: mq.slide, objectIds: { [mq.slide]: slides[i].slide, [mq.elemento]: slides[i].elemento } } });
+      }
+      qualificacoes.forEach((q, i) => {
+        const { slide, elemento } = slides[i];
+        const titulo = TITULO_QUALIFICACAO[q.d];
+        reqs.push({ replaceAllText: { containsText: { text: "Qualificação por público", matchCase: false }, replaceText: `Qualificação por ${titulo.toLowerCase()}`, pageObjectIds: [slide] } });
+        reqs.push({ deleteObject: { objectId: elemento } });
+        reqs.push(...tabela(slide, { ...mq.caixa, h: alturaSlide - mq.caixa.y - 150_000 },
+          [titulo, funil.leads, ...nomesPassos, funil.vendas, `${funil.leads} → ${funil.vendas.toLowerCase()}`, "Valor das vendas"],
+          q.linhas.map((x) => [
+            curto(x.nome, nomesPassos.length > 2 ? 46 : 56), inteiro(x.funil.leads), ...nomesPassos.map((n) => inteiro(x.funil.passos.find((y) => y.nome === n)?.valor)),
+            inteiro(x.funil.vendas), pct(taxa(x.funil.vendas, x.funil.leads)), dinheiro(x.funil.faturamento),
+          ]),
+          { larguraPrimeira: nomesPassos.length > 2 ? 0.3 : 0.38 }));
+      });
+    }
+  }
   preencher("grafico:oportunidades", (pg, c) => grafico(pg, c, "Evolução das oportunidades", categorias, [
     { nome: `Nº ${funil.leads}`, valores: valoresDe((m) => m.leads, leads) },
     ...nomesPassos.map((n) => ({ nome: `Nº ${n}`, valores: valoresDe((m) => passoDoMes(m, n)?.valor ?? null, valorPasso(n)) })),

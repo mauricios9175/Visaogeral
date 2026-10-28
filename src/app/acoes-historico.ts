@@ -5,8 +5,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { CAMPOS_AJUSTAVEIS, gravarHistorico, mesDe } from "@/lib/historico";
 import { hojeISO, somarDias } from "@/lib/datas";
-import { DIMENSOES_UTM } from "@/lib/consultas";
-import { criarModeloNoDrive, gerarRelatorio, linkApresentacao } from "@/lib/relatorio-slides";
+import { criarModeloNoDrive, gerarRelatorio, linkApresentacao, ORDEM_QUALIFICACAO } from "@/lib/relatorio-slides";
 
 function voltar(clienteId: string, msg: string): never {
   revalidatePath(`/clientes/${clienteId}/historico`);
@@ -72,10 +71,11 @@ export async function gerarRelatorioSlides(form: FormData) {
   }
   const iso = /^\d{4}-\d{2}-\d{2}$/;
   if (!iso.test(desde) || !iso.test(ate) || desde > ate) voltar(clienteId, "Escolha um período válido.");
-  const dimensao = (DIMENSOES_UTM.find((d) => d.chave === form.get("dimensao")) ?? DIMENSOES_UTM[1]).chave;
+  const escolhidas = form.getAll("qualificacao").map(String);
+  const qualificacoes = ORDEM_QUALIFICACAO.filter((d) => escolhidas.includes(d));
   let msg: string;
   try {
-    const r = await gerarRelatorio({ clienteId, desde, ate, dimensao, agrupar: form.get("agrupar") === "on" });
+    const r = await gerarRelatorio({ clienteId, desde, ate, qualificacoes, agrupar: form.get("agrupar") === "on" });
     msg = `Relatório de ${r.periodo} pronto: ${r.link}`;
   } catch (e) {
     msg = `Erro ao gerar o relatório: ${e instanceof Error ? e.message : e}`;
