@@ -7,6 +7,8 @@ import { detalheCliente, detalheCrm, DIMENSOES_UTM, type DimensaoUtm, type Linha
 import { detalheGoogle } from "./consultas-google";
 import { funilDoCliente, lerHistorico, mesDe, nomeMes, somarMeses, type MesConsolidado } from "./historico";
 import { dinheiro, inteiro, pct } from "./formato";
+import { agruparPorNome, nomeDoAnuncio, nomeDoPublico } from "./agrupar";
+import type { NumerosFunil } from "./funil";
 import { hojeISO, somarDias, type Periodo } from "./datas";
 
 // Relatório do cliente no Google Slides: o painel copia o modelo da Propulsão (no Drive do usuário)
@@ -168,7 +170,7 @@ function tabela(pagina: string, c: Caixa, cabecalho: string[], linhas: string[][
         updateTextStyle: {
           objectId: id, cellLocation: cell, textRange: { type: "ALL" },
           style: {
-            fontFamily: FONTE, fontSize: { magnitude: 8, unit: "PT" }, bold: ehCabecalho || ehTotal,
+            fontFamily: FONTE, fontSize: { magnitude: ehCabecalho ? 7 : 8, unit: "PT" }, bold: ehCabecalho || ehTotal,
             foregroundColor: { opaqueColor: cor(ehCabecalho ? "FFFFFF" : "333333") },
           },
           fields: "fontFamily,fontSize,bold,foregroundColor",
@@ -322,7 +324,10 @@ function desenharFunil(pagina: string, larg: number, alt: number, passos: { nome
 
 // ---------- Dados do relatório ----------
 
-export type PedidoRelatorio = { clienteId: string; desde: string; ate: string; dimensao: DimensaoUtm };
+export type PedidoRelatorio = {
+  clienteId: string; desde: string; ate: string; dimensao: DimensaoUtm;
+  agrupar: boolean; // junta públicos e anúncios de mesmo nome (duplicados para teste)
+};
 
 /** Rótulo do período: "Outubro/2026" para mês fechado, senão "01/10 a 15/10/2026". */
 export function rotuloPeriodo(desde: string, ate: string) {
@@ -341,13 +346,57 @@ const periodo = (desde: string, ate: string): Periodo => ({ chave: "livre", rotu
 const curto = (s: string, n = 48) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const moedaCurta = (v: number) => (v >= 10_000 ? `R$ ${(v / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil` : dinheiro(v));
 
-function linhasMeta(ls: LinhaTabela[], ordenar: "gasto" | "resultados") {
-  return [...ls].sort((a, b) => b[ordenar] - a[ordenar] || b.gasto - a.gasto).slice(0, 12).map((l) => [
-    curto(l.nome, 42), inteiro(l.resultados), dinheiro(l.cpr), dinheiro(l.gasto), inteiro(l.impressoes), inteiro(l.alcance),
-    inteiro(l.cliques_link), dinheiro(l.cpc), pct(l.ctr), dinheiro(l.cpm),
-  ]);
+/** Linhas que cabem numa tabela do slide (as outras viram uma linha "Outros"), sem contar cabeçalho e total. */
+const LINHAS_POR_TABELA = 9;
+
+type ItemMeta = Pick<LinhaTabela, "nome" | "resultados" | "gasto" | "impressoes" | "cliques_link">;
+
+function somarMeta(a: ItemMeta, b: ItemMeta): ItemMeta {
+  return {
+    nome: a.nome, resultados: a.resultados + b.resultados, gasto: a.gasto + b.gasto,
+    impressoes: a.impressoes + b.impressoes, cliques_link: a.cliques_link + b.cliques_link,
+  };
 }
-const CABECALHO_META = ["", "Resultados", "Custo por resultado", "Valor gasto", "Impressões", "Alcance", "Cliques no link", "CPC", "CTR", "CPM"];
+
+function celulasMeta(nome: string, l: ItemMeta) {
+  const div = (x: number, y: number) => (y > 0 ? x / y : null);
+  return [
+    nome, inteiro(l.resultados), dinheiro(div(l.gasto, l.resultados)), dinheiro(l.gasto), inteiro(l.impressoes),
+    inteiro(l.cliques_link), dinheiro(div(l.gasto, l.cliques_link)), pct(div(l.cliques_link * 100, l.impressoes)), dinheiro(div(l.gasto * 1000, l.impressoes)),
+  ];
+}
+
+/**
+ * Conjuntos ou anúncios do Meta para a tabela: junta os de mesmo público/criativo (se pedido),
+ * ordena, mostra os primeiros e soma o resto numa linha "Outros".
+ */
+function linhasMeta(ls: LinhaTabela[], ordenar: "gasto" | "resultados", juntar: "publico" | "anuncio" | null) {
+  const grupos = juntar
+    ? agruparPorNome<ItemMeta>(ls, (l) => l.nome, juntar === "publico" ? nomeDoPublico : nomeDoAnuncio, somarMeta)
+        // corta o nome antes de acrescentar quantos foram juntados, para o "(3x)" não sumir
+        .map((g) => ({ ...g.item, nome: g.juntos > 1 ? `${curto(g.nome, 34)} (${g.juntos}x)` : g.nome }))
+    : ls;
+  const ordenados = [...grupos].sort((a, b) => b[ordenar] - a[ordenar] || b.gasto - a.gasto);
+  const mostrados = ordenados.length > LINHAS_POR_TABELA + 1 ? ordenados.slice(0, LINHAS_POR_TABELA) : ordenados;
+  const resto = ordenados.slice(mostrados.length);
+  return [
+    ...mostrados.map((l) => celulasMeta(curto(l.nome, 40), l)),
+    ...(resto.length ? [celulasMeta(`Outros (${resto.length})`, resto.reduce(somarMeta))] : []),
+  ];
+}
+// sem "Alcance": o alcance somado de vários conjuntos não é o alcance real, e assim os valores cabem sem quebrar
+const CABECALHO_META = ["", "Resultados", "Custo por resultado", "Valor gasto", "Impressões", "Cliques no link", "CPC", "CTR", "CPM"];
+
+/** Soma o funil de vários grupos de UTM (passos pelo nome). */
+function somarFunil(a: NumerosFunil, b: NumerosFunil): NumerosFunil {
+  const passos = [...a.passos.map((p) => ({ ...p }))];
+  for (const p of b.passos) {
+    const x = passos.find((y) => y.nome === p.nome);
+    if (x) x.valor += p.valor;
+    else passos.push({ ...p });
+  }
+  return { leads: a.leads + b.leads, vendas: a.vendas + b.vendas, faturamento: a.faturamento + b.faturamento, passos };
+}
 
 const VERBO: Record<string, string> = {
   pausar: "Pausamos", ativar: "Ativamos", orcamento: "Ajustamos o orçamento de", duplicar: "Duplicamos", montar: "Criamos",
@@ -496,29 +545,39 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
     reqs.push(...gerar(m.slide, caixa));
   };
 
-  const totalMeta = (ls: LinhaTabela[]) => {
-    const t = meta.atual;
-    return ls.length ? ["Total", inteiro(t.resultados), dinheiro(t.cpr), dinheiro(t.gasto), inteiro(t.impressoes), inteiro(t.alcance),
-      inteiro(t.cliques_link), dinheiro(t.cpc), pct(t.ctr), dinheiro(t.cpm)] : undefined;
-  };
+  const totalMeta = celulasMeta("Total", { ...meta.atual, nome: "Total" });
   preencher("tabela:conjuntos", meta.conjuntos.length
-    ? (pg, c) => tabela(pg, c, ["Conjunto de anúncios", ...CABECALHO_META.slice(1)], linhasMeta(meta.conjuntos, "gasto"), { total: totalMeta(meta.conjuntos) })
+    ? (pg, c) => tabela(pg, c, [p.agrupar ? "Público" : "Conjunto de anúncios", ...CABECALHO_META.slice(1)],
+        linhasMeta(meta.conjuntos, "gasto", p.agrupar ? "publico" : null), { total: totalMeta, larguraPrimeira: 0.3 })
     : null);
   preencher("tabela:anuncios", meta.anuncios.length
-    ? (pg, c) => tabela(pg, c, ["Anúncio", ...CABECALHO_META.slice(1)], linhasMeta(meta.anuncios, "resultados"), { total: totalMeta(meta.anuncios) })
+    ? (pg, c) => tabela(pg, c, ["Anúncio", ...CABECALHO_META.slice(1)],
+        linhasMeta(meta.anuncios, "resultados", p.agrupar ? "anuncio" : null), { total: totalMeta, larguraPrimeira: 0.3 })
     : null);
   const campanhasG = (google?.campanhas ?? []).filter((x) => x.gasto > 0);
   preencher("tabela:google", campanhasG.length
     ? (pg, c) => tabela(pg, c, ["Campanha", "Conversões", "Custo por conversão", "Valor gasto", "Impressões", "Cliques", "CPC", "CTR"],
-        campanhasG.slice(0, 12).map((x) => [curto(x.nome), inteiro(x.conversoes), dinheiro(x.cpa), dinheiro(x.gasto), inteiro(x.impressoes), inteiro(x.cliques), dinheiro(x.cpc), pct(x.ctr)]),
+        campanhasG.slice(0, LINHAS_POR_TABELA + 1).map((x) => [curto(x.nome), inteiro(x.conversoes), dinheiro(x.cpa), dinheiro(x.gasto), inteiro(x.impressoes), inteiro(x.cliques), dinheiro(x.cpc), pct(x.ctr)]),
         { total: ["Total", inteiro(google!.atual.conversoes), dinheiro(google!.atual.cpa), dinheiro(google!.atual.gasto), inteiro(google!.atual.impressoes), inteiro(google!.atual.cliques), dinheiro(google!.atual.cpc), pct(google!.atual.ctr)], larguraPrimeira: 0.32 })
     : null);
-  const utm = (crm?.porUtm[p.dimensao] ?? []).filter((x) => x.funil.leads || x.funil.vendas);
+  // UTMs com o nome do conjunto/anúncio: junta os do mesmo público, como nas tabelas do Meta
+  const utmBruto = (crm?.porUtm[p.dimensao] ?? []).filter((x) => x.funil.leads || x.funil.vendas);
+  const juntarUtm = p.agrupar && p.dimensao !== "utm_source";
+  const utmGrupos = (juntarUtm
+    ? agruparPorNome(utmBruto.map((x) => ({ nome: x.nome, funil: x.funil })), (x) => x.nome,
+        (n) => (n === "(sem UTM)" ? n : p.dimensao === "utm_content" ? nomeDoAnuncio(n) : nomeDoPublico(n)),
+        (a, b) => ({ nome: a.nome, funil: somarFunil(a.funil, b.funil) }))
+        .map((g) => ({ nome: g.juntos > 1 ? `${curto(g.nome, 40)} (${g.juntos}x)` : g.nome, funil: g.item.funil }))
+    : utmBruto.map((x) => ({ nome: x.nome, funil: x.funil })))
+    .sort((a, b) => Number(a.nome === "(sem UTM)") - Number(b.nome === "(sem UTM)") || b.funil.faturamento - a.funil.faturamento || b.funil.vendas - a.funil.vendas || b.funil.leads - a.funil.leads);
+  const utmMostrados = utmGrupos.length > LINHAS_POR_TABELA + 1 ? utmGrupos.slice(0, LINHAS_POR_TABELA) : utmGrupos;
+  const utmResto = utmGrupos.slice(utmMostrados.length);
+  const utm = [...utmMostrados, ...(utmResto.length ? [{ nome: `Outros (${utmResto.length})`, funil: utmResto.map((x) => x.funil).reduce(somarFunil) }] : [])];
   const dim = DIMENSOES_UTM.find((d) => d.chave === p.dimensao)!;
   preencher("tabela:qualificacao", utm.length
     ? (pg, c) => tabela(pg, c, [dim.rotulo, funil.leads, ...nomesPassos, funil.vendas, `${funil.leads} → ${funil.vendas.toLowerCase()}`, "Valor das vendas"],
-        utm.slice(0, 12).map((x) => [
-          curto(x.nome, 60), inteiro(x.funil.leads), ...nomesPassos.map((n) => inteiro(x.funil.passos.find((y) => y.nome === n)?.valor)),
+        utm.map((x) => [
+          curto(x.nome, nomesPassos.length > 2 ? 46 : 56), inteiro(x.funil.leads), ...nomesPassos.map((n) => inteiro(x.funil.passos.find((y) => y.nome === n)?.valor)),
           inteiro(x.funil.vendas), pct(taxa(x.funil.vendas, x.funil.leads)), dinheiro(x.funil.faturamento),
         ]),
         { larguraPrimeira: nomesPassos.length > 2 ? 0.3 : 0.38 })

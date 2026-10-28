@@ -75,7 +75,7 @@ export async function gerarRelatorioSlides(form: FormData) {
   const dimensao = (DIMENSOES_UTM.find((d) => d.chave === form.get("dimensao")) ?? DIMENSOES_UTM[1]).chave;
   let msg: string;
   try {
-    const r = await gerarRelatorio({ clienteId, desde, ate, dimensao });
+    const r = await gerarRelatorio({ clienteId, desde, ate, dimensao, agrupar: form.get("agrupar") === "on" });
     msg = `Relatório de ${r.periodo} pronto: ${r.link}`;
   } catch (e) {
     msg = `Erro ao gerar o relatório: ${e instanceof Error ? e.message : e}`;

@@ -125,6 +125,10 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
                   {DIMENSOES_UTM.map((d) => <option key={d.chave} value={d.chave}>{d.rotulo}</option>)}
                 </select>
               </label>
+              <label className="flex items-center gap-2 self-center text-sm">
+                <input type="checkbox" name="agrupar" defaultChecked />
+                Juntar públicos e anúncios de mesmo nome
+              </label>
               <BotaoEnviar className={botaoPrimario} aguardando="Gerando…" aviso="Leva uns 20 segundos.">Gerar relatório</BotaoEnviar>
             </form>
             <p className="text-xs text-texto-3">
