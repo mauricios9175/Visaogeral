@@ -1,4 +1,4 @@
--- Todas as migrações (0001 a 0018) num script só, seguro para rodar mais de uma vez:
+-- Todas as migrações (0001 a 0019) num script só, seguro para rodar mais de uma vez:
 -- cria apenas o que estiver faltando e não apaga dados.
 
 create extension if not exists pgcrypto;
@@ -408,3 +408,5 @@ alter table clientes add column if not exists pasta_drive jsonb;
 alter table crm_conexoes    add column if not exists funil  jsonb;
 -- Valores de cada passo no mês: [{"nome": "Interessados", "valor": 8}, {"nome": "Propostas", "valor": 6}]
 alter table historico_mensal add column if not exists passos jsonb;
+-- 0019: Valor das propostas no histórico: soma do valor de todas as oportunidades do funil do cliente no mês.
+alter table historico_mensal add column if not exists valor_propostas numeric(14,2);

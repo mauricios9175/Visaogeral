@@ -286,7 +286,10 @@ function caixaFunil(pagina: string, c: Caixa, rotulo: string, valor: string, che
  * Slide de pipeline com quantos passos o funil do cliente tiver: caixas roxas que afunilam,
  * a linha ligando o primeiro ao último passo, o valor investido e o valor das vendas.
  */
-function desenharFunil(pagina: string, larg: number, alt: number, passos: { nome: string; valor: string; taxa: string | null; soma?: string | null }[], investido: string, valorVendas: string): Req[] {
+function desenharFunil(
+  pagina: string, larg: number, alt: number, passos: { nome: string; valor: string; taxa: string | null }[],
+  investido: string, valorVendas: string, valorPropostas: string | null,
+): Req[] {
   const reqs: Req[] = [];
   const n = passos.length;
   const topo = alt * 0.19, fundo = alt * 0.9;
@@ -309,19 +312,19 @@ function desenharFunil(pagina: string, larg: number, alt: number, passos: { nome
     // taxa de passagem do passo anterior para este, ao lado da caixa
     if (i > 0 && p.taxa) {
       // quando sai uma linha da caixa (valor das vendas ou valor somado do passo), a taxa fica acima dela
-      const y = i === n - 1 || p.soma ? caixas[i].y : caixas[i].y + h * 0.25;
+      const y = i === n - 1 || (valorPropostas && i === n - 2) ? caixas[i].y : caixas[i].y + h * 0.25;
       reqs.push(...texto(pagina, { x: caixas[i].x + caixas[i].w + larg * 0.01, y, w: larg * 0.09, h: h * 0.45 }, `${p.taxa}`, { tamanho: 10, cor: "8A5BB5", alinhar: "START" }));
     }
   });
   const larguraValor = larg * 0.25;
-  // passos do meio que somam valor (ex.: valor das propostas): caixa ao lado, ligada por uma linha
-  passos.forEach((p, i) => {
-    if (!p.soma || i === 0 || i === n - 1) return;
-    const cx = caixas[i];
+  // valor das propostas: ao lado do passo antes das vendas (o último passo do meio), ligado por uma linha
+  const iPropostas = n - 2;
+  if (valorPropostas && iPropostas > 0) {
+    const cx = caixas[iPropostas];
     const x = larg * 0.66;
     reqs.push(...retangulo(pagina, { x: cx.x + cx.w, y: cx.y + h / 2, w: x - (cx.x + cx.w), h: 12_700 }, ROXO));
-    reqs.push(...caixaFunil(pagina, { x, y: cx.y, w: larguraValor, h }, `Valor em ${p.nome.toLowerCase()}`, p.soma, false));
-  });
+    reqs.push(...caixaFunil(pagina, { x, y: cx.y, w: larguraValor, h }, "Valor das propostas", valorPropostas, false));
+  }
   reqs.push(...caixaFunil(pagina, { x: larg * 0.66, y: caixas[0].y, w: larguraValor, h }, "Valor investido", investido, false));
   const ultima = caixas[n - 1];
   const xVendas = Math.max(larg * 0.62, ultima.x + ultima.w + larg * 0.1);
@@ -403,7 +406,7 @@ function somarFunil(a: NumerosFunil, b: NumerosFunil): NumerosFunil {
     if (x) x.valor += p.valor;
     else passos.push({ ...p });
   }
-  return { leads: a.leads + b.leads, vendas: a.vendas + b.vendas, faturamento: a.faturamento + b.faturamento, passos };
+  return { leads: a.leads + b.leads, vendas: a.vendas + b.vendas, faturamento: a.faturamento + b.faturamento, valorPropostas: a.valorPropostas + b.valorPropostas, passos };
 }
 
 const VERBO: Record<string, string> = {
@@ -459,6 +462,7 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
   const nomesPassos = funil.passos.map((x) => x.nome);
   const vendas = soma ? soma.vendas : aoVivo?.vendas ?? null;
   const faturamento = soma ? soma.faturamento : aoVivo?.faturamento ?? null;
+  const valorPropostas = soma ? soma.valorPropostas : aoVivo?.valorPropostas ?? null;
   const temCrm = !!crm || !!soma?.crm;
 
   // gráficos: até 6 meses do histórico terminando no mês do relatório
@@ -529,14 +533,14 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
           { nome: funil.leads, valor: leads, taxa: null as string | null },
           ...nomesPassos.map((nome, i) => {
             const v = valorPasso(nome);
-            const somado = soma ? soma.passos.find((x) => x.nome === nome)?.soma : aoVivo?.passos.find((x) => x.nome === nome)?.soma;
-            return { nome, valor: v, taxa: pctOuNada(taxa(v, i === 0 ? leads : valorPasso(nomesPassos[i - 1]))), soma: somado == null ? null : dinheiro(somado) };
+            return { nome, valor: v, taxa: pctOuNada(taxa(v, i === 0 ? leads : valorPasso(nomesPassos[i - 1]))) };
           }),
           { nome: funil.vendas, valor: vendas, taxa: pctOuNada(taxa(vendas, nomesPassos.length ? valorPasso(nomesPassos.at(-1)!) : leads)) },
         ]
       : [{ nome: funil.leads, valor: leads, taxa: null }];
     reqs.push(...desenharFunil(slideFunil.objectId, larguraSlide, alturaSlide,
-      etapas.map((e) => ({ nome: e.nome, valor: inteiro(e.valor), taxa: e.taxa, soma: "soma" in e ? e.soma : null })), dinheiro(gasto), dinheiro(faturamento)));
+      etapas.map((e) => ({ nome: e.nome, valor: inteiro(e.valor), taxa: e.taxa })), dinheiro(gasto), dinheiro(faturamento),
+      valorPropostas ? dinheiro(valorPropostas) : null));
   }
   trocar("{{acoes}}", [...acoes, "Próximos passos: "].join("\n"));
 

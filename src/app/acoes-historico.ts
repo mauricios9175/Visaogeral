@@ -38,7 +38,7 @@ export async function salvarAjusteMes(form: FormData) {
   const clienteId = String(form.get("cliente_id"));
   const mes = String(form.get("mes"));
   // campos fixos + os passos do funil ("passo:<nome>") que estavam na tela
-  const nomes = [...new Set([...CAMPOS_AJUSTAVEIS, ...String(form.get("campos") ?? "").split("|").filter((c) => c.startsWith("passo:") || c.startsWith("valor:"))])];
+  const nomes = [...new Set([...CAMPOS_AJUSTAVEIS, ...String(form.get("campos") ?? "").split("|").filter((c) => c.startsWith("passo:"))])];
   const ajustes = Object.fromEntries(nomes.map((c) => [c, numero(form.get(c))] as const).filter(([, v]) => v != null));
   const observacao = String(form.get("observacao") ?? "").trim() || null;
   const { error } = await db().from("historico_mensal")

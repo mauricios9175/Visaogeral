@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
-import { chavePasso, chaveValorPasso, conferirMes, passosComValor, funilDoCliente, lerHistorico, mesDe, nomeMes, nomesDosPassos, somarMeses, type MesConsolidado } from "@/lib/historico";
+import { chavePasso, conferirMes, funilDoCliente, lerHistorico, mesDe, nomeMes, nomesDosPassos, somarMeses, type MesConsolidado } from "@/lib/historico";
 import type { FunilCliente } from "@/lib/funil";
 import { configRelatorio, linkApresentacao } from "@/lib/relatorio-slides";
 import { DIMENSOES_UTM } from "@/lib/consultas";
@@ -46,8 +46,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   const total = somarMeses(visiveis);
   // colunas dos passos: as do funil atual do cliente e as que aparecem nos meses já gravados
   const passos = [...new Set([...funil.passos.map((p) => p.nome), ...nomesDosPassos(visiveis)])];
-  // passos que somam o valor das oportunidades (ex.: valor das propostas)
-  const comValor = [...new Set([...funil.passos.filter((p) => p.somarValor).map((p) => p.nome), ...passosComValor(visiveis)])];
+  const temValorPropostas = visiveis.some((m) => m.valorPropostas != null);
   const temGoogle = meses.some((m) => m.gastoGoogle > 0);
   // relatório: até o dia 10 o padrão é o mês passado; depois, o mês atual
   const opcoesMes = Array.from({ length: 13 }, (_, i) => mesDe(hoje, -i));
@@ -175,7 +174,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
                   {passos.map((p) => <th key={p} className="px-3 py-2 text-right font-normal">{p}</th>)}
                   <th className="px-3 py-2 text-right font-normal">{funil.vendas}</th>
                   <th className="px-3 py-2 text-right font-normal">Valor das vendas</th>
-                  {comValor.map((p) => <th key={p} className="px-3 py-2 text-right font-normal">Valor em {p.toLowerCase()}</th>)}
+                  {temValorPropostas && <th className="px-3 py-2 text-right font-normal">Valor das propostas</th>}
                   {passos.map((p) => <th key={p} className="px-3 py-2 text-right font-normal">Tx. {p.toLowerCase()}</th>)}
                   <th className="px-3 py-2 text-right font-normal">Conv. em {funil.vendas.toLowerCase()}</th>
                   <th className="px-3 py-2 text-right font-normal">ROAS</th>
@@ -184,11 +183,11 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
                 </tr>
               </thead>
               <tbody>
-                {visiveis.map((m) => <LinhaMes key={m.mes} m={m} passos={passos} comValor={comValor} temGoogle={temGoogle} />)}
+                {visiveis.map((m) => <LinhaMes key={m.mes} m={m} passos={passos} temValorPropostas={temValorPropostas} temGoogle={temGoogle} />)}
               </tbody>
               {total && visiveis.length > 1 && (
                 <tfoot className="border-t border-borda font-medium">
-                  <LinhaMes m={{ ...total, mes: anoSel ? `Total ${anoSel}` : visiveis.length < 12 ? `Total (${visiveis.length} meses)` : "Total 12 meses" }} passos={passos} comValor={comValor} temGoogle={temGoogle} total />
+                  <LinhaMes m={{ ...total, mes: anoSel ? `Total ${anoSel}` : visiveis.length < 12 ? `Total (${visiveis.length} meses)` : "Total 12 meses" }} passos={passos} temValorPropostas={temValorPropostas} temGoogle={temGoogle} total />
                 </tfoot>
               )}
             </table>
@@ -203,7 +202,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
               sobrescritos pela atualização automática.
             </p>
             <div className="space-y-2">
-              {visiveis.map((m) => <EditarMes key={m.mes} clienteId={id} m={m} passos={passos} comValor={comValor} funil={funil} />)}
+              {visiveis.map((m) => <EditarMes key={m.mes} clienteId={id} m={m} passos={passos} funil={funil} />)}
             </div>
           </section>
         </>
@@ -212,7 +211,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   );
 }
 
-function LinhaMes({ m, passos, comValor, temGoogle, total }: { m: MesConsolidado; passos: string[]; comValor: string[]; temGoogle: boolean; total?: boolean }) {
+function LinhaMes({ m, passos, temValorPropostas, temGoogle, total }: { m: MesConsolidado; passos: string[]; temValorPropostas: boolean; temGoogle: boolean; total?: boolean }) {
   const celula = "px-3 py-2 text-right tabular-nums";
   const passo = (nome: string) => m.passos.find((p) => p.nome === nome);
   const marca = (c: string) => (m.ajustado.includes(c) ? <span className="text-destaque" title="corrigido à mão">*</span> : null);
@@ -232,7 +231,7 @@ function LinhaMes({ m, passos, comValor, temGoogle, total }: { m: MesConsolidado
       {passos.map((p) => <td key={p} className={celula}>{inteiro(passo(p)?.valor)}{marca(chavePasso(p))}</td>)}
       <td className={celula}>{inteiro(m.vendas)}{marca("vendas")}</td>
       <td className={celula}>{dinheiro(m.faturamento)}{marca("faturamento")}</td>
-      {comValor.map((p) => <td key={p} className={celula}>{dinheiro(passo(p)?.soma ?? null)}{marca(chaveValorPasso(p))}</td>)}
+      {temValorPropostas && <td className={celula}>{dinheiro(m.valorPropostas)}{marca("valor_propostas")}</td>}
       {passos.map((p) => <td key={p} className={celula}>{taxa(passo(p)?.taxa ?? null)}</td>)}
       <td className={celula}>{taxa(m.conversaoVendas)}</td>
       <td className={celula}>{m.roas == null ? "—" : `${m.roas.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}x`}</td>
@@ -242,14 +241,14 @@ function LinhaMes({ m, passos, comValor, temGoogle, total }: { m: MesConsolidado
   );
 }
 
-function EditarMes({ clienteId, m, passos, comValor, funil }: { clienteId: string; m: MesConsolidado; passos: string[]; comValor: string[]; funil: FunilCliente }) {
+function EditarMes({ clienteId, m, passos, funil }: { clienteId: string; m: MesConsolidado; passos: string[]; funil: FunilCliente }) {
   const campos: { nome: string; rotulo: string; valor: number | null }[] = [
     { nome: "investimento", rotulo: "Investimento (R$)", valor: m.investimento },
     { nome: "leads", rotulo: funil.leads, valor: m.leads },
     ...passos.map((p) => ({ nome: chavePasso(p), rotulo: p, valor: m.passos.find((x) => x.nome === p)?.valor ?? null })),
     { nome: "vendas", rotulo: funil.vendas, valor: m.vendas },
     { nome: "faturamento", rotulo: "Valor das vendas (R$)", valor: m.faturamento },
-    ...comValor.map((p) => ({ nome: chaveValorPasso(p), rotulo: `Valor em ${p.toLowerCase()} (R$)`, valor: m.passos.find((x) => x.nome === p)?.soma ?? null })),
+    { nome: "valor_propostas", rotulo: "Valor das propostas (R$)", valor: m.valorPropostas },
   ];
   return (
     <details className="rounded-xl border border-borda bg-superficie">

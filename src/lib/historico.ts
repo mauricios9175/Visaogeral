@@ -23,7 +23,8 @@ export type LinhaHistorico = {
   leads: number | null;
   interessados: number | null; // versão antiga (antes do funil por cliente)
   propostas: number | null;
-  passos?: { nome: string; valor: number; soma?: number }[] | null; // passos do meio do funil do cliente (SQL 0018)
+  passos?: { nome: string; valor: number }[] | null; // passos do meio do funil do cliente (SQL 0018)
+  valor_propostas?: number | null; // soma do valor das oportunidades do funil no mês (SQL 0019)
   vendas: number | null;
   faturamento: number | null;
   ajustes: Record<string, number> | null; // "investimento", "leads", "vendas", "faturamento" e "passo:<nome>"
@@ -32,13 +33,11 @@ export type LinhaHistorico = {
 };
 
 /** Campos fixos que dá para corrigir à mão (os passos do funil usam a chave "passo:<nome>"). */
-export const CAMPOS_AJUSTAVEIS = ["investimento", "leads", "vendas", "faturamento"] as const;
+export const CAMPOS_AJUSTAVEIS = ["investimento", "leads", "vendas", "faturamento", "valor_propostas"] as const;
 export const chavePasso = (nome: string) => `passo:${nome}`;
-/** Ajuste manual do valor somado de um passo (ex.: valor das propostas). */
-export const chaveValorPasso = (nome: string) => `valor:${nome}`;
 
 /** Passo do funil no mês, com a taxa em relação ao passo anterior. */
-export type PassoMes = { nome: string; valor: number | null; taxa: number | null; soma: number | null };
+export type PassoMes = { nome: string; valor: number | null; taxa: number | null };
 
 /** Mês com os números finais (ajustes manuais aplicados) e as taxas da planilha. */
 export type MesConsolidado = {
@@ -50,6 +49,7 @@ export type MesConsolidado = {
   passos: PassoMes[];
   vendas: number | null;
   faturamento: number | null;
+  valorPropostas: number | null;   // soma do valor das oportunidades do funil (o valor das propostas enviadas)
   conversaoVendas: number | null;  // vendas / último passo (ou / leads, sem passos)
   roas: number | null;
   cpl: number | null;
@@ -74,8 +74,7 @@ export function consolidar(l: LinhaHistorico): MesConsolidado {
   let anterior = leads;
   const passos: PassoMes[] = brutos.map((p) => {
     const valor = aj[chavePasso(p.nome)] ?? p.valor;
-    const soma = aj[chaveValorPasso(p.nome)] ?? ("soma" in p && p.soma != null ? Number(p.soma) : null);
-    const passo = { nome: p.nome, valor, taxa: div(valor, anterior), soma };
+    const passo = { nome: p.nome, valor, taxa: div(valor, anterior) };
     anterior = valor;
     return passo;
   });
@@ -87,6 +86,7 @@ export function consolidar(l: LinhaHistorico): MesConsolidado {
     gastoMeta: Number(l.gasto_meta),
     gastoGoogle: Number(l.gasto_google),
     leads, passos, vendas, faturamento,
+    valorPropostas: aj.valor_propostas ?? (l.valor_propostas == null ? null : Number(l.valor_propostas)),
     conversaoVendas: div(vendas, anterior),
     roas: faturamento ? div(faturamento, investimento) : null,
     cpl: div(investimento, leads),
@@ -99,12 +99,7 @@ export function consolidar(l: LinhaHistorico): MesConsolidado {
 
 /** O mês tem algum número (investimento, leads, passos, vendas ou faturamento)? */
 export const temDados = (m: MesConsolidado) =>
-  m.investimento > 0 || !!m.leads || !!m.vendas || !!m.faturamento || m.passos.some((p) => !!p.valor);
-
-/** Passos que têm valor somado (ex.: valor das propostas) em algum dos meses. */
-export function passosComValor(meses: MesConsolidado[]) {
-  return nomesDosPassos(meses).filter((n) => meses.some((m) => m.passos.some((p) => p.nome === n && p.soma != null)));
-}
+  m.investimento > 0 || !!m.leads || !!m.vendas || !!m.faturamento || !!m.valorPropostas || m.passos.some((p) => !!p.valor);
 
 /** Nomes dos passos que aparecem nos meses, na ordem do mês mais recente. */
 export function nomesDosPassos(meses: MesConsolidado[]) {
@@ -123,10 +118,8 @@ export function somarMeses(meses: MesConsolidado[]): MesConsolidado | null {
     gasto_meta: meses.reduce((t, m) => t + m.gastoMeta, 0), gasto_google: meses.reduce((t, m) => t + m.gastoGoogle, 0),
     resultados_meta: 0, resultados_google: 0, interessados: null, propostas: null,
     leads: soma((m) => m.leads), vendas: soma((m) => m.vendas), faturamento: soma((m) => m.faturamento),
-    passos: nomesDosPassos(meses).map((nome) => {
-      const s = soma((m) => m.passos.find((p) => p.nome === nome)?.soma ?? null);
-      return { nome, valor: soma((m) => m.passos.find((p) => p.nome === nome)?.valor ?? null) ?? 0, ...(s != null && { soma: s }) };
-    }),
+    passos: nomesDosPassos(meses).map((nome) => ({ nome, valor: soma((m) => m.passos.find((p) => p.nome === nome)?.valor ?? null) ?? 0 })),
+    valor_propostas: soma((m) => m.valorPropostas),
     // investimento pode ter ajuste manual em algum mês: soma o valor final de cada mês
     ajustes: { investimento: meses.reduce((t, m) => t + m.investimento, 0) },
   };
@@ -243,6 +236,7 @@ export async function gravarHistorico(clienteId: string, desdeMes: string, ateMe
     return null;
   }) : null;
 
+  const comValorPropostas = await colunaValorPropostas();
   const agora = new Date().toISOString();
   const linhas = meses.map((mes) => {
     const crm = cx && negocios ? numerosCrm(negocios, cx, { desde: mes, ate: ultimoDia(mes) }) : null;
@@ -255,6 +249,7 @@ export async function gravarHistorico(clienteId: string, desdeMes: string, ateMe
         crm: true, leads: crm!.funil.leads, passos: crm!.funil.passos,
         interessados: crm!.funil.passos[0]?.valor ?? null, propostas: crm!.funil.passos[1]?.valor ?? null,
         vendas: crm!.funil.vendas, faturamento: crm!.funil.faturamento,
+        ...(comValorPropostas && { valor_propostas: round(crm!.funil.valorPropostas) }),
       }),
       ...(!cx && { crm: false }),
     };
@@ -265,6 +260,16 @@ export async function gravarHistorico(clienteId: string, desdeMes: string, ateMe
 }
 
 const round = (v: number) => Math.round(v * 100) / 100;
+
+/** A coluna do SQL 0019 existe? Sem ela, grava o histórico sem o valor das propostas. */
+let temValorPropostas: boolean | null = null;
+async function colunaValorPropostas() {
+  if (temValorPropostas === null) {
+    const { error } = await db().from("historico_mensal").select("valor_propostas").limit(1);
+    temValorPropostas = !error;
+  }
+  return temValorPropostas;
+}
 
 /**
  * "Buscar o passado", 1ª parte: traz do CRM os negócios dos últimos `n` meses, em partes de até 40 páginas

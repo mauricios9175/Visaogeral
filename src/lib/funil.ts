@@ -4,7 +4,6 @@
 export type PassoFunil = {
   nome: string;
   etapas: string[];
-  somarValor?: boolean; // soma o valor das oportunidades do passo (ex.: valor das propostas enviadas)
 };
 
 export type FunilCliente = {
@@ -20,9 +19,10 @@ export const FUNIL_PADRAO: FunilCliente = { soAnuncio: true, leads: "Leads", ven
 /** Números do funil num período: leads, cada passo do meio e vendas. */
 export type NumerosFunil = {
   leads: number;
-  passos: { nome: string; valor: number; soma?: number }[]; // soma: valor das oportunidades, se o passo soma valor
+  passos: { nome: string; valor: number }[];
   vendas: number;
   faturamento: number;
+  valorPropostas: number; // soma do campo Valor de todas as oportunidades do funil criadas no período
 };
 
 export function normalizarFunil(f: Partial<FunilCliente> | null | undefined): FunilCliente {
@@ -30,7 +30,7 @@ export function normalizarFunil(f: Partial<FunilCliente> | null | undefined): Fu
     soAnuncio: f?.soAnuncio ?? true,
     leads: f?.leads?.trim() || "Leads",
     vendas: f?.vendas?.trim() || "Vendas",
-    passos: (f?.passos ?? []).filter((p) => p.nome?.trim()).map((p) => ({ nome: p.nome.trim(), etapas: p.etapas ?? [], ...(p.somarValor && { somarValor: true }) })),
+    passos: (f?.passos ?? []).filter((p) => p.nome?.trim()).map((p) => ({ nome: p.nome.trim(), etapas: p.etapas ?? [] })),
     funis: f?.funis ?? [],
   };
 }
