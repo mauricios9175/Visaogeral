@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
-import { chavePasso, funilDoCliente, lerHistorico, mesDe, nomeMes, nomesDosPassos, somarMeses, type MesConsolidado } from "@/lib/historico";
+import { chavePasso, conferirMes, funilDoCliente, lerHistorico, mesDe, nomeMes, nomesDosPassos, somarMeses, type MesConsolidado } from "@/lib/historico";
 import type { FunilCliente } from "@/lib/funil";
 import { configRelatorio, linkApresentacao } from "@/lib/relatorio-slides";
 import { DIMENSOES_UTM } from "@/lib/consultas";
@@ -23,7 +23,7 @@ const taxa = (v: number | null) => pct(v == null ? null : v * 100);
 
 export default async function Historico({ params, searchParams }: PageProps<"/clientes/[id]/historico">) {
   const { id } = await params;
-  const { msg, ano } = (await searchParams) as { msg?: string; ano?: string };
+  const { msg, ano, conferir } = (await searchParams) as { msg?: string; ano?: string; conferir?: string };
   const [{ data: cliente }, { meses, erro }, funil, { data: ultima }, config, { data: logins }, { data: gerados }] = await Promise.all([
     // pasta_drive vem do SQL 0017
     db().from("clientes").select("id, nome, pasta_drive").eq("id", id).maybeSingle()
@@ -187,6 +187,8 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
             </table>
           </div>
 
+          <Conferir clienteId={id} meses={visiveis.map((m) => m.mes)} mes={conferir && /^\d{4}-\d{2}-01$/.test(conferir) ? conferir : null} />
+
           <section className="space-y-2">
             <h2 className="font-medium">Corrigir um mês</h2>
             <p className="text-sm text-texto-2">
@@ -268,5 +270,78 @@ function EditarMes({ clienteId, m, passos, funil }: { clienteId: string; m: MesC
         <BotaoEnviar className={botaoPrimario}>Salvar {nomeMes(m.mes)}</BotaoEnviar>
       </form>
     </details>
+  );
+}
+
+/** Lista o que entrou na conta de um mês (vendas uma a uma, leads por funil e por fonte) para comparar com o CRM. */
+async function Conferir({ clienteId, meses, mes }: { clienteId: string; meses: string[]; mes: string | null }) {
+  const c = mes ? await conferirMes(clienteId, mes).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })) : null;
+  const dia = (iso: string | null) => (iso ? new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" }).format(new Date(iso)) : "—");
+  const tabela = "w-full text-sm";
+  const th = "px-3 py-1.5 text-left text-xs font-normal text-texto-3";
+  const td = "px-3 py-1.5";
+  return (
+    <section id="conferir" className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+      <h2 className="font-medium">Conferir um mês com o CRM</h2>
+      <form action={`/clientes/${clienteId}/historico#conferir`} className="flex flex-wrap items-end gap-2">
+        <select name="conferir" defaultValue={mes ?? meses.at(-1)} className={`${campo} capitalize`}>
+          {[...meses].reverse().map((m) => <option key={m} value={m}>{nomeMes(m)}</option>)}
+        </select>
+        <button className={botao}>Conferir</button>
+        <span className="text-xs text-texto-3">Mostra cada venda contada e o que ficou de fora, com o motivo.</span>
+      </form>
+      {c && "erro" in c && <Aviso>Erro: {c.erro}</Aviso>}
+      {c === null && mes && <p className="text-sm text-texto-3">Este cliente não tem CRM conectado.</p>}
+      {c && !("erro" in c) && (
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-sm font-medium">
+              Vendas fechadas em {nomeMes(mes!)}: {c.vendas.filter((v) => !v.motivo).length} contada(s)
+              ({dinheiro(c.vendas.filter((v) => !v.motivo).reduce((t, v) => t + v.valor, 0))})
+              {c.vendas.some((v) => v.motivo) && <>, {c.vendas.filter((v) => v.motivo).length} de fora</>}
+            </h3>
+            <p className="text-xs text-texto-3">Venda = oportunidade com status <b>ganho</b>, no mês em que foi marcada como ganha.</p>
+            <div className="mt-1 overflow-x-auto">
+              <table className={tabela}>
+                <thead><tr><th className={th}>Nome</th><th className={th}>Funil · etapa</th><th className={th}>Fonte</th><th className={`${th} text-right`}>Valor</th><th className={th}>Entrou</th><th className={th}>Ganha em</th><th className={th}>Na conta?</th></tr></thead>
+                <tbody>
+                  {c.vendas.map((v, i) => (
+                    <tr key={i} className={`border-t border-borda/60 ${v.motivo ? "text-texto-3" : ""}`}>
+                      <td className={td}>{v.nome}</td>
+                      <td className={td}>{v.funil ?? "—"}{v.etapa ? ` · ${v.etapa}` : ""}</td>
+                      <td className={td}>{v.fonte || "—"}</td>
+                      <td className={`${td} text-right tabular-nums`}>{dinheiro(v.valor)}</td>
+                      <td className={td}>{dia(v.criado)}</td>
+                      <td className={td}>{dia(v.fechado)}</td>
+                      <td className={td}>{v.motivo ? `não: ${v.motivo}` : "sim"}</td>
+                    </tr>
+                  ))}
+                  {!c.vendas.length && <tr><td className={td} colSpan={7}>Nenhuma oportunidade marcada como ganha neste mês.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {([["Leads que entraram, por funil", c.leadsPorFunil], ["Leads que entraram, por fonte", c.leadsPorFonte]] as const).map(([titulo, linhas]) => (
+              <div key={titulo}>
+                <h3 className="text-sm font-medium">{titulo} <span className="font-normal text-texto-3">({c.totalLeads} no total)</span></h3>
+                <table className={tabela}>
+                  <thead><tr><th className={th}></th><th className={`${th} text-right`}>Criados</th><th className={`${th} text-right`}>Na conta</th></tr></thead>
+                  <tbody>
+                    {linhas.slice(0, 15).map((l) => (
+                      <tr key={l.nome} className={`border-t border-borda/60 ${l.contados ? "" : "text-texto-3"}`}>
+                        <td className={td}>{l.nome}</td>
+                        <td className={`${td} text-right tabular-nums`}>{inteiro(l.total)}</td>
+                        <td className={`${td} text-right tabular-nums`}>{inteiro(l.contados)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

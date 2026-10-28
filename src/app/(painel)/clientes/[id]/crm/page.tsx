@@ -57,7 +57,7 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
   const funilInicial: FunilCliente = extra?.funil
     ? normalizarFunil(extra.funil)
     : {
-        soAnuncio: true, leads: extra?.rotulos?.leads || "Leads", vendas: extra?.rotulos?.vendas || "Vendas",
+        soAnuncio: true, leads: extra?.rotulos?.leads || "Leads", vendas: extra?.rotulos?.vendas || "Vendas", funis: [],
         passos: [
           ...(extra?.etapa_qualificado ? [{ nome: extra.rotulos?.interessados || "Interessados", etapas: [extra.etapa_qualificado] }] : []),
           ...(extra?.etapa_proposta ? [{ nome: extra.rotulos?.propostas || "Propostas", etapas: [extra.etapa_proposta] }] : []),

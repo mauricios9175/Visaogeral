@@ -45,6 +45,28 @@ export function EditorFunil({ clienteId, funis, inicial }: { clienteId: string; 
         </label>
       </fieldset>
 
+      {funis.length > 1 && (
+        <fieldset className="space-y-1 text-sm">
+          <legend className="mb-1 font-medium">Quais funis do CRM entram?</legend>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {funis.map((fu) => (
+              <label key={fu.id} className="flex items-center gap-1.5">
+                <input type="checkbox" checked={!f.funis.length || f.funis.includes(fu.id)}
+                  onChange={() => {
+                    const atuais = f.funis.length ? f.funis : funis.map((x) => x.id);
+                    const novos = atuais.includes(fu.id) ? atuais.filter((x) => x !== fu.id) : [...atuais, fu.id];
+                    if (!novos.length) return; // pelo menos um funil
+                    // todos marcados = sem filtro (funis novos do CRM entram sozinhos)
+                    setF({ ...f, funis: novos.length === funis.length ? [] : novos });
+                  }} />
+                {fu.nome}
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-texto-3">Leads e vendas de funis desmarcados (pós-venda, reativação, listas…) ficam fora do relatório.</p>
+        </fieldset>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           Nome do primeiro passo (todos os leads)

@@ -8,9 +8,10 @@ export type FunilCliente = {
   leads: string;      // nome do primeiro passo (todos os leads)
   vendas: string;     // nome do último passo (negócios ganhos)
   passos: PassoFunil[];
+  funis: string[];    // funis (pipelines) do CRM que entram no relatório; vazio = todos
 };
 
-export const FUNIL_PADRAO: FunilCliente = { soAnuncio: true, leads: "Leads", vendas: "Vendas", passos: [] };
+export const FUNIL_PADRAO: FunilCliente = { soAnuncio: true, leads: "Leads", vendas: "Vendas", passos: [], funis: [] };
 
 /** Números do funil num período: leads, cada passo do meio e vendas. */
 export type NumerosFunil = {
@@ -26,5 +27,6 @@ export function normalizarFunil(f: Partial<FunilCliente> | null | undefined): Fu
     leads: f?.leads?.trim() || "Leads",
     vendas: f?.vendas?.trim() || "Vendas",
     passos: (f?.passos ?? []).filter((p) => p.nome?.trim()).map((p) => ({ nome: p.nome.trim(), etapas: p.etapas ?? [] })),
+    funis: f?.funis ?? [],
   };
 }

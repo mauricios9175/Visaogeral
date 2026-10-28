@@ -5,7 +5,7 @@ import { metricasMensais, tokenDeAcesso } from "./google";
 import { tokenDaConta } from "./sync";
 import { sincronizarCrmLote, type ConexaoCrm } from "./crm/sync";
 import type { CursorHL } from "./crm/highlevel";
-import { funilDaConexao, negociosDe, numerosCrm, TIPOS_CONVERSAO, type ConexaoResumo } from "./consultas";
+import { ehFonteAnuncio, entraNoFunil, funilDaConexao, negociosDe, noPeriodo, numerosCrm, TIPOS_CONVERSAO, type ConexaoResumo, type NegocioCrm } from "./consultas";
 import { FUNIL_PADRAO, type FunilCliente } from "./funil";
 import { hojeISO } from "./datas";
 
@@ -288,4 +288,46 @@ export async function atualizarHistoricoRecente() {
   }
   await Promise.all([trabalhador(), trabalhador(), trabalhador()]);
   return { clientes: clientes?.length ?? 0, meses, erros };
+}
+
+/**
+ * "Conferir um mês": o que o painel contou e o que deixou de fora, para comparar com o CRM item a item.
+ * Leads e passos pelo mês de entrada; vendas pelo mês de fechamento (status ganho).
+ */
+export async function conferirMes(clienteId: string, mes: string) {
+  const { data } = await db().from("crm_conexoes").select("*").eq("cliente_id", clienteId).maybeSingle();
+  if (!data) return null;
+  const cx = data as ConexaoResumo;
+  const { teste, ...funil } = funilDaConexao(cx);
+  const periodo = { desde: mes, ate: ultimoDia(mes) };
+  const negocios = await negociosDe([clienteId], mes);
+  const motivo = (n: NegocioCrm) =>
+    funil.soAnuncio && !ehFonteAnuncio(n.origem, cx.fontes_anuncio) ? `fonte “${n.origem || "sem fonte"}” não está marcada`
+      : funil.funis.length && !funil.funis.includes(n.pipeline_id ?? "") ? `funil “${n.pipeline_nome ?? "?"}” não entra` : "";
+  const ganhos = negocios.filter((n) => n.ganho === true && noPeriodo(n.fechado_em, periodo))
+    .sort((a, b) => (a.fechado_em ?? "").localeCompare(b.fechado_em ?? ""));
+  const criados = negocios.filter((n) => noPeriodo(n.criado_em, periodo));
+  const contar = (ns: NegocioCrm[], chave: (n: NegocioCrm) => string) => {
+    const m = new Map<string, { total: number; contados: number }>();
+    for (const n of ns) {
+      const k = chave(n);
+      const x = m.get(k) ?? { total: 0, contados: 0 };
+      x.total++;
+      if (entraNoFunil(n, funil, cx)) x.contados++;
+      m.set(k, x);
+    }
+    return [...m.entries()].map(([nome, x]) => ({ nome, ...x })).sort((a, b) => b.total - a.total);
+  };
+  const venda = (n: NegocioCrm) => ({
+    nome: n.nome ?? "(sem nome)", funil: n.pipeline_nome, etapa: n.etapa_nome, fonte: n.origem, valor: Number(n.valor),
+    criado: n.criado_em, fechado: n.fechado_em, motivo: motivo(n),
+  });
+  void teste;
+  return {
+    funil,
+    vendas: ganhos.map(venda),
+    leadsPorFunil: contar(criados, (n) => n.pipeline_nome ?? "(funil desconhecido)"),
+    leadsPorFonte: contar(criados, (n) => n.origem?.trim() || "(sem fonte)"),
+    totalLeads: criados.length,
+  };
 }

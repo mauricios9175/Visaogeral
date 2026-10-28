@@ -482,7 +482,7 @@ export function funilDaConexao(cx: ConexaoResumo): FunilCliente & { teste: ((n: 
     });
   }
   return {
-    soAnuncio: true, leads: r.leads || "Leads", vendas: r.vendas || "Vendas",
+    soAnuncio: true, leads: r.leads || "Leads", vendas: r.vendas || "Vendas", funis: [],
     passos: passos.map((p) => ({ nome: p.nome, etapas: [] })), teste: passos.map((p) => p.teste),
   };
 }
@@ -525,13 +525,19 @@ const diaSP = (iso: string) => {
   }
   return d;
 };
-const noPeriodo = (iso: string | null, p: { desde: string; ate: string }) => { if (!iso) return false; const d = diaSP(iso); return d >= p.desde && d <= p.ate; };
+export const noPeriodo = (iso: string | null, p: { desde: string; ate: string }) => { if (!iso) return false; const d = diaSP(iso); return d >= p.desde && d <= p.ate; };
 
 /**
  * Leads e qualificados: negócios CRIADOS no período, em qualquer funil.
  * Qualificado: chegou no funil de qualificação (na etapa escolhida ou depois) ou foi ganho.
  * Vendas e faturamento: negócios GANHOS com data de fechamento no período.
  */
+/** O negócio entra no funil do relatório? (fonte de anúncio, se configurado, e um dos funis escolhidos) */
+export function entraNoFunil(n: NegocioCrm, f: FunilCliente, cx: ConexaoResumo) {
+  if (f.soAnuncio && !ehFonteAnuncio(n.origem, cx.fontes_anuncio)) return false;
+  return !f.funis.length || (!!n.pipeline_id && f.funis.includes(n.pipeline_id));
+}
+
 export function numerosCrm(negocios: NegocioCrm[], cx: ConexaoResumo, p: { desde: string; ate: string }): NumerosCrm {
   const anuncio = (n: NegocioCrm) => ehFonteAnuncio(n.origem, cx.fontes_anuncio);
   const qualificado = (n: NegocioCrm) =>
@@ -546,7 +552,7 @@ export function numerosCrm(negocios: NegocioCrm[], cx: ConexaoResumo, p: { desde
   const ganhos = negocios.filter((n) => n.ganho === true && noPeriodo(n.fechado_em, p));
   const semEtapa = cx.etapa_qualificado_ordem == null;
   const f = funilDaConexao(cx);
-  const doFunil = (ns: NegocioCrm[]) => (f.soAnuncio ? ns.filter(anuncio) : ns);
+  const doFunil = (ns: NegocioCrm[]) => ns.filter((n) => entraNoFunil(n, f, cx));
   const criadosF = doFunil(criados), ganhosF = doFunil(ganhos);
   return {
     funil: {
