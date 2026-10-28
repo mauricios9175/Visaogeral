@@ -90,6 +90,10 @@ export function EditorFunil({ clienteId, funis, inicial }: { clienteId: string; 
               <button type="button" className={botaoPequeno} disabled={i === f.passos.length - 1} onClick={() => mover(i, 1)} aria-label="Descer">↓</button>
               <button type="button" className={`${botaoPequeno} hover:text-critico`} onClick={() => setF({ ...f, passos: f.passos.filter((_, j) => j !== i) })}>remover</button>
             </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={!!p.somarValor} onChange={(e) => mudarPasso(i, { somarValor: e.target.checked })} />
+              Somar o valor das oportunidades deste passo <span className="text-xs text-texto-3">(ex.: valor das propostas enviadas)</span>
+            </label>
             <p className="text-xs text-texto-3">
               Etapas do CRM que contam como “{p.nome || `passo ${i + 1}`}” ({p.etapas.length} marcada{p.etapas.length === 1 ? "" : "s"}):
             </p>

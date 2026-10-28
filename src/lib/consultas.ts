@@ -557,7 +557,10 @@ export function numerosCrm(negocios: NegocioCrm[], cx: ConexaoResumo, p: { desde
   return {
     funil: {
       leads: criadosF.length,
-      passos: f.passos.map((p, i) => ({ nome: p.nome, valor: criadosF.filter(f.teste[i]).length })),
+      passos: f.passos.map((p, i) => {
+        const doPasso = criadosF.filter(f.teste[i]);
+        return { nome: p.nome, valor: doPasso.length, ...(p.somarValor && { soma: doPasso.reduce((s, n) => s + Number(n.valor), 0) }) };
+      }),
       vendas: ganhosF.length,
       faturamento: ganhosF.reduce((s, n) => s + Number(n.valor), 0),
     },

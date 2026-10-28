@@ -23,7 +23,7 @@ export type LinhaHistorico = {
   leads: number | null;
   interessados: number | null; // versão antiga (antes do funil por cliente)
   propostas: number | null;
-  passos?: { nome: string; valor: number }[] | null; // passos do meio do funil do cliente (SQL 0018)
+  passos?: { nome: string; valor: number; soma?: number }[] | null; // passos do meio do funil do cliente (SQL 0018)
   vendas: number | null;
   faturamento: number | null;
   ajustes: Record<string, number> | null; // "investimento", "leads", "vendas", "faturamento" e "passo:<nome>"
@@ -34,9 +34,11 @@ export type LinhaHistorico = {
 /** Campos fixos que dá para corrigir à mão (os passos do funil usam a chave "passo:<nome>"). */
 export const CAMPOS_AJUSTAVEIS = ["investimento", "leads", "vendas", "faturamento"] as const;
 export const chavePasso = (nome: string) => `passo:${nome}`;
+/** Ajuste manual do valor somado de um passo (ex.: valor das propostas). */
+export const chaveValorPasso = (nome: string) => `valor:${nome}`;
 
 /** Passo do funil no mês, com a taxa em relação ao passo anterior. */
-export type PassoMes = { nome: string; valor: number | null; taxa: number | null };
+export type PassoMes = { nome: string; valor: number | null; taxa: number | null; soma: number | null };
 
 /** Mês com os números finais (ajustes manuais aplicados) e as taxas da planilha. */
 export type MesConsolidado = {
@@ -72,7 +74,8 @@ export function consolidar(l: LinhaHistorico): MesConsolidado {
   let anterior = leads;
   const passos: PassoMes[] = brutos.map((p) => {
     const valor = aj[chavePasso(p.nome)] ?? p.valor;
-    const passo = { nome: p.nome, valor, taxa: div(valor, anterior) };
+    const soma = aj[chaveValorPasso(p.nome)] ?? ("soma" in p && p.soma != null ? Number(p.soma) : null);
+    const passo = { nome: p.nome, valor, taxa: div(valor, anterior), soma };
     anterior = valor;
     return passo;
   });
@@ -98,6 +101,11 @@ export function consolidar(l: LinhaHistorico): MesConsolidado {
 export const temDados = (m: MesConsolidado) =>
   m.investimento > 0 || !!m.leads || !!m.vendas || !!m.faturamento || m.passos.some((p) => !!p.valor);
 
+/** Passos que têm valor somado (ex.: valor das propostas) em algum dos meses. */
+export function passosComValor(meses: MesConsolidado[]) {
+  return nomesDosPassos(meses).filter((n) => meses.some((m) => m.passos.some((p) => p.nome === n && p.soma != null)));
+}
+
 /** Nomes dos passos que aparecem nos meses, na ordem do mês mais recente. */
 export function nomesDosPassos(meses: MesConsolidado[]) {
   const nomes: string[] = [];
@@ -115,7 +123,10 @@ export function somarMeses(meses: MesConsolidado[]): MesConsolidado | null {
     gasto_meta: meses.reduce((t, m) => t + m.gastoMeta, 0), gasto_google: meses.reduce((t, m) => t + m.gastoGoogle, 0),
     resultados_meta: 0, resultados_google: 0, interessados: null, propostas: null,
     leads: soma((m) => m.leads), vendas: soma((m) => m.vendas), faturamento: soma((m) => m.faturamento),
-    passos: nomesDosPassos(meses).map((nome) => ({ nome, valor: soma((m) => m.passos.find((p) => p.nome === nome)?.valor ?? null) ?? 0 })),
+    passos: nomesDosPassos(meses).map((nome) => {
+      const s = soma((m) => m.passos.find((p) => p.nome === nome)?.soma ?? null);
+      return { nome, valor: soma((m) => m.passos.find((p) => p.nome === nome)?.valor ?? null) ?? 0, ...(s != null && { soma: s }) };
+    }),
     // investimento pode ter ajuste manual em algum mês: soma o valor final de cada mês
     ajustes: { investimento: meses.reduce((t, m) => t + m.investimento, 0) },
   };
