@@ -52,3 +52,18 @@ export function agruparPorNome<T>(itens: T[], nomeDe: (x: T) => string, normaliz
   }
   return [...grupos.values()];
 }
+
+/** Nível do Meta/Google que cada UTM costuma repetir no nome (ex.: utm_content={{ad.name}}). */
+export const NIVEL_DA_UTM: Record<string, "campanha" | "conjunto" | "anuncio" | null> = {
+  utm_campaign: "campanha", utm_medium: "conjunto", utm_term: "conjunto", utm_content: "anuncio", utm_source: null,
+};
+
+/** Gasto por nome (chave sem maiúsculas/acentos/espaços), para cruzar o valor da UTM com o investido. */
+export function gastoPorNome(itens: { nome: string; gasto: number }[]) {
+  const mapa = new Map<string, number>();
+  for (const x of itens) {
+    const k = chaveDe(x.nome);
+    mapa.set(k, (mapa.get(k) ?? 0) + Number(x.gasto));
+  }
+  return mapa;
+}

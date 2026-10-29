@@ -7,7 +7,7 @@ import { detalheCliente, detalheCrm, type DimensaoUtm, type LinhaTabela } from "
 import { detalheGoogle } from "./consultas-google";
 import { funilDoCliente, lerHistorico, mesDe, nomeMes, somarMeses, type MesConsolidado } from "./historico";
 import { dinheiro, inteiro, pct } from "./formato";
-import { agruparPorNome, nomeDoAnuncio, nomeDoPublico } from "./agrupar";
+import { agruparPorNome, chaveDe, gastoPorNome, NIVEL_DA_UTM, nomeDoAnuncio, nomeDoPublico } from "./agrupar";
 import type { NumerosFunil } from "./funil";
 import { hojeISO, somarDias, type Periodo } from "./datas";
 
@@ -583,19 +583,30 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
         { total: ["Total", inteiro(google!.atual.conversoes), dinheiro(google!.atual.cpa), dinheiro(google!.atual.gasto), inteiro(google!.atual.impressoes), inteiro(google!.atual.cliques), dinheiro(google!.atual.cpc), pct(google!.atual.ctr)], larguraPrimeira: 0.32 })
     : null);
   // Qualificação: um slide para cada UTM escolhida (público, anúncio, campanha…); nenhuma = sem o slide
-  const linhasQualificacao = (d: DimensaoUtm) => {
-    const bruto = (crm?.porUtm[d] ?? []).filter((x) => x.funil.leads || x.funil.vendas);
+  // investido de cada UTM: gasto do anúncio/conjunto/campanha com o mesmo nome
+  const gastos = {
+    campanha: gastoPorNome([...meta.campanhas, ...(google?.campanhas ?? [])]),
+    conjunto: gastoPorNome(meta.conjuntos),
+    anuncio: gastoPorNome(meta.anuncios),
+  };
+  type LinhaQ = { nome: string; funil: NumerosFunil; gasto: number | null };
+  const somarQ = (a: LinhaQ, b: LinhaQ): LinhaQ => ({
+    nome: a.nome, funil: somarFunil(a.funil, b.funil), gasto: a.gasto == null && b.gasto == null ? null : (a.gasto ?? 0) + (b.gasto ?? 0),
+  });
+  const linhasQualificacao = (d: DimensaoUtm): LinhaQ[] => {
+    const nivel = NIVEL_DA_UTM[d];
+    const bruto = (crm?.porUtm[d] ?? []).filter((x) => x.funil.leads || x.funil.vendas)
+      .map((x) => ({ nome: x.nome, funil: x.funil, gasto: nivel && x.nome !== "(sem UTM)" ? gastos[nivel].get(chaveDe(x.nome)) ?? null : null }));
     // UTMs com o nome do conjunto/anúncio: junta os do mesmo público, como nas tabelas do Meta
     const grupos = (p.agrupar && d !== "utm_source"
-      ? agruparPorNome(bruto.map((x) => ({ nome: x.nome, funil: x.funil })), (x) => x.nome,
-          (n) => (n === "(sem UTM)" ? n : d === "utm_content" ? nomeDoAnuncio(n) : nomeDoPublico(n)),
-          (a, b) => ({ nome: a.nome, funil: somarFunil(a.funil, b.funil) }))
-          .map((g) => ({ nome: g.juntos > 1 ? `${curto(g.nome, 40)} (${g.juntos}x)` : g.nome, funil: g.item.funil }))
-      : bruto.map((x) => ({ nome: x.nome, funil: x.funil })))
+      ? agruparPorNome(bruto, (x) => x.nome,
+          (n) => (n === "(sem UTM)" ? n : d === "utm_content" ? nomeDoAnuncio(n) : nomeDoPublico(n)), somarQ)
+          .map((g) => ({ ...g.item, nome: g.juntos > 1 ? `${curto(g.nome, 40)} (${g.juntos}x)` : g.nome }))
+      : bruto)
       .sort((a, b) => Number(a.nome === "(sem UTM)") - Number(b.nome === "(sem UTM)") || b.funil.faturamento - a.funil.faturamento || b.funil.vendas - a.funil.vendas || b.funil.leads - a.funil.leads);
     const mostrados = grupos.length > LINHAS_POR_TABELA + 1 ? grupos.slice(0, LINHAS_POR_TABELA) : grupos;
     const resto = grupos.slice(mostrados.length);
-    return [...mostrados, ...(resto.length ? [{ nome: `Outros (${resto.length})`, funil: resto.map((x) => x.funil).reduce(somarFunil) }] : [])];
+    return [...mostrados, ...(resto.length ? [{ ...resto.reduce(somarQ), nome: `Outros (${resto.length})` }] : [])];
   };
   const qualificacoes = p.qualificacoes.map((d) => ({ d, linhas: linhasQualificacao(d) })).filter((q) => q.linhas.length);
   const mq = marcadores.get("tabela:qualificacao");
@@ -613,12 +624,14 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
         reqs.push({ replaceAllText: { containsText: { text: "Qualificação por público", matchCase: false }, replaceText: `Qualificação por ${titulo.toLowerCase()}`, pageObjectIds: [slide] } });
         reqs.push({ deleteObject: { objectId: elemento } });
         reqs.push(...tabela(slide, { ...mq.caixa, h: alturaSlide - mq.caixa.y - 150_000 },
-          [titulo, funil.leads, ...nomesPassos, funil.vendas, `${funil.leads} → ${funil.vendas.toLowerCase()}`, "Valor das vendas"],
+          [titulo, funil.leads, ...nomesPassos, funil.vendas, `${funil.leads} → ${funil.vendas.toLowerCase()}`, "Valor das vendas",
+            ...(NIVEL_DA_UTM[q.d] ? ["Investido"] : [])],
           q.linhas.map((x) => [
-            curto(x.nome, nomesPassos.length > 2 ? 46 : 56), inteiro(x.funil.leads), ...nomesPassos.map((n) => inteiro(x.funil.passos.find((y) => y.nome === n)?.valor)),
+            curto(x.nome, nomesPassos.length > 2 ? 42 : 52), inteiro(x.funil.leads), ...nomesPassos.map((n) => inteiro(x.funil.passos.find((y) => y.nome === n)?.valor)),
             inteiro(x.funil.vendas), pct(taxa(x.funil.vendas, x.funil.leads)), dinheiro(x.funil.faturamento),
+            ...(NIVEL_DA_UTM[q.d] ? [dinheiro(x.gasto)] : []),
           ]),
-          { larguraPrimeira: nomesPassos.length > 2 ? 0.3 : 0.38 }));
+          { larguraPrimeira: nomesPassos.length > 2 ? 0.27 : 0.34 }));
       });
     }
   }

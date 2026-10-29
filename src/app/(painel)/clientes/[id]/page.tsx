@@ -9,6 +9,7 @@ import { Aviso, Kpi, SeletorPeriodo, SeloStatus, TiposResultado, Variacao } from
 import { BarrasDiarias } from "@/components/graficos";
 import { AcoesRapidas, type DestinosDuplicar } from "@/components/acoes-rapidas";
 import { db } from "@/lib/db";
+import { chaveDe, gastoPorNome, NIVEL_DA_UTM } from "@/lib/agrupar";
 
 
 const NIVEIS = [
@@ -187,7 +188,13 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
       {google && ("erro" in google ? <Aviso>Erro ao carregar o Google Ads: {google.erro}</Aviso> : <SecaoGoogle g={google} voltar={voltar} />)}
 
       <SecaoCrm crm={crm} gasto={gastoTotal} gastoAnterior={gastoTotalAnterior} base={base} comGoogle={!!g}
-        dimensao={dimensao} qs={atual.qs} periodo={atual} />
+        dimensao={dimensao} qs={atual.qs} periodo={atual}
+        gastos={{
+          // gasto do período por nome, para a coluna "Investido" das UTMs
+          campanha: gastoPorNome([...d.campanhas, ...(g?.campanhas ?? [])]),
+          conjunto: gastoPorNome(d.conjuntos),
+          anuncio: gastoPorNome(d.anuncios),
+        }} />
 
       {!!historico?.length && <Historico itens={historico as ItemHistorico[]} />}
     </div>
@@ -428,7 +435,9 @@ function Tabela({ linhas, meta, nivel, voltar, abrir, destinos }: {
   );
 }
 
-function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, periodo }: {
+type GastosPorNivel = Record<"campanha" | "conjunto" | "anuncio", Map<string, number>>;
+
+function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, periodo, gastos }: {
   crm: Awaited<ReturnType<typeof detalheCrm>> | { erro: string };
   gasto: number;
   gastoAnterior: number;
@@ -437,6 +446,7 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, pe
   dimensao: DimensaoUtm;
   qs: string;
   periodo: { desde: string; ate: string };
+  gastos: GastosPorNivel;
 }) {
   if (!crm) return null;
   if ("erro" in crm) return <Aviso>Erro ao carregar o CRM: {crm.erro}</Aviso>;
@@ -523,7 +533,7 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, pe
         </div>
       )}
 
-      <TabelaUtm crm={crm} dimensao={dimensao} base={base} qs={qs} periodo={periodo} />
+      <TabelaUtm crm={crm} dimensao={dimensao} base={base} qs={qs} periodo={periodo} gastos={gastos} />
 
       {crm.negocios.length > 0 && (
         <details className="rounded-xl border border-borda bg-superficie">
@@ -582,14 +592,18 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, pe
 }
 
 /** Leads, qualificados e vendas por UTM, com abas para cada parâmetro. */
-function TabelaUtm({ crm, dimensao, base, qs, periodo }: {
+function TabelaUtm({ crm, dimensao, base, qs, periodo, gastos }: {
   crm: NonNullable<Awaited<ReturnType<typeof detalheCrm>>>;
   dimensao: DimensaoUtm;
   base: string;
   qs: string;
   periodo: { desde: string; ate: string };
+  gastos: GastosPorNivel;
 }) {
   const linhas = crm.porUtm[dimensao];
+  // investido: gasto do anúncio/conjunto/campanha com o mesmo nome da UTM (utm_source não tem como cruzar)
+  const nivel = NIVEL_DA_UTM[dimensao];
+  const investido = (nome: string) => (nivel && nome !== "(sem UTM)" ? gastos[nivel].get(chaveDe(nome)) ?? null : null);
   const csv = `/api/crm/exportar?cliente=${crm.conexao.cliente_id}&de=${periodo.desde}&ate=${periodo.ate}`;
   return (
     <div id="utm" className="rounded-xl border border-borda bg-superficie">
@@ -618,7 +632,7 @@ function TabelaUtm({ crm, dimensao, base, qs, periodo }: {
             <thead className="text-left text-xs text-texto-3">
               <tr>
                 <th className="px-4 py-2 font-normal">{DIMENSOES_UTM.find((d) => d.chave === dimensao)!.rotulo}</th>
-                {["Leads", "Qualificados", "Vendas", "Lead → venda", "Faturamento", "Em negociação"].map((h) => (
+                {["Leads", "Qualificados", "Vendas", "Lead → venda", "Faturamento", ...(nivel ? ["Investido", "ROAS"] : []), "Em negociação"].map((h) => (
                   <th key={h} className="px-3 py-2 text-right font-normal">{h}</th>
                 ))}
               </tr>
@@ -632,6 +646,15 @@ function TabelaUtm({ crm, dimensao, base, qs, periodo }: {
                   <td className="px-3 py-2 text-right">{inteiro(l.vendas)}</td>
                   <td className="px-3 py-2 text-right">{l.leads ? pct((l.vendas / l.leads) * 100) : "—"}</td>
                   <td className="px-3 py-2 text-right">{dinheiro(l.faturamento)}</td>
+                  {nivel && (() => {
+                    const inv = investido(l.nome);
+                    return (
+                      <>
+                        <td className="px-3 py-2 text-right">{dinheiro(inv)}</td>
+                        <td className="px-3 py-2 text-right">{inv && l.faturamento ? `${(l.faturamento / inv).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}x` : "—"}</td>
+                      </>
+                    );
+                  })()}
                   <td className="px-3 py-2 text-right">{dinheiro(l.emNegociacao)}</td>
                 </tr>
               ))}
@@ -639,6 +662,7 @@ function TabelaUtm({ crm, dimensao, base, qs, periodo }: {
           </table>
           <p className="px-4 py-2 text-xs text-texto-3">
             UTMs do primeiro acesso do lead. Leads: criados no período. Vendas: ganhas no período (o lead pode ter entrado antes).
+            {nivel && <> Investido: gasto no período do {nivel === "anuncio" ? "anúncio" : nivel} com o mesmo nome da UTM (— quando nenhum nome bate).</>}
           </p>
         </div>
       )}
