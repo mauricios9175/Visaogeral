@@ -13,7 +13,7 @@ export type ResultadoMontagem = { ok: boolean; mensagem: string; detalhes: strin
 type Payload = {
   clienteId: string; conta: string; modeloId: string; objetivo: ObjetivoMeta; config: ConfigMeta;
   pagina: string; instagram: string; formulario: string; pixel: string;
-  criativos: { caminho: string; nome: string; tipo: string }[];
+  criativos: { caminho: string; nome: string; tipo: string; videoId?: string }[];
   manterSemAnuncios?: boolean;
 };
 
@@ -58,7 +58,7 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
       ...registro, objeto_id: r.campanhaId, objeto_nome: r.campanhaNome, ok: true,
       depois: `${r.conjuntos} conjunto(s), ${r.anuncios} anúncio(s), ${r.falhas.length ? `${r.falhas.length} criativo(s) com erro` : "pausado"}`,
     }).then(() => null, () => null);
-    await apagar(p.criativos.map((c) => c.caminho));
+    await apagar(p.criativos.map((c) => c.caminho).filter(Boolean));
     revalidatePath(`/clientes/${cliente.id}`);
     return {
       ok: r.anuncios > 0,

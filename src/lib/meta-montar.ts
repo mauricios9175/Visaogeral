@@ -380,7 +380,11 @@ async function subirImagem(contaId: string, token: string, caminho: string) {
 async function subirVideo(contaId: string, token: string, caminho: string, nome: string) {
   const url = await linkTemporario(caminho);
   const r = await postMeta(`${contaId}/advideos`, token, { file_url: url, name: nome });
-  const id = String(r.id);
+  return esperarVideo(String(r.id), token, nome);
+}
+
+/** Espera o Meta processar o vídeo e devolve o id e a miniatura (o anúncio de vídeo precisa dela). */
+async function esperarVideo(id: string, token: string, nome: string) {
   for (let i = 0; i < 40; i++) {
     const v = await getMeta<{ status?: { video_status?: string }; picture?: string; thumbnails?: { data?: { uri: string; is_preferred?: boolean }[] } }>(
       montarUrl(id, token, { fields: "status,picture,thumbnails" }),
@@ -393,6 +397,46 @@ async function subirVideo(contaId: string, token: string, caminho: string, nome:
     await new Promise((res) => setTimeout(res, 5000));
   }
   throw new Error(`O vídeo ${nome} ainda está sendo processado pelo Meta; tente montar de novo em alguns minutos.`);
+}
+
+// ---------- vídeo enviado em partes (sem passar pelo Storage, que limita o arquivo a 50 MB) ----------
+
+const BASE_VIDEO = BASE_META.replace("graph.facebook.com", "graph-video.facebook.com");
+
+async function postVideo(contaId: string, token: string, corpo: FormData) {
+  corpo.set("access_token", token);
+  const res = await fetch(`${BASE_VIDEO}/${contaId}/advideos`, { method: "POST", body: corpo, cache: "no-store" });
+  const json = await res.json().catch(() => ({}));
+  if (json.error) throw new Error(json.error.error_user_msg || json.error.message);
+  return json;
+}
+
+/** Começa o envio em partes: o Meta devolve a sessão e qual pedaço do arquivo mandar primeiro. */
+export async function iniciarEnvioVideo(contaId: string, token: string, tamanho: number) {
+  const f = new FormData();
+  f.set("upload_phase", "start");
+  f.set("file_size", String(tamanho));
+  const r = await postVideo(contaId, token, f);
+  return { sessao: String(r.upload_session_id), videoId: String(r.video_id), inicio: Number(r.start_offset), fim: Number(r.end_offset) };
+}
+
+/** Manda um pedaço (de `inicio` até onde o Meta pediu) e recebe o próximo; inicio === fim = acabou. */
+export async function enviarParteVideo(contaId: string, token: string, sessao: string, inicio: number, parte: Blob) {
+  const f = new FormData();
+  f.set("upload_phase", "transfer");
+  f.set("upload_session_id", sessao);
+  f.set("start_offset", String(inicio));
+  f.set("video_file_chunk", parte, "parte");
+  const r = await postVideo(contaId, token, f);
+  return { inicio: Number(r.start_offset), fim: Number(r.end_offset) };
+}
+
+export async function concluirEnvioVideo(contaId: string, token: string, sessao: string, nome: string) {
+  const f = new FormData();
+  f.set("upload_phase", "finish");
+  f.set("upload_session_id", sessao);
+  f.set("title", nome);
+  await postVideo(contaId, token, f);
 }
 
 // ---------- montagem ----------
@@ -433,7 +477,7 @@ function segmentacao(c: ConfigMeta, p: ConjuntoMeta) {
 export type DadosMontagem = {
   contaId: string; token: string; clienteNome: string; objetivo: ObjetivoMeta; config: ConfigMeta;
   paginaId: string; instagramId: string | null; formularioId: string | null; pixelId: string | null;
-  criativos: { caminho: string; nome: string; tipo: string }[];
+  criativos: { caminho: string; nome: string; tipo: string; videoId?: string }[];
   /** objetivo formulário: em vez de um formulário existente, cria um novo na página a partir deste modelo */
   modeloFormulario?: ConfigFormulario | null;
   /** se nenhum anúncio puder ser criado, manter campanha, conjuntos e formulário (pausados) em vez de desfazer */
@@ -526,7 +570,10 @@ export async function montarNoMeta(d: DadosMontagem) {
       const nomeBase = { ...vars, n: String(i + 1), arquivo: cr.nome.replace(/\.\w+$/, "") };
       try {
         const ehVideo = cr.tipo.startsWith("video");
-        const midia = ehVideo ? await subirVideo(d.contaId, d.token, cr.caminho, cr.nome) : { hash: await subirImagem(d.contaId, d.token, cr.caminho) };
+        // vídeo grande já foi direto para o Meta pelo navegador (cr.videoId); os outros passam pelo Storage
+        const midia = !ehVideo ? { hash: await subirImagem(d.contaId, d.token, cr.caminho) }
+          : cr.videoId ? await esperarVideo(cr.videoId, d.token, cr.nome)
+          : await subirVideo(d.contaId, d.token, cr.caminho, cr.nome);
         const nomeCriativo = aplicarNome(c.nomeAnuncio, { ...nomeBase, conjunto: "" }).replace(/\s*-\s*$/, "");
         const link =
           d.objetivo === "site" ? c.url

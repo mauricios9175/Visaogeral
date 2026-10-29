@@ -7,7 +7,8 @@ import { CamposMeta, campo } from "./campos-meta";
 
 type Opcao = { id: string; nome: string };
 type Ativos = { paginas: Opcao[]; instagram: Opcao[]; pixels: Opcao[]; erro?: string };
-export type Criativo = { caminho: string; nome: string; tipo: string; tamanho: number };
+/** Criativo enviado: imagem fica no Storage (caminho); vídeo vai direto para o Meta da conta (videoId). */
+export type Criativo = { caminho: string; nome: string; tipo: string; tamanho: number; videoId?: string; conta?: string };
 export type Padroes = Partial<{ conta: string; pagina: string; instagram: string; formulario: string; pixel: string; locais: ConfigMeta["locais"] }>;
 
 const botao = "rounded-lg border border-borda bg-superficie px-3 py-1.5 text-sm hover:border-destaque disabled:opacity-60";
@@ -79,19 +80,46 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
     return () => { vivo = false; };
   }, [objetivo, pagina, conta]);
 
+  /** Vídeo em partes direto para o Meta (sem o limite de 50 MB do Storage), com o andamento na tela. */
+  async function enviarVideoAoMeta(f: File) {
+    if (!conta) throw new Error("Escolha a conta de anúncio antes de enviar o vídeo.");
+    const chamar = async (qs: Record<string, string>, corpo?: Blob) => {
+      const r = await fetch(`/api/meta/video?${new URLSearchParams({ conta, ...qs })}`, { method: "POST", body: corpo });
+      const j = await r.json().catch(() => ({ erro: `erro ${r.status}` }));
+      if (j.erro) throw new Error(j.erro);
+      return j;
+    };
+    const s = await chamar({ etapa: "inicio", tamanho: String(f.size) });
+    let { inicio, fim } = s as { inicio: number; fim: number };
+    while (inicio < fim) {
+      setEnviando(`Enviando ${f.name} para o Meta… ${Math.round((inicio / f.size) * 100)}%`);
+      ({ inicio, fim } = await chamar({ etapa: "parte", sessao: s.sessao, inicio: String(inicio) }, f.slice(inicio, fim)));
+    }
+    await chamar({ etapa: "fim", sessao: s.sessao, nome: f.name });
+    return { videoId: String(s.videoId), conta };
+  }
+
   async function enviarDoComputador(arquivos: FileList | null) {
     if (!arquivos?.length) return;
     setErroEnvio(null);
     for (const f of Array.from(arquivos)) {
       setEnviando(`Enviando ${f.name}…`);
       try {
+        if (f.type.startsWith("video/")) {
+          const video = await enviarVideoAoMeta(f);
+          setCriativos((c) => [...c, { caminho: "", nome: f.name, tipo: f.type, tamanho: f.size, ...video }]);
+          continue;
+        }
         const r = await fetch("/api/upload", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ nome: f.name, tipo: f.type, lote }),
         }).then((x) => x.json());
         if (r.erro) throw new Error(r.erro);
         const put = await fetch(r.url, { method: "PUT", headers: { "Content-Type": f.type, "x-upsert": "true" }, body: f });
-        if (!put.ok) throw new Error(`falha no envio (${put.status})`);
+        if (!put.ok) {
+          const motivo = await put.json().then((j) => j.message || j.error, () => "");
+          throw new Error(`falha no envio (${put.status}${motivo ? `: ${motivo}` : ""})`);
+        }
         setCriativos((c) => [...c, { caminho: r.caminho, nome: f.name, tipo: f.type, tamanho: f.size }]);
       } catch (e) {
         setErroEnvio(`${f.name}: ${e instanceof Error ? e.message : e}`);
@@ -107,13 +135,15 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
     return <p className="text-sm">Este cliente não tem conta do Meta vinculada (Configurações → Contas do Meta).</p>;
   }
 
-  const payload = { clienteId, conta, modeloId, objetivo, config, pagina, instagram, formulario, pixel, criativos, manterSemAnuncios };
+  // vídeo enviado ao Meta fica na conta para onde foi; se trocou de conta, ele não serve
+  const criativosDaConta = criativos.filter((c) => !c.videoId || c.conta === conta);
+  const payload = { clienteId, conta, modeloId, objetivo, config, pagina, instagram, formulario, pixel, criativos: criativosDaConta, manterSemAnuncios };
   const faltando =
     !pagina ? "Escolha a página do Facebook." :
     objetivo === "formulario" && !formulario ? "Escolha o formulário." :
     objetivo === "site" && !config.url ? "Informe o link do site." :
     !config.locais.length ? "Escolha pelo menos uma localização." :
-    !criativos.length ? "Adicione pelo menos um criativo." :
+    !criativosDaConta.length ? "Adicione pelo menos um criativo." :
     !config.textos.some((t) => t.trim()) ? "Escreva o texto principal." : null;
 
   return (
@@ -200,12 +230,15 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
         {criativos.length > 0 && (
           <ul className="divide-y divide-borda text-sm">
             {criativos.map((c, i) => (
-              <li key={c.caminho} className="flex items-center gap-3 py-1.5">
+              <li key={c.caminho || c.videoId} className="flex items-center gap-3 py-1.5">
                 <span className="w-6 text-texto-3">{i + 1}</span>
                 <span>{c.tipo.startsWith("video") ? "▶" : "🖼"}</span>
-                <span className="min-w-0 flex-1 truncate">{c.nome}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {c.nome}
+                  {c.videoId && c.conta !== conta && <span className="ml-2 text-xs text-critico">enviado para outra conta: remova e envie de novo</span>}
+                </span>
                 <span className="text-xs text-texto-3">{c.tamanho ? tamanho(c.tamanho) : ""}</span>
-                <button type="button" onClick={() => setCriativos((x) => x.filter((y) => y.caminho !== c.caminho))} className="text-texto-3 hover:text-critico">remover</button>
+                <button type="button" onClick={() => setCriativos((x) => x.filter((y) => y !== c))} className="text-texto-3 hover:text-critico">remover</button>
               </li>
             ))}
           </ul>
