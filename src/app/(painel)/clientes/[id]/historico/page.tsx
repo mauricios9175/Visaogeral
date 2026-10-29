@@ -307,6 +307,12 @@ async function Conferir({ clienteId, meses, mes }: { clienteId: string; meses: s
       {c === null && mes && <p className="text-sm text-texto-3">Este cliente não tem CRM conectado.</p>}
       {c && !("erro" in c) && (
         <div className="space-y-4">
+          {c.repetidos.extras > 0 && (
+            <Aviso>
+              {c.repetidos.nomes} nome(s) aparecem mais de uma vez entre os leads do mês ({c.repetidos.extras} lead(s) a mais).
+              Pode ser lead duplicado no CRM. Ex.: {c.repetidos.exemplos.map((x) => `${x.nome} (${x.n}x)`).join(", ")}.
+            </Aviso>
+          )}
           <div>
             <h3 className="text-sm font-medium">
               Vendas fechadas em {nomeMes(mes!)}: {c.vendas.filter((v) => !v.motivo).length} contada(s)
@@ -335,9 +341,9 @@ async function Conferir({ clienteId, meses, mes }: { clienteId: string; meses: s
             </div>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
-            {([["Leads que entraram, por funil", c.leadsPorFunil], ["Leads que entraram, por fonte", c.leadsPorFonte]] as const).map(([titulo, linhas]) => (
+            {([["Leads que entraram, por funil", c.leadsPorFunil], ["Leads que entraram, por fonte", c.leadsPorFonte], ["Vendas do mês, por funil", c.vendasPorFunil]] as const).map(([titulo, linhas]) => (
               <div key={titulo}>
-                <h3 className="text-sm font-medium">{titulo} <span className="font-normal text-texto-3">({c.totalLeads} no total)</span></h3>
+                <h3 className="text-sm font-medium">{titulo} <span className="font-normal text-texto-3">({linhas.reduce((t, l) => t + l.total, 0)} no total)</span></h3>
                 <table className={tabela}>
                   <thead><tr><th className={th}></th><th className={`${th} text-right`}>Criados</th><th className={`${th} text-right`}>Na conta</th></tr></thead>
                   <tbody>

@@ -339,8 +339,19 @@ export async function conferirMes(clienteId: string, mes: string) {
     criado: n.criado_em, fechado: n.fechado_em, motivo: motivo(n),
   });
   void teste;
+  // mesmo nome mais de uma vez no mês, entre os leads que entram na conta: costuma ser lead duplicado no CRM
+  const porNome = new Map<string, { nome: string; n: number }>();
+  for (const n of criados.filter((x) => entraNoFunil(x, funil, cx))) {
+    const nome = (n.nome ?? "").trim();
+    if (!nome) continue;
+    const k = nome.toLowerCase();
+    porNome.set(k, { nome, n: (porNome.get(k)?.n ?? 0) + 1 });
+  }
+  const repetidos = [...porNome.values()].filter((x) => x.n > 1).sort((a, b) => b.n - a.n);
   return {
     funil,
+    repetidos: { nomes: repetidos.length, extras: repetidos.reduce((t, x) => t + x.n - 1, 0), exemplos: repetidos.slice(0, 8) },
+    vendasPorFunil: contar(ganhos, (n) => n.pipeline_nome ?? "(funil desconhecido)"),
     vendas: ganhos.map(venda),
     leadsPorFunil: contar(criados, (n) => n.pipeline_nome ?? "(funil desconhecido)"),
     leadsPorFonte: contar(criados, (n) => n.origem?.trim() || "(sem fonte)"),
