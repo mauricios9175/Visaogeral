@@ -2,10 +2,11 @@
 
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { montarCampanhaMeta, type ResultadoMontagem } from "@/app/acoes-montagem";
-import { normalizarConfig, OBJETIVOS, type ConfigMeta, type Modelo } from "@/lib/modelos";
+import { FORMULARIO_PADRAO, normalizarConfig, OBJETIVOS, type ConfigFormulario, type ConfigMeta, type Modelo } from "@/lib/modelos";
 import { CamposMeta, campo } from "./campos-meta";
+import { CamposFormulario } from "./editor-formulario";
 
-type Opcao = { id: string; nome: string };
+type Opcao = { id: string; nome: string; arquivado?: boolean };
 type Ativos = { paginas: Opcao[]; instagram: Opcao[]; pixels: Opcao[]; erro?: string };
 /** Criativo enviado: imagem fica no Storage (caminho); vídeo vai direto para o Meta da conta (videoId). */
 export type Criativo = { caminho: string; nome: string; tipo: string; tamanho: number; videoId?: string; conta?: string };
@@ -37,6 +38,9 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
   const [instagram, setInstagram] = useState(padroes.instagram ?? "");
   const [pixel, setPixel] = useState(padroes.pixel ?? "");
   const [formularios, setFormularios] = useState<{ itens: Opcao[]; erro?: string } | null>(null);
+  // formulário criado na própria montagem (sem precisar de modelo)
+  const [formNovo, setFormNovo] = useState<ConfigFormulario>(FORMULARIO_PADRAO);
+  const [salvarComoModelo, setSalvarComoModelo] = useState("");
   // "modelo:<id>" = criar um formulário novo a partir do modelo; senão o id de um formulário da página
   const [formulario, setFormulario] = useState(
     padroes.formulario || (modelosFormulario[0] ? `modelo:${modelosFormulario[0].id}` : ""));
@@ -75,7 +79,8 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
     fetch(`/api/meta/formularios?conta=${encodeURIComponent(conta)}&pagina=${pagina}`).then((r) => r.json()).then((f) => {
       if (!vivo) return;
       setFormularios(f);
-      setFormulario((x) => (x.startsWith("modelo:") || f.itens?.some((y: Opcao) => y.id === x) ? x : f.itens?.[0]?.id ?? x));
+      setFormulario((x) => (x === "novo" || x.startsWith("modelo:") || f.itens?.some((y: Opcao) => y.id === x) ? x
+        : f.itens?.find((y: Opcao) => !y.arquivado)?.id ?? f.itens?.[0]?.id ?? x));
     }).catch(() => vivo && setFormularios({ itens: [], erro: "Falha ao buscar os formulários." }));
     return () => { vivo = false; };
   }, [objetivo, pagina, conta]);
@@ -150,6 +155,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
   const semCriativo = !criativosDaConta.length;
   const payload = {
     clienteId, conta, modeloId, objetivo, config, pagina, instagram, formulario, pixel, criativos: criativosDaConta,
+    ...(formulario === "novo" && { formularioNovo: formNovo, salvarComoModelo: salvarComoModelo.trim() }),
     manterSemAnuncios: semCriativo || manterSemAnuncios,
   };
   const faltando =
@@ -192,23 +198,30 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
         </label>
         {objetivo === "formulario" && (
           <label className={rotulo}>Formulário instantâneo
-            {formularios?.itens.length || modelosFormulario.length ? (
+            {formularios?.itens.length || modelosFormulario.length || !formularios?.erro ? (
               <select value={formulario} onChange={(e) => setFormulario(e.target.value)} className={campo}>
+                <option value="novo">✚ Criar formulário novo aqui (sem modelo)</option>
                 {modelosFormulario.length > 0 && (
                   <optgroup label="Criar formulário novo a partir do modelo">
                     {modelosFormulario.map((m) => <option key={m.id} value={`modelo:${m.id}`}>✚ {m.nome}</option>)}
                   </optgroup>
                 )}
-                {!!formularios?.itens.length && (
-                  <optgroup label="Formulários que já existem na página">
-                    {formularios.itens.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                {formularios?.itens.some((f) => !f.arquivado) && (
+                  <optgroup label="Formulários ativos da página">
+                    {formularios.itens.filter((f) => !f.arquivado).map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                  </optgroup>
+                )}
+                {formularios?.itens.some((f) => f.arquivado) && (
+                  <optgroup label="Arquivados (o painel reativa ao usar)">
+                    {formularios.itens.filter((f) => f.arquivado).map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
                   </optgroup>
                 )}
               </select>
             ) : (
               <input value={formulario} onChange={(e) => setFormulario(e.target.value)} placeholder="ID do formulário" className={campo} />
             )}
-            {formulario.startsWith("modelo:") && <span className="block text-xs text-texto-3">O formulário é criado na página na hora de montar.</span>}
+            {(formulario.startsWith("modelo:") || formulario === "novo") && <span className="block text-xs text-texto-3">O formulário é criado na página na hora de montar.</span>}
+            {formularios?.itens.find((f) => f.id === formulario)?.arquivado && <span className="block text-xs text-texto-3">Está arquivado: o painel reativa antes de criar o anúncio.</span>}
             {formularios?.erro && !formulario.startsWith("modelo:") && (
               <span className="block text-xs text-texto-3">{formularios.erro} Use um modelo de formulário (menu Modelos) ou cole o ID.</span>
             )}
@@ -227,6 +240,17 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
           </p>
         )}
       </section>
+
+      {objetivo === "formulario" && formulario === "novo" && (
+        <section className="space-y-4 rounded-xl border border-borda bg-superficie p-4">
+          <h2 className="font-medium">Formulário novo</h2>
+          <CamposFormulario valor={formNovo} onChange={setFormNovo} />
+          <label className="flex flex-col gap-1 text-sm md:max-w-md">
+            Salvar também como modelo <span className="text-xs text-texto-3">(opcional: dê um nome para reaproveitar em outros clientes)</span>
+            <input value={salvarComoModelo} onChange={(e) => setSalvarComoModelo(e.target.value)} placeholder="Ex.: Planejados – orçamento" className={campo} />
+          </label>
+        </section>
+      )}
 
       <section className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
         <h2 className="font-medium">Criativos</h2>

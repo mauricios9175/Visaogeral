@@ -12,6 +12,23 @@ const dica = "text-xs text-texto-3";
 /** Editor de modelo de formulário instantâneo: perguntas, introdução, política de privacidade e tela final. */
 export function EditorFormulario({ modelo }: { modelo?: ModeloFormulario }) {
   const [f, setF] = useState<ConfigFormulario>(normalizarFormulario(modelo?.config));
+  return (
+    <form action={salvarModeloFormulario} className="space-y-5 rounded-xl border border-borda bg-superficie p-4">
+      <input type="hidden" name="id" value={modelo?.id ?? ""} />
+      <input type="hidden" name="config" value={JSON.stringify(f)} />
+      <label className={`${rotulo} max-w-md`}>Nome do modelo
+        <input name="nome" required defaultValue={modelo?.nome} placeholder="Ex.: Planejados – orçamento" className={campo} />
+      </label>
+      <CamposFormulario valor={f} onChange={setF} />
+      <BotaoEnviar className="rounded-lg bg-destaque px-4 py-2 text-sm font-medium text-white" aguardando="Salvando…">
+        Salvar modelo de formulário
+      </BotaoEnviar>
+    </form>
+  );
+}
+
+/** Campos do formulário instantâneo (usados no modelo e na montagem da campanha). */
+export function CamposFormulario({ valor: f, onChange: setF }: { valor: ConfigFormulario; onChange: (f: ConfigFormulario) => void }) {
   const set = <K extends keyof ConfigFormulario>(k: K, v: ConfigFormulario[K]) => setF({ ...f, [k]: v });
   const temPadrao = (tipo: PerguntaForm["tipo"]) => f.perguntas.some((p) => p.tipo === tipo);
   const alternarPadrao = (tipo: PerguntaForm["tipo"]) =>
@@ -25,13 +42,8 @@ export function EditorFormulario({ modelo }: { modelo?: ModeloFormulario }) {
   const mudarPergunta = (i: number, nova: Partial<PerguntaForm>) => set("perguntas", f.perguntas.map((p, j) => (j === i ? { ...p, ...nova } : p)));
 
   return (
-    <form action={salvarModeloFormulario} className="space-y-5 rounded-xl border border-borda bg-superficie p-4">
-      <input type="hidden" name="id" value={modelo?.id ?? ""} />
-      <input type="hidden" name="config" value={JSON.stringify(f)} />
-      <div className="grid gap-3 md:grid-cols-3">
-        <label className={rotulo}>Nome do modelo
-          <input name="nome" required defaultValue={modelo?.nome} placeholder="Ex.: Planejados – orçamento" className={campo} />
-        </label>
+    <div className="space-y-5">
+      <div className="grid gap-3 md:grid-cols-2">
         <label className={rotulo}>Nome do formulário no Meta
           <input value={f.nome} onChange={(e) => set("nome", e.target.value)} className={campo} />
           <span className={dica}>Aceita {"{cliente}"} e {"{data}"}.</span>
@@ -134,9 +146,6 @@ export function EditorFormulario({ modelo }: { modelo?: ModeloFormulario }) {
         </label>
       </fieldset>
 
-      <BotaoEnviar className="rounded-lg bg-destaque px-4 py-2 text-sm font-medium text-white" aguardando="Salvando…">
-        Salvar modelo de formulário
-      </BotaoEnviar>
-    </form>
+    </div>
   );
 }

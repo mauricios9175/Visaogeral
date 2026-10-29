@@ -279,7 +279,17 @@ export async function formulariosDaPagina(paginaId: string, token: string) {
   const forms = await todasPaginas<{ id: string; name: string; status: string }>(
     montarUrl(`${paginaId}/leadgen_forms`, tokenPagina, { fields: "id,name,status", limit: "100" }),
   );
-  return forms.filter((f) => f.status === "ACTIVE").map((f) => ({ id: f.id, nome: f.name }));
+  // arquivados também (o painel reativa o escolhido); ativos primeiro
+  return forms.filter((f) => f.status === "ACTIVE" || f.status === "ARCHIVED")
+    .sort((a, b) => Number(a.status !== "ACTIVE") - Number(b.status !== "ACTIVE"))
+    .map((f) => ({ id: f.id, nome: f.name, arquivado: f.status !== "ACTIVE" }));
+}
+
+/** Reativa um formulário arquivado (o anúncio não aceita formulário arquivado). */
+async function reativarFormulario(formularioId: string, paginaId: string, token: string) {
+  const tokenPagina = await tokenDaPagina(paginaId, token);
+  const f = await getMeta<{ status?: string }>(montarUrl(formularioId, tokenPagina, { fields: "status" })).catch(() => null);
+  if (f?.status === "ARCHIVED") await postMeta(formularioId, tokenPagina, { status: "ACTIVE" });
 }
 
 type Politica = { rotulo: string; params: Record<string, string> };
@@ -365,7 +375,7 @@ export async function criarFormulario(paginaId: string, token: string, f: Config
   for (const pol of politicas) {
     try {
       const r = await postMeta(`${paginaId}/leadgen_forms`, tokenPagina, { ...base, ...pol.params });
-      return { id: String(r.id), arquivar: () => postMeta(String(r.id), tokenPagina, { status: "ARCHIVED" }).catch(() => null) };
+      return { id: String(r.id) };
     } catch (e) {
       if (!/privacy|legal_content|privacidade|conte[uú]do legal/i.test(msgErro(e))) throw e;
       tentativas.push(`${pol.rotulo}: ${msgErro(e)}`);
@@ -509,18 +519,27 @@ export async function montarNoMeta(d: DadosMontagem) {
   const centavos = (v: number) => String(Math.round(v * 100));
   if (d.objetivo === "site" && !d.pixelId) throw new Error("Escolha o pixel.");
 
-  // 0. formulário novo a partir do modelo (se a montagem falhar depois, ele é arquivado)
-  let arquivarFormulario: (() => Promise<unknown>) | null = null;
+  // 0. formulário novo (modelo ou criado na montagem). Se a montagem falhar depois, ele fica ativo na página
+  // para ser reaproveitado (antes era arquivado, e sumia da lista).
+  let formularioCriado: string | null = null;
   if (d.objetivo === "formulario" && d.modeloFormulario) {
     try {
       const f = await criarFormulario(d.paginaId, d.token, d.modeloFormulario, vars);
       d = { ...d, formularioId: f.id };
-      arquivarFormulario = f.arquivar;
+      formularioCriado = f.id;
     } catch (e) {
       throw new Error(`Formulário: ${msgErro(e)}`);
     }
+  } else if (d.objetivo === "formulario" && d.formularioId) {
+    try {
+      await reativarFormulario(d.formularioId, d.paginaId, d.token);
+    } catch (e) {
+      throw new Error(`Não consegui reativar o formulário arquivado: ${msgErro(e)}`);
+    }
   }
   if (d.objetivo === "formulario" && !d.formularioId) throw new Error("Escolha o formulário.");
+  const avisoFormulario = (e: unknown) =>
+    formularioCriado ? new Error(`${msgErro(e)} (o formulário novo foi criado e ficou na página: dá para escolher ele na próxima tentativa)`) : e;
 
   // 1. campanha
   const objetivoMeta = d.objetivo === "mensagens" ? "OUTCOME_ENGAGEMENT" : "OUTCOME_LEADS";
@@ -536,8 +555,7 @@ export async function montarNoMeta(d: DadosMontagem) {
         : { is_adset_budget_sharing_enabled: "false" }),
     });
   } catch (e) {
-    await arquivarFormulario?.();
-    throw e;
+    throw avisoFormulario(e);
   }
   const campanhaId = String(campanha.id);
 
@@ -631,11 +649,10 @@ export async function montarNoMeta(d: DadosMontagem) {
     const motivos = [...new Set(falhas.map((f) => f.replace(/^.*?: /, "")))];
     const resumo = motivos.length === 1 && falhas.length > 1 ? [`${falhas.length} anúncio(s): ${motivos[0]}`] : falhas;
     if (!anuncios && !d.manterSemAnuncios) throw new Error(`Nenhum anúncio foi criado. ${resumo.join(" | ")}`);
-    return { campanhaId, campanhaNome, conjuntos: conjuntos.length, anuncios, falhas: resumo, formularioCriado: arquivarFormulario ? d.formularioId : null };
+    return { campanhaId, campanhaNome, conjuntos: conjuntos.length, anuncios, falhas: resumo, formularioCriado };
   } catch (e) {
-    // desfaz: apaga a campanha (os conjuntos e os anúncios vão junto) e arquiva o formulário criado agora
+    // desfaz: apaga a campanha (os conjuntos e os anúncios vão junto); o formulário fica para reaproveitar
     await fetch(`${BASE_META}/${campanhaId}?access_token=${encodeURIComponent(d.token)}`, { method: "DELETE" }).catch(() => null);
-    await arquivarFormulario?.();
-    throw e;
+    throw avisoFormulario(e);
   }
 }

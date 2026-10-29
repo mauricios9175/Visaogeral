@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db, type ContaAnuncio } from "@/lib/db";
-import { normalizarConfig, normalizarFormulario, OBJETIVO_FORMULARIO, type ConfigMeta, type ObjetivoMeta } from "@/lib/modelos";
+import { normalizarConfig, normalizarFormulario, OBJETIVO_FORMULARIO, type ConfigFormulario, type ConfigMeta, type ObjetivoMeta } from "@/lib/modelos";
 import { montarNoMeta } from "@/lib/meta-montar";
 import { linkGerenciador } from "@/lib/meta";
 import { tokenDaConta } from "@/lib/sync";
@@ -15,6 +15,8 @@ type Payload = {
   pagina: string; instagram: string; formulario: string; pixel: string;
   criativos: { caminho: string; nome: string; tipo: string; videoId?: string }[];
   manterSemAnuncios?: boolean;
+  formularioNovo?: Partial<ConfigFormulario>; // formulário criado na própria montagem (formulario = "novo")
+  salvarComoModelo?: string;                  // nome para salvar esse formulário também como modelo
 };
 
 /** Cria campanha, conjunto e anúncios (tudo pausado) a partir do modelo. Se algo falhar no meio, desfaz o que criou. */
@@ -36,8 +38,14 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
 
   const config = normalizarConfig(p.config);
   // "modelo:<id>" = criar um formulário novo na página a partir do modelo de formulário
-  let modeloFormulario = null;
-  if (p.objetivo === "formulario" && p.formulario.startsWith("modelo:")) {
+  let modeloFormulario: ConfigFormulario | null = null;
+  if (p.objetivo === "formulario" && p.formulario === "novo") {
+    modeloFormulario = normalizarFormulario(p.formularioNovo);
+    if (p.salvarComoModelo) {
+      await banco.from("modelos").insert({ nome: p.salvarComoModelo, objetivo: OBJETIVO_FORMULARIO, plataforma: "meta", config: modeloFormulario })
+        .then(() => null, () => null);
+    }
+  } else if (p.objetivo === "formulario" && p.formulario.startsWith("modelo:")) {
     const { data: mf } = await banco.from("modelos").select("config").eq("id", p.formulario.slice(7)).eq("objetivo", OBJETIVO_FORMULARIO).maybeSingle();
     if (!mf) return { ok: false, mensagem: "Modelo de formulário não encontrado.", detalhes: [], link: null };
     modeloFormulario = normalizarFormulario(mf.config);
@@ -52,7 +60,8 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
     });
     // lembra as escolhas deste cliente para a próxima montagem
     await banco.from("clientes").update({
-      padroes_meta: { conta: conta.id, pagina: p.pagina, instagram: p.instagram, formulario: p.formulario, pixel: p.pixel, locais: config.locais },
+      // formulário criado agora: na próxima montagem já vem escolhido (em vez de criar outro)
+      padroes_meta: { conta: conta.id, pagina: p.pagina, instagram: p.instagram, formulario: r.formularioCriado ?? p.formulario, pixel: p.pixel, locais: config.locais },
     }).eq("id", cliente.id).then(() => null, () => null);
     await banco.from("acoes_log").insert({
       ...registro, objeto_id: r.campanhaId, objeto_nome: r.campanhaNome, ok: true,
