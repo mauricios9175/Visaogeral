@@ -8,13 +8,22 @@ import { hojeISO } from "./datas";
 
 // ---------- buscas de segmentação ----------
 
+/**
+ * Cidades, estados e países. Busca só no Brasil (com mais resultados, para cidades pequenas não sumirem
+ * atrás de cidades de outros países com nome parecido) e também no mundo todo.
+ */
 export async function buscarLocais(q: string, token: string): Promise<Local[]> {
   type R = { key: string; name: string; type: string; region?: string; country_code?: string };
-  const r = await getMeta<{ data: R[] }>(montarUrl("search", token, {
-    type: "adgeolocation", q, location_types: JSON.stringify(["city", "region", "country"]), limit: "25", locale: "pt_BR",
-  }));
-  return r.data
-    .filter((x) => ["city", "region", "country"].includes(x.type))
+  const tipos = JSON.stringify(["city", "region", "country"]);
+  const erros: string[] = [];
+  const buscar = (params: Record<string, string>) =>
+    getMeta<{ data: R[] }>(montarUrl("search", token, { type: "adgeolocation", q, location_types: tipos, locale: "pt_BR", ...params }))
+      .then((r) => r.data, (e) => { erros.push(e instanceof Error ? e.message : String(e)); return [] as R[]; });
+  const [brasil, mundo] = await Promise.all([buscar({ country_code: "BR", limit: "50" }), buscar({ limit: "25" })]);
+  if (!brasil.length && !mundo.length && erros.length) throw new Error(`O Meta não respondeu à busca: ${erros[0]}`);
+  const vistos = new Set<string>();
+  return [...brasil, ...mundo]
+    .filter((x) => ["city", "region", "country"].includes(x.type) && !vistos.has(x.key) && vistos.add(x.key))
     // Brasil primeiro
     .sort((a, b) => Number(b.country_code === "BR") - Number(a.country_code === "BR"))
     .map((x) => ({

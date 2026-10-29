@@ -91,9 +91,18 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
     };
     const s = await chamar({ etapa: "inicio", tamanho: String(f.size) });
     let { inicio, fim } = s as { inicio: number; fim: number };
+    // a Vercel aceita até ~4,5 MB por chamada: o trecho que o Meta pede vai em pedaços de até 4 MB
+    const PEDACO = 4 * 1024 * 1024;
     while (inicio < fim) {
-      setEnviando(`Enviando ${f.name} para o Meta… ${Math.round((inicio / f.size) * 100)}%`);
-      ({ inicio, fim } = await chamar({ etapa: "parte", sessao: s.sessao, inicio: String(inicio) }, f.slice(inicio, fim)));
+      const total = Math.ceil((fim - inicio) / PEDACO);
+      let r: { inicio: number; fim: number } | null = null;
+      for (let n = 0; n < total; n++) {
+        const de = inicio + n * PEDACO;
+        setEnviando(`Enviando ${f.name} para o Meta… ${Math.round((de / f.size) * 100)}%`);
+        r = await chamar({ etapa: "parte", sessao: s.sessao, inicio: String(inicio), n: String(n), total: String(total) },
+          f.slice(de, Math.min(de + PEDACO, fim)));
+      }
+      ({ inicio, fim } = r!);
     }
     await chamar({ etapa: "fim", sessao: s.sessao, nome: f.name });
     return { videoId: String(s.videoId), conta };
@@ -137,14 +146,18 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
 
   // vídeo enviado ao Meta fica na conta para onde foi; se trocou de conta, ele não serve
   const criativosDaConta = criativos.filter((c) => !c.videoId || c.conta === conta);
-  const payload = { clienteId, conta, modeloId, objetivo, config, pagina, instagram, formulario, pixel, criativos: criativosDaConta, manterSemAnuncios };
+  // sem criativo: cria só a campanha e os conjuntos (o anúncio é subido depois no Gerenciador)
+  const semCriativo = !criativosDaConta.length;
+  const payload = {
+    clienteId, conta, modeloId, objetivo, config, pagina, instagram, formulario, pixel, criativos: criativosDaConta,
+    manterSemAnuncios: semCriativo || manterSemAnuncios,
+  };
   const faltando =
     !pagina ? "Escolha a página do Facebook." :
     objetivo === "formulario" && !formulario ? "Escolha o formulário." :
     objetivo === "site" && !config.url ? "Informe o link do site." :
     !config.locais.length ? "Escolha pelo menos uma localização." :
-    !criativosDaConta.length ? "Adicione pelo menos um criativo." :
-    !config.textos.some((t) => t.trim()) ? "Escreva o texto principal." : null;
+    !semCriativo && !config.textos.some((t) => t.trim()) ? "Escreva o texto principal." : null;
 
   return (
     <div className="space-y-6">
@@ -253,16 +266,26 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
       <form action={enviar} className="space-y-3">
         <input type="hidden" name="payload" value={JSON.stringify(payload)} />
         {faltando && <p className="text-sm text-atencao">▲ {faltando}</p>}
-        <label className="flex items-center gap-2 text-sm text-texto-2">
+        {semCriativo && !faltando && (
+          <p className="text-sm text-texto-2">
+            Sem criativo: o painel cria só {objetivo === "formulario" ? "o formulário, " : ""}a campanha e os conjuntos (pausados).
+            O anúncio você sobe depois no Gerenciador.
+          </p>
+        )}
+        {!semCriativo && <label className="flex items-center gap-2 text-sm text-texto-2">
           <input type="checkbox" checked={manterSemAnuncios} onChange={(e) => setManterSemAnuncios(e.target.checked)} />
           Se o Meta barrar os anúncios, manter a campanha, os conjuntos e o formulário criados (pausados) para eu subir o anúncio no Gerenciador
-        </label>
+        </label>}
         <button
           disabled={!!faltando || montando || !!enviando}
-          onClick={(e) => { if (!confirm(`Criar a campanha de ${clienteNome} no Meta? Tudo vai ser criado PAUSADO.`)) e.preventDefault(); }}
+          onClick={(e) => {
+            const oque = semCriativo ? "a campanha e os conjuntos (sem anúncios)" : "a campanha";
+            if (!confirm(`Criar ${oque} de ${clienteNome} no Meta? Tudo vai ser criado PAUSADO.`)) e.preventDefault();
+          }}
           className="rounded-lg bg-destaque px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {montando ? "Montando no Meta… (vídeos podem levar alguns minutos)" : "Montar campanha pausada no Meta"}
+          {montando ? "Montando no Meta… (vídeos podem levar alguns minutos)"
+            : semCriativo ? "Criar campanha e conjuntos pausados (sem anúncios)" : "Montar campanha pausada no Meta"}
         </button>
       </form>
 

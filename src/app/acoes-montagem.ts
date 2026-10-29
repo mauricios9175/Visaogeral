@@ -61,9 +61,11 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
     await apagar(p.criativos.map((c) => c.caminho).filter(Boolean));
     revalidatePath(`/clientes/${cliente.id}`);
     return {
-      ok: r.anuncios > 0,
+      ok: r.anuncios > 0 || !p.criativos.length,
       mensagem: r.anuncios
         ? `Campanha “${r.campanhaNome}” criada PAUSADA com ${r.conjuntos} conjunto(s) e ${r.anuncios} anúncio(s).`
+        : !p.criativos.length
+          ? `Campanha “${r.campanhaNome}” e ${r.conjuntos} conjunto(s) criados PAUSADOS, sem anúncios. Suba o anúncio pelo Gerenciador (link abaixo).`
         : `Campanha “${r.campanhaNome}” e ${r.conjuntos} conjunto(s) criados PAUSADOS, mas o Meta não deixou criar os anúncios. ` +
           "Suba o anúncio pelo Gerenciador (link abaixo); o motivo está logo aqui embaixo.",
       detalhes: [

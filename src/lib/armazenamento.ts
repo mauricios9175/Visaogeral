@@ -49,3 +49,10 @@ export async function linkTemporario(caminho: string, segundos = 3600) {
 export async function apagar(caminhos: string[]) {
   if (caminhos.length) await db().storage.from(BUCKET).remove(caminhos).then(() => null, () => null);
 }
+
+/** Guarda um pedaço de um envio em partes (vídeo da montagem) até juntar o trecho que o Meta pediu. */
+export async function guardarParte(caminho: string, parte: Blob) {
+  await garantirBucket();
+  const { error } = await db().storage.from(BUCKET).upload(caminho, parte, { upsert: true, contentType: "application/octet-stream" });
+  if (error) throw new Error(`Storage: ${error.message}`);
+}
