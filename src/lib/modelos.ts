@@ -239,9 +239,11 @@ export const FORMULARIO_PADRAO: ConfigFormulario = {
   botaoTexto: "Falar no WhatsApp",
   botaoUrl: "",
   idioma: "PT_BR",
+  // como no Gerenciador (Configurações do formulário → Parâmetros de rastreamento); aceita {{campaign.name}} etc.
   parametros: [
-    { chave: "utm_source", valor: "facebook" },
-    { chave: "utm_medium", valor: "formulario" },
+    { chave: "utm_source", valor: "Facebook" },
+    { chave: "utm_medium", valor: "cpc" },
+    { chave: "utm_campaign", valor: "{{campaign.name}}" },
   ],
 };
 

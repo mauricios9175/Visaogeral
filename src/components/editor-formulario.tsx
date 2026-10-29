@@ -117,8 +117,9 @@ export function EditorFormulario({ modelo }: { modelo?: ModeloFormulario }) {
             + Parâmetro
           </button>
           <p className={dica}>
-            Aqui vão os valores fixos (ex.: utm_source = facebook). Os dinâmicos, com o nome da campanha, do conjunto e do anúncio,
-            ficam nos “Parâmetros de URL do anúncio”, no modelo de campanha.
+            É a mesma tela de “Configurações do formulário → Parâmetros de rastreamento” do Gerenciador. Aceita valores fixos
+            (ex.: utm_source = Facebook) e dinâmicos ({"{{campaign.name}}"}, {"{{adset.name}}"}, {"{{ad.name}}"}). O anúncio tem os
+            seus próprios “Parâmetros de URL”, no modelo de campanha.
           </p>
         </div>
       </fieldset>

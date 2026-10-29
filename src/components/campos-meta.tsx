@@ -56,6 +56,42 @@ function Busca<T>({ tipo, conta, placeholder, onEscolher, rotuloItem }: {
   );
 }
 
+/** Sugestões do Meta parecidas com o que já foi escolhido, como no Gerenciador. */
+function Sugestoes({ conta, escolhidos, onEscolher }: { conta?: string; escolhidos: Interesse[]; onEscolher: (x: Interesse) => void }) {
+  const [itens, setItens] = useState<Interesse[]>([]);
+  const [carregando, setCarregando] = useState(false);
+  const chave = escolhidos.map((x) => x.id).join(",");
+  useEffect(() => {
+    if (!chave) return;
+    const relogio = setTimeout(async () => {
+      setCarregando(true);
+      const qs = new URLSearchParams({
+        tipo: "sugestao", itens: JSON.stringify(escolhidos.map((x) => ({ id: x.id, nome: x.nome, tipo: x.tipo }))), ...(conta ? { conta } : {}),
+      });
+      const r = await fetch(`/api/meta/busca?${qs}`).then((x) => x.json()).catch(() => ({ itens: [] }));
+      setItens(r.itens ?? []);
+      setCarregando(false);
+    }, 500);
+    return () => clearTimeout(relogio);
+    // escolhidos muda de referência a cada render; a chave (ids) é o que importa
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chave, conta]);
+  const visiveis = chave ? itens.filter((x) => !escolhidos.some((y) => y.id === x.id)) : [];
+  if (!visiveis.length && !carregando) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1 text-xs">
+      <span className="text-texto-3">{carregando ? "Buscando sugestões do Meta…" : "Sugestões do Meta:"}</span>
+      {visiveis.map((x) => (
+        <button key={`${x.tipo}:${x.id}`} type="button" onClick={() => onEscolher(x)}
+          title={[x.caminho, x.publico ? `${publico(x.publico)} pessoas` : ""].filter(Boolean).join(" · ")}
+          className="rounded-full border border-dashed border-borda px-2 py-0.5 text-texto-2 hover:border-destaque hover:text-texto">
+          + {x.nome}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Chips<T>({ itens, texto, onRemover }: { itens: T[]; texto: (t: T) => string; onRemover: (i: number) => void }) {
   if (!itens.length) return null;
   return (
@@ -276,6 +312,8 @@ function CartaoConjunto({ indice, conjunto, conta, comOrcamento, podeRemover, on
         />
         <Chips itens={conjunto.interesses} texto={(x) => `${x.tipo && x.tipo !== "interests" ? `${tipoDe(x)}: ` : ""}${x.nome}`}
           onRemover={(i) => set("interesses", conjunto.interesses.filter((_, j) => j !== i))} />
+        <Sugestoes conta={conta} escolhidos={conjunto.interesses}
+          onEscolher={(x) => !conjunto.interesses.some((y) => y.id === x.id) && set("interesses", [...conjunto.interesses, x])} />
       </div>
     </div>
   );

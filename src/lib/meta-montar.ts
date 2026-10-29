@@ -35,24 +35,46 @@ const paraInteresse = (x: ResultadoSegmentacao, tipoPadrao: string): Interesse =
   publico: x.audience_size_upper_bound ?? x.audience_size_lower_bound,
 });
 
+/** Sem acento e minúsculo, para comparar o termo buscado com os nomes. */
+const simples = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+/** Listas fixas do Meta que não têm busca por texto (comportamentos, eventos da vida, setores…): baixa e guarda 6 h. */
+const CLASSES_CATEGORIA = ["behaviors", "life_events", "industries", "income", "family_statuses", "education_statuses", "relationship_statuses"];
+let categorias: { quando: number; itens: Interesse[] } | null = null;
+async function categoriasDoMeta(token: string) {
+  if (categorias && Date.now() - categorias.quando < 6 * 3_600_000) return categorias.itens;
+  const listas = await Promise.all(CLASSES_CATEGORIA.map((classe) =>
+    getMeta<{ data: ResultadoSegmentacao[] }>(montarUrl("search", token, { type: "adTargetingCategory", class: classe, locale: "pt_BR", limit: "1000" }))
+      .then((r) => r.data.map((x) => paraInteresse(x, classe)), () => [] as Interesse[]),
+  ));
+  const itens = listas.flat();
+  if (itens.length) categorias = { quando: Date.now(), itens };
+  return itens;
+}
+
 /**
  * Segmentação detalhada como no Gerenciador: interesses, comportamentos, dados demográficos (cargos, setores,
- * formação, eventos da vida…). Usa a busca da conta de anúncio e completa com interesses e cargos.
+ * formação, eventos da vida…). Junta várias buscas do Meta, porque nenhuma sozinha traz tudo:
+ * a da conta (a mesma do Gerenciador), em português e sem idioma (muitos interesses só têm nome em inglês),
+ * interesses, cargos, empregadores e as listas fixas de comportamentos e dados demográficos.
  */
 export async function buscarInteresses(q: string, token: string, contaId?: string | null): Promise<Interesse[]> {
+  const erros: string[] = [];
+  const buscar = (caminho: string, params: Record<string, string>, tipoPadrao: string) =>
+    getMeta<{ data: ResultadoSegmentacao[] }>(montarUrl(caminho, token, params))
+      .then((r) => r.data.map((x) => paraInteresse(x, tipoPadrao)), (e) => { erros.push(msgErro(e)); return [] as Interesse[]; });
+  const termo = simples(q);
   const buscas: Promise<Interesse[]>[] = [
-    getMeta<{ data: ResultadoSegmentacao[] }>(montarUrl("search", token, { type: "adinterest", q, limit: "50", locale: "pt_BR" }))
-      .then((r) => r.data.map((x) => paraInteresse(x, "interests")), () => []),
-    getMeta<{ data: ResultadoSegmentacao[] }>(montarUrl("search", token, { type: "adworkposition", q, limit: "25", locale: "pt_BR" }))
-      .then((r) => r.data.map((x) => paraInteresse(x, "work_positions")), () => []),
+    ...(contaId ? [
+      buscar(`${contaId}/targetingsearch`, { q, limit: "100", locale: "pt_BR" }, "interests"),
+      buscar(`${contaId}/targetingsearch`, { q, limit: "100" }, "interests"),
+    ] : []),
+    buscar("search", { type: "adinterest", q, limit: "60", locale: "pt_BR" }, "interests"),
+    buscar("search", { type: "adinterest", q, limit: "60" }, "interests"),
+    buscar("search", { type: "adworkposition", q, limit: "25", locale: "pt_BR" }, "work_positions"),
+    buscar("search", { type: "adworkemployer", q, limit: "15", locale: "pt_BR" }, "work_employers"),
+    categoriasDoMeta(token).then((lista) => lista.filter((x) => simples(`${x.nome} ${x.caminho ?? ""}`).includes(termo))),
   ];
-  if (contaId) {
-    // mesma busca do campo "Segmentação detalhada" do Gerenciador (traz todos os tipos)
-    buscas.unshift(
-      getMeta<{ data: ResultadoSegmentacao[] }>(montarUrl(`${contaId}/targetingsearch`, token, { q, limit: "100", locale: "pt_BR" }))
-        .then((r) => r.data.map((x) => paraInteresse(x, "interests")), () => []),
-    );
-  }
   const vistos = new Set<string>();
   const itens: Interesse[] = [];
   for (const lista of await Promise.all(buscas)) {
@@ -61,8 +83,35 @@ export async function buscarInteresses(q: string, token: string, contaId?: strin
       if (!vistos.has(chave)) { vistos.add(chave); itens.push(x); }
     }
   }
-  if (!itens.length && !contaId) return [];
-  return itens.slice(0, 80);
+  if (!itens.length && erros.length) throw new Error(`O Meta não respondeu à busca: ${[...new Set(erros)][0]}`);
+  // mais parecidos primeiro: começa com o termo, depois contém o termo, depois o resto; empate = maior público
+  const nota = (x: Interesse) => { const n = simples(x.nome); return n.startsWith(termo) ? 0 : n.includes(termo) ? 1 : 2; };
+  return itens.sort((a, b) => nota(a) - nota(b) || (b.publico ?? 0) - (a.publico ?? 0)).slice(0, 100);
+}
+
+/**
+ * Sugestões parecidas com os itens já escolhidos (como o Gerenciador mostra ao clicar no campo).
+ * Usa as sugestões da conta; sem conta, a sugestão de interesses pelo nome.
+ */
+export async function sugerirInteresses(escolhidos: Interesse[], token: string, contaId?: string | null): Promise<Interesse[]> {
+  if (!escolhidos.length) return [];
+  const ja = new Set(escolhidos.map((x) => x.id));
+  let lista: Interesse[] = [];
+  if (contaId) {
+    const alvo = escolhidos.slice(0, 10).map((x) => ({ type: x.tipo ?? "interests", id: x.id }));
+    lista = await getMeta<{ data: ResultadoSegmentacao[] }>(montarUrl(`${contaId}/targetingsuggestions`, token, {
+      targeting_list: JSON.stringify(alvo), limit: "30", locale: "pt_BR",
+    })).then((r) => r.data.map((x) => paraInteresse(x, "interests")), () => []);
+  }
+  if (!lista.length) {
+    const nomes = escolhidos.filter((x) => !x.tipo || x.tipo === "interests").slice(0, 10).map((x) => x.nome);
+    if (nomes.length) {
+      lista = await getMeta<{ data: ResultadoSegmentacao[] }>(montarUrl("search", token, {
+        type: "adinterestsuggestion", interest_list: JSON.stringify(nomes), limit: "30", locale: "pt_BR",
+      })).then((r) => r.data.map((x) => paraInteresse(x, "interests")), () => []);
+    }
+  }
+  return lista.filter((x) => !ja.has(x.id)).slice(0, 20);
 }
 
 // ---------- ativos da conta ----------
