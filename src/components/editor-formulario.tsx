@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { salvarModeloFormulario } from "@/app/acoes-modelos";
-import { normalizarFormulario, PERGUNTAS_PADRAO, type ConfigFormulario, type ModeloFormulario, type PerguntaForm } from "@/lib/modelos";
+import { IDIOMAS_FORMULARIO, normalizarFormulario, PERGUNTAS_PADRAO, type ConfigFormulario, type ModeloFormulario, type PerguntaForm } from "@/lib/modelos";
 import { BotaoEnviar } from "./botao";
 import { campo } from "./campos-meta";
 
@@ -91,6 +91,36 @@ export function EditorFormulario({ modelo }: { modelo?: ModeloFormulario }) {
         <label className={rotulo}>Link<input value={f.politicaUrl} onChange={(e) => set("politicaUrl", e.target.value)} placeholder="https://site-do-cliente.com/privacidade" className={campo} /></label>
         <label className={rotulo}>Texto do link<input value={f.politicaTexto} onChange={(e) => set("politicaTexto", e.target.value)} className={campo} /></label>
         <p className={`${dica} md:col-span-2`}>Em branco, o painel reaproveita a política do formulário mais recente da página do cliente (como o Gerenciador faz). Só é preciso preencher se a página ainda não tiver nenhum formulário.</p>
+      </fieldset>
+
+      <fieldset className="space-y-3">
+        <legend className="mb-2 text-sm font-medium">Configurações</legend>
+        <label className={`${rotulo} max-w-xs`}>Idioma do formulário
+          <select value={f.idioma} onChange={(e) => set("idioma", e.target.value)} className={campo}>
+            {IDIOMAS_FORMULARIO.map((i) => <option key={i.valor} value={i.valor}>{i.rotulo}</option>)}
+          </select>
+        </label>
+        <div className="space-y-2">
+          <div className="text-sm">Parâmetros de rastreamento <span className={dica}>(vão junto com cada lead; o Ávora lê como UTM)</span></div>
+          {f.parametros.map((p, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-2">
+              <input value={p.chave} onChange={(e) => set("parametros", f.parametros.map((x, j) => (j === i ? { ...x, chave: e.target.value } : x)))}
+                placeholder="utm_campaign" className={`${campo} w-48 font-mono text-xs`} />
+              <span className="text-texto-3">=</span>
+              <input value={p.valor} onChange={(e) => set("parametros", f.parametros.map((x, j) => (j === i ? { ...x, valor: e.target.value } : x)))}
+                placeholder="valor" className={`${campo} min-w-60 flex-1 font-mono text-xs`} />
+              <button type="button" onClick={() => set("parametros", f.parametros.filter((_, j) => j !== i))} className="text-xs text-texto-3 underline hover:text-critico">remover</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => set("parametros", [...f.parametros, { chave: "", valor: "" }])}
+            className="rounded-lg border border-dashed border-borda px-3 py-1 text-sm text-texto-2 hover:border-destaque hover:text-texto">
+            + Parâmetro
+          </button>
+          <p className={dica}>
+            Aqui vão os valores fixos (ex.: utm_source = facebook). Os dinâmicos, com o nome da campanha, do conjunto e do anúncio,
+            ficam nos “Parâmetros de URL do anúncio”, no modelo de campanha.
+          </p>
+        </div>
       </fieldset>
 
       <fieldset className="grid gap-3 md:grid-cols-2">

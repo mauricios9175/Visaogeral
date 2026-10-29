@@ -56,8 +56,13 @@ export type ConfigMeta = {
   descricao: string;
   cta: string;
   url: string;            // site (objetivo site)
-  utm: boolean;           // acrescenta UTMs padrão no link do site
+  utm: boolean;           // (antigo) acrescentava UTMs fixas no link do site; hoje vale parametrosUrl
+  parametrosUrl: string;  // "Parâmetros de URL" do anúncio, com os dinâmicos do Meta ({{ad.name}}…)
 };
+
+/** Parâmetros de URL padrão: o Meta troca {{…}} pelos nomes reais da campanha, do conjunto e do anúncio. */
+export const PARAMETROS_URL_PADRAO =
+  "utm_source=facebook&utm_medium={{adset.name}}&utm_campaign={{campaign.name}}&utm_content={{ad.name}}";
 
 export type Modelo = {
   id: string;
@@ -110,6 +115,7 @@ const BASE: ConfigMeta = {
   cta: "LEARN_MORE",
   url: "",
   utm: true,
+  parametrosUrl: PARAMETROS_URL_PADRAO,
 };
 
 /** Modelos prontos para começar (o usuário edita e salva os dele). */
@@ -191,7 +197,15 @@ export type ConfigFormulario = {
   agradecimentoTexto: string;
   botaoTexto: string;
   botaoUrl: string;          // site ou link do WhatsApp (https://wa.me/55…)
+  idioma: string;            // idioma do formulário no Meta (PT_BR, EN_US…)
+  parametros: { chave: string; valor: string }[]; // parâmetros de rastreamento do formulário (vão junto com o lead)
 };
+
+export const IDIOMAS_FORMULARIO = [
+  { valor: "PT_BR", rotulo: "Português (Brasil)" },
+  { valor: "ES_LA", rotulo: "Espanhol (América Latina)" },
+  { valor: "EN_US", rotulo: "Inglês" },
+];
 
 export type ModeloFormulario = { id: string; nome: string; config: ConfigFormulario };
 
@@ -224,6 +238,11 @@ export const FORMULARIO_PADRAO: ConfigFormulario = {
   agradecimentoTexto: "Em breve um consultor vai entrar em contato pelo WhatsApp.",
   botaoTexto: "Falar no WhatsApp",
   botaoUrl: "",
+  idioma: "PT_BR",
+  parametros: [
+    { chave: "utm_source", valor: "facebook" },
+    { chave: "utm_medium", valor: "formulario" },
+  ],
 };
 
 export function normalizarFormulario(c: Partial<ConfigFormulario> | null | undefined): ConfigFormulario {

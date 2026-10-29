@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  CONJUNTO_PADRAO, CTAS, TIPOS_SEGMENTACAO, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type ObjetivoMeta,
+  CONJUNTO_PADRAO, CTAS, PARAMETROS_URL_PADRAO, TIPOS_SEGMENTACAO, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type ObjetivoMeta,
 } from "@/lib/modelos";
 
 const publico = (n?: number) =>
@@ -197,13 +197,16 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
           </label>
         </div>
         {objetivo === "site" && (
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className={rotulo}>Link do site<input value={valor.url} onChange={(e) => set("url", e.target.value)} placeholder="https://" className={campo} /></label>
-            <label className="flex items-end gap-2 pb-2 text-sm">
-              <input type="checkbox" checked={valor.utm} onChange={(e) => set("utm", e.target.checked)} />
-              Acrescentar UTMs (utm_source=facebook, utm_campaign, utm_content = nome do anúncio)
-            </label>
-          </div>
+          <label className={rotulo}>Link do site<input value={valor.url} onChange={(e) => set("url", e.target.value)} placeholder="https://" className={campo} /></label>
+        )}
+        {objetivo !== "mensagens" && (
+          <label className={rotulo}>Parâmetros de URL do anúncio <span className="text-xs text-texto-3">(UTMs; o Meta troca {"{{campaign.name}}"}, {"{{adset.name}}"} e {"{{ad.name}}"} pelos nomes reais)</span>
+            <input value={valor.parametrosUrl} onChange={(e) => set("parametrosUrl", e.target.value)} className={`${campo} font-mono text-xs`} />
+            <span className="flex gap-3 text-xs text-texto-3">
+              <button type="button" className="underline hover:text-texto" onClick={() => set("parametrosUrl", PARAMETROS_URL_PADRAO)}>usar o padrão</button>
+              <button type="button" className="underline hover:text-texto" onClick={() => set("parametrosUrl", "")}>sem parâmetros</button>
+            </span>
+          </label>
         )}
       </fieldset>
     </div>

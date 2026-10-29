@@ -260,6 +260,12 @@ async function politicasCandidatas(paginaId: string, tokenPagina: string, f: Con
 }
 
 /** Cria um formulário instantâneo na página a partir do modelo. Devolve o id do formulário. */
+/** Parâmetros de rastreamento do formulário ({utm_source: "facebook", …}), se houver. */
+function rastreamento(f: ConfigFormulario): Record<string, string> {
+  const params = Object.fromEntries((f.parametros ?? []).map((p) => [p.chave.trim(), p.valor.trim()] as const).filter(([k, v]) => k && v));
+  return Object.keys(params).length ? { tracking_parameters: JSON.stringify(params) } : {};
+}
+
 export async function criarFormulario(paginaId: string, token: string, f: ConfigFormulario, vars: Record<string, string>) {
   const tokenPagina = await tokenDaPagina(paginaId, token);
   const perguntas = f.perguntas.map((p, i) => {
@@ -272,7 +278,9 @@ export async function criarFormulario(paginaId: string, token: string, f: Config
   });
   const base = {
     name: aplicarNome(f.nome, vars),
-    locale: "PT_BR",
+    locale: f.idioma || "PT_BR",
+    // parâmetros de rastreamento: vão junto com cada lead (o CRM lê como UTM)
+    ...rastreamento(f),
     questions: JSON.stringify(perguntas),
     ...(f.tituloPerguntas && { question_page_custom_headline: f.tituloPerguntas }),
     is_optimized_for_quality: f.tipo === "intencao" ? "true" : "false",
@@ -371,15 +379,6 @@ function segmentacao(c: ConfigMeta, p: ConjuntoMeta) {
     ...(p.interesses.length && { flexible_spec: [agruparPorTipo(p.interesses)] }),
     targeting_automation: { advantage_audience: p.advantage ? 1 : 0 },
   };
-}
-
-function comUtm(url: string, campanha: string, anuncio: string) {
-  const u = new URL(url);
-  u.searchParams.set("utm_source", "facebook");
-  u.searchParams.set("utm_medium", "paid_social");
-  u.searchParams.set("utm_campaign", campanha);
-  u.searchParams.set("utm_content", anuncio);
-  return u.toString();
 }
 
 export type DadosMontagem = {
@@ -481,7 +480,7 @@ export async function montarNoMeta(d: DadosMontagem) {
         const midia = ehVideo ? await subirVideo(d.contaId, d.token, cr.caminho, cr.nome) : { hash: await subirImagem(d.contaId, d.token, cr.caminho) };
         const nomeCriativo = aplicarNome(c.nomeAnuncio, { ...nomeBase, conjunto: "" }).replace(/\s*-\s*$/, "");
         const link =
-          d.objetivo === "site" ? (c.utm ? comUtm(c.url, campanhaNome, nomeCriativo) : c.url)
+          d.objetivo === "site" ? c.url
           : d.objetivo === "mensagens" ? "https://api.whatsapp.com/send"
           : "http://fb.me/"; // link padrão do Meta para formulário instantâneo
         // no vídeo não existe "link" fora do botão; no WhatsApp o botão não pode levar link
@@ -501,9 +500,12 @@ export async function montarNoMeta(d: DadosMontagem) {
               ...(c.descricao && { description: c.descricao }), call_to_action: cta,
             } };
         if (d.instagramId) Object.assign(story, { instagram_user_id: d.instagramId });
+        // "Parâmetros de URL" do anúncio (site e formulário): o Meta troca {{ad.name}} etc. pelos nomes reais
+        const parametrosUrl = d.objetivo !== "mensagens" ? c.parametrosUrl.trim().replace(/^[?&]+/, "") : "";
         const criativo = await postMeta(`${d.contaId}/adcreatives`, d.token, {
           name: nomeCriativo,
           object_story_spec: JSON.stringify(story),
+          ...(parametrosUrl && { url_tags: parametrosUrl }),
         });
         for (const cj of conjuntos) {
           try {
