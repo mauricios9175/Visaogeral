@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { montarCampanhaMeta, type ResultadoMontagem } from "@/app/acoes-montagem";
-import { FORMULARIO_PADRAO, normalizarConfig, OBJETIVOS, type ConfigFormulario, type ConfigMeta, type Modelo } from "@/lib/modelos";
+import { configDoZero, FORMULARIO_PADRAO, normalizarConfig, OBJETIVOS, type ObjetivoMeta, type ConfigFormulario, type ConfigMeta, type Modelo } from "@/lib/modelos";
 import { CamposMeta, campo } from "./campos-meta";
 import { CamposFormulario } from "./editor-formulario";
 
@@ -27,11 +27,14 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
   /** modelos de formulário: na montagem dá para criar um formulário novo na página a partir deles */
   modelosFormulario: Opcao[];
 }) {
-  const [modeloId, setModeloId] = useState(modelos[0]?.id ?? "");
+  // "zero:<objetivo>" = campanha do zero, sem modelo
+  const [modeloId, setModeloId] = useState(modelos[0]?.id ?? "zero:formulario");
   const modelo = modelos.find((m) => m.id === modeloId);
-  const objetivo = modelo?.objetivo ?? "formulario";
-  const [config, setConfig] = useState<ConfigMeta>(() =>
-    normalizarConfig({ ...modelos[0]?.config, ...(padroes.locais?.length ? { locais: padroes.locais } : {}) }));
+  const objetivo: ObjetivoMeta = modelo?.objetivo ?? (modeloId.startsWith("zero:") ? (modeloId.slice(5) as ObjetivoMeta) : "formulario");
+  const [config, setConfig] = useState<ConfigMeta>(() => normalizarConfig({
+    ...(modelos[0]?.config ?? configDoZero("formulario")), ...(padroes.locais?.length ? { locais: padroes.locais } : {}),
+  }));
+  const [salvarModeloComo, setSalvarModeloComo] = useState("");
   const [conta, setConta] = useState(contas.some((c) => c.id === padroes.conta) ? padroes.conta! : contas[0]?.id ?? "");
   const [ativos, setAtivos] = useState<Ativos | null>(null);
   const [pagina, setPagina] = useState(padroes.pagina ?? "");
@@ -55,7 +58,8 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
   function trocarModelo(id: string) {
     setModeloId(id);
     const m = modelos.find((x) => x.id === id);
-    setConfig((atual) => normalizarConfig({ ...m?.config, locais: atual.locais.length ? atual.locais : m?.config.locais ?? [] }));
+    const base = m?.config ?? configDoZero(id.startsWith("zero:") ? (id.slice(5) as ObjetivoMeta) : "formulario");
+    setConfig((atual) => normalizarConfig({ ...base, locais: atual.locais.length ? atual.locais : base.locais }));
   }
 
   // páginas, Instagram e pixels da conta
@@ -142,9 +146,6 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
     setEnviando(null);
   }
 
-  if (!modelos.length) {
-    return <p className="text-sm">Crie um modelo primeiro em <a href="/modelos" className="text-destaque underline">Modelos</a>.</p>;
-  }
   if (!contas.length) {
     return <p className="text-sm">Este cliente não tem conta do Meta vinculada (Configurações → Contas do Meta).</p>;
   }
@@ -156,6 +157,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
   const payload = {
     clienteId, conta, modeloId, objetivo, config, pagina, instagram, formulario, pixel, criativos: criativosDaConta,
     ...(formulario === "novo" && { formularioNovo: formNovo, salvarComoModelo: salvarComoModelo.trim() }),
+    salvarModeloComo: salvarModeloComo.trim(),
     manterSemAnuncios: semCriativo || manterSemAnuncios,
   };
   const faltando =
@@ -170,7 +172,14 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
       <section className="grid gap-3 rounded-xl border border-borda bg-superficie p-4 md:grid-cols-2">
         <label className={rotulo}>Modelo
           <select value={modeloId} onChange={(e) => trocarModelo(e.target.value)} className={campo}>
-            {modelos.map((m) => <option key={m.id} value={m.id}>{m.nome} · {OBJETIVOS[m.objetivo]?.rotulo}</option>)}
+            <optgroup label="Começar do zero">
+              {(Object.keys(OBJETIVOS) as ObjetivoMeta[]).map((o) => <option key={o} value={`zero:${o}`}>✚ Do zero · {OBJETIVOS[o].rotulo}</option>)}
+            </optgroup>
+            {modelos.length > 0 && (
+              <optgroup label="Modelos">
+                {modelos.map((m) => <option key={m.id} value={m.id}>{m.nome} · {OBJETIVOS[m.objetivo]?.rotulo}</option>)}
+              </optgroup>
+            )}
           </select>
         </label>
         <label className={rotulo}>Conta de anúncio
@@ -296,6 +305,10 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
             O anúncio você sobe depois no Gerenciador.
           </p>
         )}
+        <label className="flex flex-col gap-1 text-sm md:max-w-md">
+          Salvar esta campanha como modelo <span className="text-xs text-texto-3">(opcional: dê um nome e ela vira modelo junto com a montagem)</span>
+          <input value={salvarModeloComo} onChange={(e) => setSalvarModeloComo(e.target.value)} placeholder="Ex.: Planejados – formulário 3 públicos" className={campo} />
+        </label>
         {!semCriativo && <label className="flex items-center gap-2 text-sm text-texto-2">
           <input type="checkbox" checked={manterSemAnuncios} onChange={(e) => setManterSemAnuncios(e.target.checked)} />
           Se o Meta barrar os anúncios, manter a campanha, os conjuntos e o formulário criados (pausados) para eu subir o anúncio no Gerenciador

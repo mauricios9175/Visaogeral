@@ -118,6 +118,16 @@ const BASE: ConfigMeta = {
   parametrosUrl: PARAMETROS_URL_PADRAO,
 };
 
+/** Campanha do zero: um conjunto aberto, sem textos nem interesses (o CTA segue o objetivo). */
+export function configDoZero(objetivo: ObjetivoMeta): ConfigMeta {
+  return {
+    ...BASE,
+    conjuntos: [{ ...CONJUNTO_PADRAO }],
+    textos: [""], titulos: [""], descricao: "", url: "",
+    cta: CTAS[objetivo][0].valor,
+  };
+}
+
 /** Modelos prontos para começar (o usuário edita e salva os dele). */
 export const MODELOS_PADRAO: { nome: string; objetivo: ObjetivoMeta; config: ConfigMeta }[] = [
   {

@@ -17,6 +17,7 @@ type Payload = {
   manterSemAnuncios?: boolean;
   formularioNovo?: Partial<ConfigFormulario>; // formulário criado na própria montagem (formulario = "novo")
   salvarComoModelo?: string;                  // nome para salvar esse formulário também como modelo
+  salvarModeloComo?: string;                  // nome para salvar a campanha (config da montagem) como modelo
 };
 
 /** Cria campanha, conjunto e anúncios (tudo pausado) a partir do modelo. Se algo falhar no meio, desfaz o que criou. */
@@ -49,6 +50,12 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
     const { data: mf } = await banco.from("modelos").select("config").eq("id", p.formulario.slice(7)).eq("objetivo", OBJETIVO_FORMULARIO).maybeSingle();
     if (!mf) return { ok: false, mensagem: "Modelo de formulário não encontrado.", detalhes: [], link: null };
     modeloFormulario = normalizarFormulario(mf.config);
+  }
+  // campanha salva como modelo antes de ir ao Meta: mesmo se a montagem falhar, o trabalho fica guardado
+  if (p.salvarModeloComo) {
+    // as cidades são do cliente: o modelo fica sem elas
+    await banco.from("modelos").insert({ nome: p.salvarModeloComo, objetivo: p.objetivo, plataforma: "meta", config: { ...config, locais: [] } })
+      .then(() => null, () => null);
   }
   const registro = { plataforma: "meta", cliente_id: cliente.id, conta_id: conta.id, nivel: "campanha", acao: "montar" };
   try {
