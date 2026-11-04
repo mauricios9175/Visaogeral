@@ -201,12 +201,20 @@ export async function analisarPeriodo(clienteId: string, params: { p?: string; d
   return { cliente: { id: cliente.id, nome: cliente.nome }, periodo: { rotulo: atual.rotulo, desde: atual.desde, ate: atual.ate, qs: atual.qs }, texto: analise };
 }
 
+/** O pedido é para montar campanha (e não para analisar)? */
+export function ehPedidoDeCampanha(texto: string) {
+  const t = sem(texto);
+  return /\b(campanha|esboco|rascunho|mont[ae]r?|cri[ae]r?|anuncio)\b/.test(t) && !/\banalis|\bresum|\brelatorio|como (foi|esta|ta)|desempenho|ultim[oa]s? \d+|mes passado/.test(t);
+}
+
+/** Cliente citado no pedido (entre os ativos). */
+export async function clienteDoPedido(pedido: string) {
+  const { data } = await db().from("clientes").select("id, nome").eq("ativo", true);
+  return acharCliente(pedido, (data ?? []) as ClienteBasico[]);
+}
+
 /** Pedido livre ("análise dos últimos 14 dias da Loja X"): acha o cliente (se não veio) e o período, e analisa. */
 export async function analisarPedido(pedido: string, clienteId?: string) {
-  let id = clienteId;
-  if (!id) {
-    const { data } = await db().from("clientes").select("id, nome").eq("ativo", true);
-    id = acharCliente(pedido, (data ?? []) as ClienteBasico[]).id;
-  }
+  const id = clienteId ?? (await clienteDoPedido(pedido)).id;
   return analisarPeriodo(id, periodoDoTexto(pedido));
 }

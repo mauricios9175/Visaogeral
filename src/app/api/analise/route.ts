@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { analisarPedido, analisarPeriodo } from "@/lib/analise";
+import { analisarPedido, analisarPeriodo, clienteDoPedido, ehPedidoDeCampanha } from "@/lib/analise";
 
 export const maxDuration = 120;
 
@@ -12,6 +12,11 @@ export async function POST(request: NextRequest) {
   const pedido = typeof corpo.pedido === "string" ? corpo.pedido.trim().slice(0, 500) : "";
   const clienteId = typeof corpo.clienteId === "string" && corpo.clienteId ? corpo.clienteId : undefined;
   try {
+    // "monta uma campanha de formulário para a Loja X": vai para a montagem, que faz o esboço com a IA
+    if (pedido && ehPedidoDeCampanha(pedido)) {
+      const id = clienteId ?? (await clienteDoPedido(pedido)).id;
+      return NextResponse.json({ ir: `/clientes/${id}/montar?pedido=${encodeURIComponent(pedido)}` });
+    }
     if (pedido) return NextResponse.json(await analisarPedido(pedido, clienteId));
     if (!clienteId) return NextResponse.json({ erro: "Escreva o pedido (ex.: “últimos 14 dias da Loja X”)." }, { status: 400 });
     return NextResponse.json(await analisarPeriodo(clienteId, { p: corpo.p, de: corpo.de, ate: corpo.ate }));

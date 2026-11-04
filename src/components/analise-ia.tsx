@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
 type Resultado = { cliente: { id: string; nome: string }; periodo: { rotulo: string; qs: string }; texto: string };
@@ -13,6 +14,36 @@ const criarReconhecedor = (): Reconhecedor | null => {
     ?? (window as unknown as { webkitSpeechRecognition?: new () => Reconhecedor }).webkitSpeechRecognition;
   return C ? new C() : null;
 };
+
+/** Microfone do navegador: vai escrevendo o que a pessoa fala em `setTexto`. */
+export function useMicrofone(setTexto: (t: string) => void, setErro: (e: string) => void) {
+  const [ouvindo, setOuvindo] = useState(false);
+  const rec = useRef<Reconhecedor | null>(null);
+  function falar() {
+    if (ouvindo) { rec.current?.stop(); return; }
+    const r = criarReconhecedor();
+    if (!r) { setErro("Este navegador não tem reconhecimento de voz. Use o Chrome, ou o microfone do teclado do celular."); return; }
+    r.lang = "pt-BR";
+    r.interimResults = true;
+    r.onresult = (ev) => setTexto(Array.from(ev.results).map((x) => x[0].transcript).join(" "));
+    r.onend = () => setOuvindo(false);
+    r.onerror = () => setOuvindo(false);
+    rec.current = r;
+    setOuvindo(true);
+    r.start();
+  }
+  return { ouvindo, falar };
+}
+
+/** Botão do microfone (mesmo visual nas caixas de IA). */
+export function BotaoMicrofone({ ouvindo, falar }: { ouvindo: boolean; falar: () => void }) {
+  return (
+    <button type="button" onClick={falar} aria-label={ouvindo ? "Parar de ouvir" : "Falar o pedido"} title="Falar"
+      className={`flex min-h-11 w-11 shrink-0 items-center justify-center rounded-[10px] border ${ouvindo ? "border-destaque bg-destaque-bg text-destaque" : "border-borda text-texto-2 hover:text-texto"}`}>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+    </button>
+  );
+}
 
 /** Negrito (**x**) dentro de uma linha. */
 function Inline({ t }: { t: string }) {
@@ -48,8 +79,7 @@ export function AnaliseIA({ clienteId, periodo, rotuloPeriodo }: { clienteId?: s
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [res, setRes] = useState<Resultado | null>(null);
-  const [ouvindo, setOuvindo] = useState(false);
-  const rec = useRef<Reconhecedor | null>(null);
+  const router = useRouter();
 
   async function analisar(corpo: Record<string, unknown>) {
     setOcupado(true);
@@ -58,6 +88,8 @@ export function AnaliseIA({ clienteId, periodo, rotuloPeriodo }: { clienteId?: s
       const r = await fetch("/api/analise", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
       const j = await r.json().catch(() => ({ erro: `erro ${r.status}` }));
       if (j.erro) throw new Error(j.erro);
+      // pedido de campanha: abre a montagem, que faz o esboço
+      if (j.ir) { router.push(j.ir); return; }
       setRes(j as Resultado);
     } catch (e) {
       setErro(e instanceof Error ? e.message : String(e));
@@ -72,21 +104,11 @@ export function AnaliseIA({ clienteId, periodo, rotuloPeriodo }: { clienteId?: s
     analisar({ pedido, clienteId });
   }
 
-  function falar() {
-    if (ouvindo) { rec.current?.stop(); return; }
-    const r = criarReconhecedor();
-    if (!r) { setErro("Este navegador não tem reconhecimento de voz. Use o Chrome, ou o microfone do teclado do celular."); return; }
-    r.lang = "pt-BR";
-    r.interimResults = true;
-    r.onresult = (ev) => setPedido(Array.from(ev.results).map((x) => x[0].transcript).join(" "));
-    r.onend = () => setOuvindo(false);
-    r.onerror = () => setOuvindo(false);
-    rec.current = r;
-    setOuvindo(true);
-    r.start();
-  }
+  const { ouvindo, falar } = useMicrofone(setPedido, setErro);
 
-  const exemplo = clienteId ? "ex.: do dia 1 ao dia 15, últimos 30 dias, mês passado" : "ex.: análise dos últimos 14 dias da Loja X";
+  const exemplo = clienteId
+    ? "ex.: do dia 1 ao dia 15, mês passado, ou “monta uma campanha de WhatsApp…”"
+    : "ex.: análise dos últimos 14 dias da Loja X · ou: campanha de formulário para a Loja X";
   return (
     <section className="rounded-2xl border border-borda bg-superficie p-4 lg:p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -106,10 +128,7 @@ export function AnaliseIA({ clienteId, periodo, rotuloPeriodo }: { clienteId?: s
           aria-label="Pedido de análise"
           className="min-h-11 min-w-0 flex-1 rounded-[10px] border border-borda bg-fundo px-3 text-sm placeholder:text-texto-3 focus:border-destaque focus:outline-none"
         />
-        <button type="button" onClick={falar} aria-label={ouvindo ? "Parar de ouvir" : "Falar o pedido"} title="Falar"
-          className={`flex min-h-11 w-11 shrink-0 items-center justify-center rounded-[10px] border ${ouvindo ? "border-destaque bg-destaque-bg text-destaque" : "border-borda text-texto-2 hover:text-texto"}`}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
-        </button>
+        <BotaoMicrofone ouvindo={ouvindo} falar={falar} />
         <button disabled={ocupado} className="min-h-11 shrink-0 rounded-[10px] border border-borda bg-superficie-2 px-4 text-sm font-semibold hover:border-destaque disabled:opacity-60">
           {ocupado ? "…" : "Analisar"}
         </button>

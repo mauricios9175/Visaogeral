@@ -7,8 +7,9 @@ import { Montagem, type Padroes } from "@/components/montagem";
 
 export const maxDuration = 300;
 
-export default async function Montar({ params }: PageProps<"/clientes/[id]/montar">) {
+export default async function Montar({ params, searchParams }: PageProps<"/clientes/[id]/montar">) {
   const { id } = await params;
+  const { pedido } = (await searchParams) as { pedido?: string };
   const banco = db();
   const [{ data: cliente }, { data: contas }, { data: modelos }] = await Promise.all([
     banco.from("clientes").select("*").eq("id", id).maybeSingle(),
@@ -36,6 +37,7 @@ export default async function Montar({ params }: PageProps<"/clientes/[id]/monta
           .map((m) => ({ ...m, config: normalizarConfig(m.config) }))}
         modelosFormulario={(modelos ?? []).filter((m) => m.objetivo === OBJETIVO_FORMULARIO).map((m) => ({ id: m.id, nome: m.nome }))}
         padroes={(cliente.padroes_meta ?? {}) as Padroes}
+        pedidoInicial={pedido?.slice(0, 1000)}
       />
     </div>
   );

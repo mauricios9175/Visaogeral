@@ -1,5 +1,6 @@
 "use client";
 
+import { EsbocoIA } from "./esboco-ia";
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { montarCampanhaMeta, type ResultadoMontagem } from "@/app/acoes-montagem";
 import { configDoZero, FORMULARIO_PADRAO, normalizarConfig, OBJETIVOS, type ObjetivoMeta, type ConfigFormulario, type ConfigMeta, type Modelo } from "@/lib/modelos";
@@ -18,7 +19,7 @@ const rotulo = "block space-y-1 text-sm";
 const tamanho = (b: number) => (b > 1e6 ? `${(b / 1e6).toFixed(1).replace(".", ",")} MB` : `${Math.round(b / 1e3)} KB`);
 
 /** Tela de montagem: escolhe o modelo, a conta, a página e os criativos, e cria tudo pausado no Meta. */
-export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, modelosFormulario }: {
+export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, modelosFormulario, pedidoInicial }: {
   clienteId: string;
   clienteNome: string;
   contas: Opcao[];
@@ -26,6 +27,8 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
   padroes: Padroes;
   /** modelos de formulário: na montagem dá para criar um formulário novo na página a partir deles */
   modelosFormulario: Opcao[];
+  /** pedido vindo da caixa "Pergunte ao painel": já faz o esboço com IA */
+  pedidoInicial?: string;
 }) {
   // "zero:<objetivo>" = campanha do zero, sem modelo
   const [modeloId, setModeloId] = useState(modelos[0]?.id ?? "zero:formulario");
@@ -169,6 +172,13 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
 
   return (
     <div className="space-y-6">
+      <EsbocoIA
+        clienteId={clienteId} conta={conta} pedidoInicial={pedidoInicial}
+        onPronto={(obj, c) => {
+          setModeloId(`zero:${obj}`);
+          setConfig((atual) => normalizarConfig({ ...c, locais: atual.locais.length ? atual.locais : c.locais }));
+        }}
+      />
       <section className="grid gap-3 rounded-2xl border border-borda bg-superficie p-4 md:grid-cols-2">
         <label className={rotulo}>Modelo
           <select value={modeloId} onChange={(e) => trocarModelo(e.target.value)} className={campo}>
