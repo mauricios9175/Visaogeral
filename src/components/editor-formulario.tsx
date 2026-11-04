@@ -13,7 +13,7 @@ const dica = "text-xs text-texto-3";
 export function EditorFormulario({ modelo }: { modelo?: ModeloFormulario }) {
   const [f, setF] = useState<ConfigFormulario>(normalizarFormulario(modelo?.config));
   return (
-    <form action={salvarModeloFormulario} className="space-y-5 rounded-xl border border-borda bg-superficie p-4">
+    <form action={salvarModeloFormulario} className="space-y-5 rounded-2xl border border-borda bg-superficie p-4">
       <input type="hidden" name="id" value={modelo?.id ?? ""} />
       <input type="hidden" name="config" value={JSON.stringify(f)} />
       <label className={`${rotulo} max-w-md`}>Nome do modelo

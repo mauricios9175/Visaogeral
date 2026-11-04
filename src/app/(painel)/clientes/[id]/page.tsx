@@ -74,39 +74,57 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <Link href={`/?${atual.qs}`} className="text-sm text-texto-3 hover:text-texto">← Visão geral</Link>
-          <h1 className="text-xl font-semibold">{c.nome}</h1>
-          <p className="text-sm text-texto-2">
-            {d.contas.map((x) => x.nome + (x.pre_paga && x.saldo != null ? ` (saldo ${dinheiro(x.saldo)})` : "")).join(", ")
-              || "Nenhuma conta vinculada"}
-            {d.contas[0] && <> · atualizado {quandoFoi(d.contas[0].ultima_sync)}</>}
-            {" · "}
-            <Link href={`${base}/montar`} className="text-destaque underline">Montar campanha</Link>
-            {" · "}
-            <Link href={`/criativos?cliente=${id}&${atual.qs}`} className="text-destaque underline">Criativos</Link>
-            {" · "}
-            <Link href={`${base}/diagnostico`} className="text-destaque underline">Diagnóstico de resultados</Link>
-            {" · "}
-            <Link href={`${base}/historico`} className="text-destaque underline">Histórico e relatório</Link>
-            {" · "}
-            <Link href={`${base}/crm`} className="text-destaque underline">{crm && !("erro" in crm) ? "Configurar CRM" : "Conectar CRM"}</Link>
-          </p>
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-col gap-2.5">
+          <Link href={`/?${atual.qs}`} className="text-[13px] text-texto-3 hover:text-texto">← Visão geral</Link>
+          <div className="flex flex-wrap items-center gap-3.5">
+            <span aria-hidden className="flex h-[52px] w-[52px] items-center justify-center rounded-[14px] bg-destaque-bg text-lg font-extrabold text-destaque">
+              {c.nome.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]).join("").toUpperCase()}
+            </span>
+            <div>
+              <h1 className="text-[26px] font-extrabold tracking-tight lg:text-[28px]">{c.nome}</h1>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-texto-3">
+                <span className="rounded-md bg-superficie-2 px-2 py-1 text-texto-2">{[c.empresa, c.nicho].filter(Boolean).join(" · ") || "Cliente"}</span>
+                <span>
+                  {d.contas.map((x) => x.nome + (x.pre_paga && x.saldo != null ? ` (saldo ${dinheiro(x.saldo)})` : "")).join(", ") || "Nenhuma conta vinculada"}
+                  {d.contas[0] && <> · atualizado {quandoFoi(d.contas[0].ultima_sync)}</>}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
+        <div className="flex flex-wrap gap-2.5">
+          <Link href={`${base}/historico#relatorio`} className="inline-flex min-h-[42px] items-center rounded-[10px] border border-borda bg-superficie px-4 text-sm font-semibold hover:border-destaque">
+            Gerar relatório
+          </Link>
+          <Link href={`${base}/montar`} className="inline-flex min-h-[42px] items-center rounded-[10px] bg-destaque px-4 text-sm font-semibold text-white">
+            + Montar campanha
+          </Link>
+        </div>
+      </header>
+
+      <nav aria-label="Seções do cliente" className="-mt-2 flex flex-wrap gap-1 border-b border-borda text-sm">
+        <span className="border-b-2 border-destaque px-3.5 py-3 font-bold" aria-current="page">Resultados</span>
+        <Link href={`/criativos?cliente=${id}&${atual.qs}`} className="px-3.5 py-3 text-texto-2 hover:text-texto">Criativos</Link>
+        <Link href={`${base}/historico`} className="px-3.5 py-3 text-texto-2 hover:text-texto">Histórico e relatório</Link>
+        <Link href={`${base}/diagnostico`} className="px-3.5 py-3 text-texto-2 hover:text-texto">Diagnóstico</Link>
+        <Link href={`${base}/crm`} className="px-3.5 py-3 text-texto-2 hover:text-texto">{crm && !("erro" in crm) ? "Configurar CRM" : "Conectar CRM"}</Link>
+      </nav>
+
+      <div className="flex justify-end">
         <SeletorPeriodo atual={atual} base={base} />
       </div>
       {busca.msg && <Aviso>{busca.msg}</Aviso>}
 
       {g && <ResumoGeral meta={a} metaAnt={b} g={g} metaCpl={c.cpl_meta} />}
 
-      <h2 className="text-sm font-medium">Meta Ads</h2>
+      <h2 className="text-lg font-bold">Meta Ads</h2>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Kpi rotulo="Investido" valor={dinheiro(a.gasto)}><Variacao atual={a.gasto} anterior={b.gasto} neutro /></Kpi>
-        <Kpi rotulo="Resultados" valor={inteiro(a.resultados)}>
+        <Kpi rotulo="Investido" valor={dinheiro(a.gasto)} serie={d.serie.map((x) => x.gasto)}><Variacao atual={a.gasto} anterior={b.gasto} neutro /></Kpi>
+        <Kpi rotulo="Resultados" valor={inteiro(a.resultados)} serie={d.serie.map((x) => x.resultados)}>
           <TiposResultado m={a} />
         </Kpi>
-        <Kpi rotulo={`Custo/resultado${c.cpl_meta ? ` (alvo ${dinheiro(c.cpl_meta)})` : ""}`} valor={dinheiro(a.cpr)}>
+        <Kpi rotulo={`Custo/resultado${c.cpl_meta ? ` (alvo ${dinheiro(c.cpl_meta)})` : ""}`} valor={dinheiro(a.cpr)} serie={d.serie.map((x) => x.cpr ?? 0)} cor="var(--serie-2)">
           <Variacao atual={a.cpr} anterior={b.cpr} menorMelhor />
         </Kpi>
         <Kpi rotulo="CTR (link)" valor={pct(a.ctr)}><Variacao atual={a.ctr} anterior={b.ctr} /></Kpi>
@@ -128,7 +146,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
         <BarrasDiarias dados={d.serie} campo="cpr" titulo="Custo por resultado por dia" formato="dinheiro" />
       </div>
 
-      <div id="tabela" className="scroll-mt-4 rounded-xl border border-borda bg-superficie">
+      <div id="tabela" className="scroll-mt-4 overflow-hidden rounded-2xl border border-borda bg-superficie">
         {(campanhaSel || conjuntoSel) && (
           <div className="flex flex-wrap items-center gap-1 border-b border-borda px-3 py-2 text-sm">
             <Link href={`${base}?${atual.qs}&nivel=campanhas&status=${filtro.chave}#tabela`} className="text-destaque underline">
@@ -158,7 +176,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
             <Link
               key={n.chave}
               href={`${base}?${atual.qs}&nivel=${n.chave}&status=${filtro.chave}${recorte}#tabela`}
-              className={`rounded-md px-3 py-1 ${n.chave === nivelAtual.chave ? "bg-fundo font-medium" : "text-texto-2 hover:text-texto"}`}
+              className={`rounded-[8px] px-3 py-1.5 ${n.chave === nivelAtual.chave ? "bg-destaque-bg font-semibold text-texto" : "text-texto-2 hover:text-texto"}`}
             >
               {n.rotulo} <span className="text-texto-3">({doRecorte(n.chave).length})</span>
             </Link>
@@ -168,7 +186,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
               <Link
                 key={f.chave}
                 href={`${base}?${atual.qs}&nivel=${nivelAtual.chave}&status=${f.chave}${recorte}#tabela`}
-                className={`rounded-md px-3 py-1 ${f.chave === filtro.chave ? "bg-fundo font-medium" : "text-texto-2 hover:text-texto"}`}
+                className={`rounded-[8px] px-3 py-1.5 ${f.chave === filtro.chave ? "bg-destaque-bg font-semibold text-texto" : "text-texto-2 hover:text-texto"}`}
               >
                 {f.rotulo}
               </Link>
@@ -288,7 +306,7 @@ function SecaoGoogle({ g, voltar }: { g: NonNullable<Awaited<ReturnType<typeof d
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
+      <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
         {g.campanhas.length === 0 ? (
           <p className="p-4 text-sm text-texto-3">Sem dados do Google no período.</p>
         ) : (
@@ -504,7 +522,7 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, pe
       </div>
 
       {crm.porFonte.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
+        <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
           <table className="w-full text-sm">
             <thead className="text-left text-xs text-texto-3">
               <tr>
@@ -536,7 +554,7 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, pe
       <TabelaUtm crm={crm} dimensao={dimensao} base={base} qs={qs} periodo={periodo} gastos={gastos} />
 
       {crm.negocios.length > 0 && (
-        <details className="rounded-xl border border-borda bg-superficie">
+        <details className="rounded-2xl border border-borda bg-superficie">
           <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
             Negócios do período ({crm.negocios.length})
           </summary>
@@ -606,7 +624,7 @@ function TabelaUtm({ crm, dimensao, base, qs, periodo, gastos }: {
   const investido = (nome: string) => (nivel && nome !== "(sem UTM)" ? gastos[nivel].get(chaveDe(nome)) ?? null : null);
   const csv = `/api/crm/exportar?cliente=${crm.conexao.cliente_id}&de=${periodo.desde}&ate=${periodo.ate}`;
   return (
-    <div id="utm" className="rounded-xl border border-borda bg-superficie">
+    <div id="utm" className="rounded-2xl border border-borda bg-superficie">
       <div className="flex flex-wrap items-center gap-1 border-b border-borda p-2 text-sm">
         <span className="px-2 font-medium">Origem por UTM</span>
         {DIMENSOES_UTM.map((d) => (
@@ -681,7 +699,7 @@ const ACAO_FALHA: Record<string, string> = { pausar: "pausar", ativar: "ativar",
 /** Tudo o que foi feito pelo painel neste cliente: o histórico de otimizações, sem anotar à mão. */
 function Historico({ itens }: { itens: ItemHistorico[] }) {
   return (
-    <details className="rounded-xl border border-borda bg-superficie" open>
+    <details className="rounded-2xl border border-borda bg-superficie" open>
       <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
         Histórico de ações pelo painel <span className="font-normal text-texto-3">({itens.length} mais recentes)</span>
       </summary>

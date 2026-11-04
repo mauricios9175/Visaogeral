@@ -47,7 +47,7 @@ export default async function Diagnostico({ params }: PageProps<"/clientes/[id]/
       </div>
 
       {blocos.map(({ conta, linhas, conjuntos, erro }) => (
-        <section key={conta.id} className="overflow-x-auto rounded-xl border border-borda bg-superficie">
+        <section key={conta.id} className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
           <h2 className="border-b border-borda px-4 py-2 text-sm font-medium">
             {conta.nome} <span className="font-normal text-texto-3">· {conta.id}</span>
           </h2>

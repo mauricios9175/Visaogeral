@@ -35,7 +35,7 @@ export default async function Modelos({ searchParams }: PageProps<"/modelos">) {
       {error && <Aviso>Rode o SQL 0013 no Supabase para usar os modelos ({error.message}).</Aviso>}
 
       {!error && !modelos.length && (
-        <div className="rounded-xl border border-borda bg-superficie p-4 text-sm">
+        <div className="rounded-2xl border border-borda bg-superficie p-4 text-sm">
           <p>Nenhum modelo ainda. Comece com os três prontos (formulário, WhatsApp e site) e ajuste para cada nicho.</p>
           <form action={criarModelosPadrao} className="mt-2">
             <BotaoEnviar className="rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium text-white">Criar modelos prontos</BotaoEnviar>
@@ -44,7 +44,7 @@ export default async function Modelos({ searchParams }: PageProps<"/modelos">) {
       )}
 
       {modelos.length > 0 && (
-        <ul className="divide-y divide-borda rounded-xl border border-borda bg-superficie text-sm">
+        <ul className="divide-y divide-borda rounded-2xl border border-borda bg-superficie text-sm">
           {modelos.map((m) => (
             <li key={m.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
               <div className="min-w-0 flex-1">
@@ -84,7 +84,7 @@ export default async function Modelos({ searchParams }: PageProps<"/modelos">) {
             </p>
           </div>
           {formularios.length > 0 && (
-            <ul className="divide-y divide-borda rounded-xl border border-borda bg-superficie text-sm">
+            <ul className="divide-y divide-borda rounded-2xl border border-borda bg-superficie text-sm">
               {formularios.map((f) => (
                 <li key={f.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                   <div className="min-w-0 flex-1">

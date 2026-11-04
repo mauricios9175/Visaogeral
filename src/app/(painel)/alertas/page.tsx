@@ -57,7 +57,7 @@ export default async function Alertas({ searchParams }: PageProps<"/alertas">) {
               <span className={`rounded-full px-2 py-0.5 text-xs ${n.classe}`}>{n.icone} {n.titulo}</span>{" "}
               <span className="text-texto-3">({lista.length})</span>
             </h2>
-            <ul className="divide-y divide-borda rounded-xl border border-borda bg-superficie text-sm">
+            <ul className="divide-y divide-borda rounded-2xl border border-borda bg-superficie text-sm">
               {lista.map((a, i) => (
                 <ItemAlerta key={i} a={a} voltar={voltar} feita={a.acao ? feitaPorObjeto.get(a.acao.objetoId) : undefined} />
               ))}

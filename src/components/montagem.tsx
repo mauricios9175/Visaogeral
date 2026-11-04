@@ -169,7 +169,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
 
   return (
     <div className="space-y-6">
-      <section className="grid gap-3 rounded-xl border border-borda bg-superficie p-4 md:grid-cols-2">
+      <section className="grid gap-3 rounded-2xl border border-borda bg-superficie p-4 md:grid-cols-2">
         <label className={rotulo}>Modelo
           <select value={modeloId} onChange={(e) => trocarModelo(e.target.value)} className={campo}>
             <optgroup label="Começar do zero">
@@ -251,7 +251,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
       </section>
 
       {objetivo === "formulario" && formulario === "novo" && (
-        <section className="space-y-4 rounded-xl border border-borda bg-superficie p-4">
+        <section className="space-y-4 rounded-2xl border border-borda bg-superficie p-4">
           <h2 className="font-medium">Formulário novo</h2>
           <CamposFormulario valor={formNovo} onChange={setFormNovo} />
           <label className="flex flex-col gap-1 text-sm md:max-w-md">
@@ -261,7 +261,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
         </section>
       )}
 
-      <section className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+      <section className="space-y-3 rounded-2xl border border-borda bg-superficie p-4">
         <h2 className="font-medium">Criativos</h2>
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <label className={`${botao} cursor-pointer`}>
@@ -292,7 +292,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
         <p className="text-xs text-texto-3">Cada criativo vira um anúncio em cada conjunto, com os textos do modelo. Normalmente basta um: depois é só duplicar e trocar a imagem.</p>
       </section>
 
-      <section className="rounded-xl border border-borda bg-superficie p-4">
+      <section className="rounded-2xl border border-borda bg-superficie p-4">
         <CamposMeta objetivo={objetivo} valor={config} onChange={setConfig} conta={conta} naMontagem />
       </section>
 

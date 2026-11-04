@@ -11,7 +11,7 @@ export function EditorModelo({ modelo }: { modelo?: Modelo }) {
   const [objetivo, setObjetivo] = useState<ObjetivoMeta>(modelo?.objetivo ?? "formulario");
   const [config, setConfig] = useState(normalizarConfig(modelo?.config));
   return (
-    <form action={salvarModelo} className="space-y-5 rounded-xl border border-borda bg-superficie p-4">
+    <form action={salvarModelo} className="space-y-5 rounded-2xl border border-borda bg-superficie p-4">
       <input type="hidden" name="id" value={modelo?.id ?? ""} />
       <input type="hidden" name="config" value={JSON.stringify(config)} />
       <div className="grid gap-3 md:grid-cols-2">

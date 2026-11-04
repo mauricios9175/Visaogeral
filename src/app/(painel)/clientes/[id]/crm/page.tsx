@@ -76,7 +76,7 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
       {msg && <Aviso>{msg}</Aviso>}
 
       {/* 1. Conexão */}
-      <section className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+      <section className="space-y-3 rounded-2xl border border-borda bg-superficie p-4">
         <h2 className="font-medium">1. Conexão</h2>
         <form action={salvarConexaoCrm} className="space-y-3">
           <input type="hidden" name="cliente_id" value={id} />
@@ -129,7 +129,7 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
 
       {/* 2. Funil e qualificação */}
       {c && (
-        <section className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+        <section className="space-y-3 rounded-2xl border border-borda bg-superficie p-4">
           <h2 className="font-medium">2. Funil e etapa de qualificação</h2>
           {erroFunis ? (
             <p className="text-sm text-critico">Não foi possível ler os funis: {erroFunis}</p>
@@ -170,7 +170,7 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
 
       {/* Funil do relatório */}
       {c && !erroFunis && (
-        <section id="funil" className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+        <section id="funil" className="space-y-3 rounded-2xl border border-borda bg-superficie p-4">
           <h2 className="font-medium">Funil do relatório e do histórico</h2>
           <p className="text-sm text-texto-2">
             Monte o funil do jeito que você apresenta para este cliente: crie os passos (Interessados, Propostas, Agendamentos…)
@@ -182,7 +182,7 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
 
       {/* 3. Fontes de anúncio */}
       {c && (
-        <section className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+        <section className="space-y-3 rounded-2xl border border-borda bg-superficie p-4">
           <h2 className="font-medium">3. Quais fontes são de anúncio?</h2>
           {fontes.length === 0 ? (
             <p className="text-sm text-texto-3">
@@ -217,7 +217,7 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
 
       {/* 4. UTMs dos campos personalizados */}
       {c && (
-        <section className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+        <section className="space-y-3 rounded-2xl border border-borda bg-superficie p-4">
           <h2 className="font-medium">4. De onde vêm as UTMs?</h2>
           <p className="text-sm text-texto-2">
             Além das UTMs que o CRM registra sozinho, o painel lê os campos personalizados dos negócios (no Ávora, também os

@@ -103,7 +103,7 @@ export function PainelSincronizacao() {
       </div>
 
       {(itens.length > 0 || fim) && (
-        <div className="space-y-2 rounded-xl border border-borda bg-superficie p-4 text-sm">
+        <div className="space-y-2 rounded-2xl border border-borda bg-superficie p-4 text-sm">
           <div className="flex items-center justify-between gap-3">
             <span className="font-medium">{fim ?? `Sincronizando ${feitos} de ${itens.length}…`}</span>
             <span className="num text-xs text-texto-3">{feitos}/{itens.length}</span>

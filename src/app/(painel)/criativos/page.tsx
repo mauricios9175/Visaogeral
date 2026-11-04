@@ -190,7 +190,7 @@ function CardCriativo({ c, mostrarCliente }: { c: Criativo; mostrarCliente: bool
       </div>
     </>
   );
-  return <div className="overflow-hidden rounded-xl border border-borda bg-superficie">{corpo}</div>;
+  return <div className="overflow-hidden rounded-2xl border border-borda bg-superficie">{corpo}</div>;
 }
 
 function Dado({ rotulo, valor, alerta }: { rotulo: string; valor: string; alerta?: boolean }) {

@@ -66,7 +66,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
       {msg && <Aviso>{msg}</Aviso>}
       {erro && <Aviso>Rode o SQL 0015 no Supabase para usar o histórico ({erro}).</Aviso>}
 
-      <section className="flex flex-wrap items-end gap-3 rounded-xl border border-borda bg-superficie p-4">
+      <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-borda bg-superficie p-4">
         <BuscarHistorico clienteId={id} opcoes={Array.from({ length: 37 }, (_, i) => mesDe(hoje, -i))} gravados={meses.map((m) => m.mes)} />
         {meses.length > 0 && (
           <form action={atualizarMesesRecentes}>
@@ -82,7 +82,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
         </p>
       </section>
 
-      <section id="relatorio" className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+      <section id="relatorio" className="space-y-3 rounded-2xl border border-borda bg-superficie p-4">
         <h2 className="font-medium">Relatório no Google Slides</h2>
         {!config ? (
           <>
@@ -169,7 +169,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
             ))}
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
+          <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
             <table className="w-full min-w-[1100px] text-sm">
               <thead className="text-left text-xs text-texto-3">
                 <tr className="border-b border-borda">
@@ -256,7 +256,7 @@ function EditarMes({ clienteId, m, passos, funil }: { clienteId: string; m: MesC
     { nome: "valor_propostas", rotulo: "Valor das propostas (R$)", valor: m.valorPropostas },
   ];
   return (
-    <details className="rounded-xl border border-borda bg-superficie">
+    <details className="rounded-2xl border border-borda bg-superficie">
       <summary className="cursor-pointer px-4 py-2 text-sm capitalize">
         {nomeMes(m.mes)}{m.ajustado.length > 0 && <span className="normal-case text-texto-3"> · {m.ajustado.length} valor(es) corrigido(s)</span>}
       </summary>
@@ -294,7 +294,7 @@ async function Conferir({ clienteId, meses, mes }: { clienteId: string; meses: s
   const th = "px-3 py-1.5 text-left text-xs font-normal text-texto-3";
   const td = "px-3 py-1.5";
   return (
-    <section id="conferir" className="space-y-3 rounded-xl border border-borda bg-superficie p-4">
+    <section id="conferir" className="space-y-3 rounded-2xl border border-borda bg-superficie p-4">
       <h2 className="font-medium">Conferir um mês com o CRM</h2>
       <form action={`/clientes/${clienteId}/historico#conferir`} className="flex flex-wrap items-end gap-2">
         <select name="conferir" defaultValue={mes ?? meses.at(-1)} className={`${campo} capitalize`}>

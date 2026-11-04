@@ -59,7 +59,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
       {msg && <Aviso>{msg}</Aviso>}
 
       {!!execucoes?.length && (
-        <section className="rounded-xl border border-borda bg-superficie p-4 text-sm">
+        <section className="rounded-2xl border border-borda bg-superficie p-4 text-sm">
           <div className="font-medium">Últimas sincronizações</div>
           <ul className="mt-2 space-y-2">
             {execucoes.map((e) => (
@@ -82,7 +82,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
       <section className="space-y-3">
         <h2 className="font-medium">1. Conexões com o Meta</h2>
         <div className="grid gap-3 md:grid-cols-2">
-          <div className="rounded-xl border border-borda bg-superficie p-4 text-sm">
+          <div className="rounded-2xl border border-borda bg-superficie p-4 text-sm">
             <div className="font-medium">
               Seu Business Manager (Usuário do Sistema){" "}
               <span className="text-xs font-normal text-texto-3">· opcional</span>
@@ -93,7 +93,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                 : "Não usado. Só é necessário se os clientes compartilharem as contas com um BM seu como parceiro; aí o acesso não expira. Suas contas já entram pelo Login com Facebook ao lado."}
             </p>
           </div>
-          <div className="rounded-xl border border-borda bg-superficie p-4 text-sm">
+          <div className="rounded-2xl border border-borda bg-superficie p-4 text-sm">
             <div className="font-medium">Contas no BM do cliente (Login com Facebook)</div>
             <ul className="mt-1 space-y-1 text-texto-2">
               {((tokens ?? []) as TokenMeta[]).map((t) => {
@@ -132,7 +132,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
         <datalist id="empresas">
           {empresas.map((e) => <option key={e} value={e} />)}
         </datalist>
-        <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
+        <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
           <div className="grid min-w-[980px] grid-cols-[1.5fr_1.2fr_1.1fr_0.9fr_0.9fr_0.7fr_auto] gap-2 px-4 py-2 text-xs text-texto-3">
             <span>Nome</span><span>Empresa</span><span>Nicho</span><span>Alvo custo/result. (R$)</span>
             <span>Orçamento mensal (R$)</span><span>ROAS meta</span><span className="w-[190px]" />
@@ -158,7 +158,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
         </div>
 
         {encerrados.length > 0 && (
-          <details className="rounded-xl border border-borda bg-superficie">
+          <details className="rounded-2xl border border-borda bg-superficie">
             <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
               Clientes encerrados / churn ({encerrados.length})
             </summary>
@@ -188,7 +188,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
         ) : !metaVinculadas.length ? (
           <Aviso>Nenhuma conta vinculada ainda. Abra “Vincular outra conta do Meta” abaixo e escolha o cliente.</Aviso>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
+          <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
             <table className="w-full min-w-[900px] text-sm">
               <thead className="text-left text-xs text-texto-3">
                 <tr>
@@ -246,7 +246,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
           </div>
         )}
         {metaLivres.length > 0 && (
-          <details open={!!mbusca} className="rounded-xl border border-borda bg-superficie">
+          <details open={!!mbusca} className="rounded-2xl border border-borda bg-superficie">
             <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
               Vincular outra conta do Meta <span className="font-normal text-texto-3">({metaLivres.length} sem cliente)</span>
             </summary>
@@ -267,7 +267,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
       {/* ---------- Google Ads ---------- */}
       <section id="google" className="space-y-3">
         <h2 className="font-medium">4. Google Ads</h2>
-        <div className="rounded-xl border border-borda bg-superficie p-4 text-sm">
+        <div className="rounded-2xl border border-borda bg-superficie p-4 text-sm">
           <div className="font-medium">Login com Google</div>
           <p className="mt-1 text-texto-2">
             Puxa as contas em que seu e-mail é administrador e as que estão nos MCCs das agências (Propulsão, Viccon…).
@@ -316,7 +316,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
             .filter((c) => !termo || c.nome.toLowerCase().includes(termo) || c.id.includes(termo.replace(/\D/g, "") || "§"));
           const mostradas = filtradas.slice(0, 30);
           const tabela = (lista: ContaGoogle[], comSync: boolean) => (
-            <div className="overflow-x-auto rounded-xl border border-borda bg-superficie">
+            <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
               <table className="w-full min-w-[900px] text-sm">
                 <thead className="text-left text-xs text-texto-3">
                   <tr>
@@ -376,7 +376,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                 Só as contas vinculadas a um cliente são sincronizadas. As outras ficam só nesta lista e não gastam cota do Google.
               </p>
 
-              <details open={!!(gbusca || gacesso || gcanceladas)} className="rounded-xl border border-borda bg-superficie">
+              <details open={!!(gbusca || gacesso || gcanceladas)} className="rounded-2xl border border-borda bg-superficie">
               <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
                 Vincular outra conta do Google <span className="font-normal text-texto-3">({livres.length} sem cliente)</span>
               </summary>

@@ -120,7 +120,7 @@ export function Aviso({ children }: { children: React.ReactNode }) {
           ? <a key={i} href={parte} target="_blank" rel="noreferrer" className="text-destaque underline">abrir ↗</a>
           : parte)
     : children;
-  return <div className="rounded-xl border border-borda bg-superficie px-4 py-3 text-sm text-texto-2">{conteudo}</div>;
+  return <div className="rounded-2xl border border-borda bg-superficie px-4 py-3 text-sm text-texto-2">{conteudo}</div>;
 }
 
 /** "12 conversas · 3 formulário · 5 conv. personalizada"; cliques/engajamento aparecem à parte. */

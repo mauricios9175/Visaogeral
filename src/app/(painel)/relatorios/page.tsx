@@ -55,7 +55,7 @@ export default async function Relatorios({ searchParams }: PageProps<"/relatorio
 
       <div className="grid gap-4 lg:grid-cols-2">
         {relatorios.map((r) => (
-          <section key={r.cliente.id} className="space-y-2 rounded-xl border border-borda bg-superficie p-4">
+          <section key={r.cliente.id} className="space-y-2 rounded-2xl border border-borda bg-superficie p-4">
             <div className="flex items-baseline justify-between gap-2">
               <Link href={`/clientes/${r.cliente.id}`} className="font-medium hover:underline">{r.cliente.nome}</Link>
               <span className="text-xs text-texto-3">{r.cliente.empresa || EMPRESA_PADRAO}</span>
