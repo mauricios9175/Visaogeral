@@ -144,64 +144,101 @@ export async function esbocarCampanha(clienteId: string | null, pedido: string, 
   };
 }
 
-// ---------- Google Ads (Pesquisa) ----------
+// ---------- Google Ads (Pesquisa e Performance Max) ----------
 
-const SISTEMA_GOOGLE = `Você é um gestor de tráfego sênior no Brasil e monta campanhas de PESQUISA no Google Ads para negócios locais.
+const SISTEMA_GOOGLE = `Você é um gestor de tráfego sênior no Brasil e monta campanhas no Google Ads para negócios locais.
 A partir do pedido, monte o esboço de UMA campanha e responda SÓ com um JSON neste formato:
 {
+  "tipo": "pesquisa" | "pmax",
   "nome": "nome curto para salvar como modelo (ex.: Celulares – Pesquisa)",
   "orcamentoDiario": número em reais, ou null se o pedido não falar,
   "lance": "maximizar_conversoes" | "maximizar_cliques",
-  "grupos": [ { "nome": "tema do grupo", "palavras": [ { "texto": "palavra-chave", "correspondencia": "FRASE" | "EXATA" | "AMPLA" } ] } ],
+  "grupos": [
+    { "nome": "tema do grupo",
+      "palavras": [ { "texto": "palavra-chave", "correspondencia": "FRASE" | "EXATA" | "AMPLA" } ],
+      "titulos": ["12 a 15 títulos DESTE grupo"],
+      "descricoes": ["4 descrições DESTE grupo"],
+      "caminho1": "palavra do link", "caminho2": "palavra do link" }
+  ],
   "negativas": ["termos negativos"],
-  "titulos": ["12 a 15 títulos"],
-  "descricoes": ["4 descrições"],
-  "caminho1": "palavra do link",
-  "caminho2": "palavra do link",
+  "pmax": { "nomeEmpresa": "nome da empresa", "titulos": ["15 títulos"], "titulosLongos": ["5 títulos longos"], "descricoes": ["5 descrições"], "temas": ["até 25 temas de pesquisa"] },
+  "sitelinks": [ { "texto": "texto do link", "descricao1": "linha 1", "descricao2": "linha 2" } ],
+  "frases": ["frases de destaque"],
   "observacoes": "1 a 2 frases com dicas para o gestor"
 }
 
-Regras:
-- 2 a 4 grupos por tema/intenção (ex.: produto, serviço, "perto de mim", marca/modelo). 6 a 15 palavras por grupo.
-- Palavras com intenção de compra/contratação, do jeito que as pessoas pesquisam no Brasil (ex.: "loja de celular", "iphone 13 usado", "conserto de celular perto de mim"). Use principalmente FRASE e EXATA; AMPLA só para termos bem específicos.
-- Negativas: 10 a 25 termos que trazem clique sem intenção de compra (grátis, vagas, emprego, curso, como fazer, pdf, download, mercado livre, olx, conserto se a loja só vende etc.), coerentes com o nicho.
-- Títulos com NO MÁXIMO 30 caracteres (conte os espaços); variados: produto + benefício, cidade/região, diferencial, chamada para ação, prova. Pelo menos 3 citando a palavra principal.
-- Descrições com NO MÁXIMO 90 caracteres, com benefício e chamada para ação.
-- Não invente preço, desconto ou dado que o pedido não trouxe; use [colchetes] para o gestor completar.
-- caminho1 e caminho2: até 15 caracteres, sem espaço (ex.: "celulares", "iphone").
-- Português do Brasil.`;
+Regras gerais:
+- tipo "pmax" só se o pedido falar em Performance Max/PMax; senão "pesquisa". Em "pesquisa", "pmax" pode vir vazio; em "pmax", "grupos" e "negativas" podem vir vazios.
+- Não invente preço, desconto ou dado que o pedido não trouxe; use [colchetes] para o gestor completar. Português do Brasil.
+- Conte os caracteres (com espaços) e respeite os limites. Texto acima do limite é descartado.
+- 4 sitelinks (texto até 25; descricao1 e descricao2 até 35 cada) para páginas/ações úteis (ex.: Fale no WhatsApp, Nossos produtos, Como chegar, Avaliações).
+- 4 a 6 frases de destaque, até 25 caracteres (ex.: "Garantia de 90 dias", "Atendimento rápido").
 
+Pesquisa:
+- 2 a 4 grupos por tema/intenção (ex.: produto, serviço, "perto de mim", marca/modelo), 6 a 15 palavras por grupo, como as pessoas pesquisam no Brasil, com intenção de compra/contratação. Use principalmente FRASE e EXATA; AMPLA só para termos bem específicos.
+- CADA grupo tem o seu anúncio: títulos (até 30) que repetem e conversam com as palavras DESSE grupo (pelo menos 3 com a palavra principal do grupo), variados (benefício, cidade/região, diferencial, chamada para ação, prova). Descrições até 90, com benefício e chamada para ação.
+- caminho1/caminho2 do grupo: até 15 caracteres, sem espaço (ex.: "celulares", "iphone").
+- Negativas: 10 a 25 termos que trazem clique sem intenção de compra (grátis, vagas, emprego, curso, como fazer, pdf, download, olx etc.), coerentes com o nicho.
+
+Performance Max:
+- nomeEmpresa até 25 caracteres. 15 títulos até 30. 5 títulos longos até 90. 5 descrições até 90, e pelo menos uma até 60.
+- temas: até 25 termos que o cliente ideal pesquisa (sinal para o Google).`;
+
+type TextosIA = { titulos?: string[]; descricoes?: string[] };
 type RespostaGoogle = {
-  nome?: string; orcamentoDiario?: number | null; lance?: string;
-  grupos?: { nome?: string; palavras?: ({ texto?: string; correspondencia?: string } | string)[] }[];
-  negativas?: string[]; titulos?: string[]; descricoes?: string[]; caminho1?: string; caminho2?: string; observacoes?: string;
+  tipo?: string; nome?: string; orcamentoDiario?: number | null; lance?: string;
+  grupos?: (TextosIA & { nome?: string; palavras?: ({ texto?: string; correspondencia?: string } | string)[]; caminho1?: string; caminho2?: string })[];
+  negativas?: string[];
+  pmax?: TextosIA & { nomeEmpresa?: string; titulosLongos?: string[]; temas?: string[] };
+  sitelinks?: { texto?: string; descricao1?: string; descricao2?: string }[];
+  frases?: string[];
+  observacoes?: string;
 };
 
 export type EsbocoGoogle = { config: ConfigGoogle; nome: string; observacoes: string; cortados: number };
 
-/** Esboço de campanha de Pesquisa: grupos, palavras-chave, negativas e anúncio responsivo. Nada é publicado. */
+/** Esboço de campanha do Google (Pesquisa com anúncio por grupo, ou Performance Max), com sitelinks e frases. Nada é publicado. */
 export async function esbocarGoogle(clienteId: string | null, pedido: string): Promise<EsbocoGoogle> {
   const r = lerJson<RespostaGoogle>(await perguntarIA(SISTEMA_GOOGLE, await contextoDo(clienteId, pedido), { json: true, temperatura: 0.7 }));
-  const textos = (v: unknown, limite: number, max: number) => {
+  let cortados = 0;
+  const textos = (v: unknown, limite: number, max: number, min = 0) => {
     const todos = (Array.isArray(v) ? v : []).map((t) => String(t ?? "").replace(/\s+/g, " ").trim()).filter(Boolean);
     const ok = [...new Set(todos.filter((t) => t.length <= limite))].slice(0, max);
-    return { ok, cortados: todos.length - ok.length };
+    cortados += todos.filter((t) => t.length > limite).length;
+    while (ok.length < min) ok.push("");
+    return ok;
   };
-  const t = textos(r.titulos, LIMITES.titulo, LIMITES.titulos);
-  const d = textos(r.descricoes, LIMITES.descricao, LIMITES.descricoes);
   const caminho = (x: unknown) => String(x ?? "").replace(/\s+/g, "-").slice(0, LIMITES.caminho);
+  const pmax = r.tipo === "pmax" || /performance max|pmax/i.test(pedido);
   const config = normalizarGoogle({
     ...CONFIG_GOOGLE_PADRAO,
+    tipo: pmax ? "pmax" : "pesquisa",
+    nomeCampanha: pmax ? "[PMax] {cliente} - {data}" : CONFIG_GOOGLE_PADRAO.nomeCampanha,
     orcamentoDiario: Number(r.orcamentoDiario) > 0 ? Math.round(Number(r.orcamentoDiario)) : CONFIG_GOOGLE_PADRAO.orcamentoDiario,
-    lance: r.lance === "maximizar_cliques" ? "maximizar_cliques" : "maximizar_conversoes",
-    grupos: (r.grupos ?? []).slice(0, 6).map((g) => ({
+    lance: !pmax && r.lance === "maximizar_cliques" ? "maximizar_cliques" : "maximizar_conversoes",
+    grupos: pmax ? undefined : (r.grupos ?? []).slice(0, 6).map((g) => ({
       nome: corta(g.nome, 60) || "Grupo",
       palavras: (g.palavras ?? []).slice(0, 25).map((p) => (typeof p === "string" ? { texto: p, correspondencia: "FRASE" } : p)) as PalavraChave[],
+      titulos: textos(g.titulos, LIMITES.titulo, LIMITES.titulos, 3),
+      descricoes: textos(g.descricoes, LIMITES.descricao, LIMITES.descricoes, 2),
+      url: "", caminho1: caminho(g.caminho1), caminho2: caminho(g.caminho2),
     })),
-    negativas: (r.negativas ?? []).slice(0, 40).map((x) => ({ texto: String(x), correspondencia: "AMPLA" as const })),
-    titulos: t.ok.length >= 3 ? t.ok : [...t.ok, "", "", ""].slice(0, 3),
-    descricoes: d.ok.length >= 2 ? d.ok : [...d.ok, "", ""].slice(0, 2),
-    caminho1: caminho(r.caminho1), caminho2: caminho(r.caminho2),
+    negativas: pmax ? [] : (r.negativas ?? []).slice(0, 40).map((x) => ({ texto: String(x), correspondencia: "AMPLA" as const })),
+    pmax: pmax ? {
+      nomeEmpresa: corta(r.pmax?.nomeEmpresa, LIMITES.nomeEmpresa),
+      titulos: textos(r.pmax?.titulos, LIMITES.titulo, LIMITES.titulos, 3),
+      titulosLongos: textos(r.pmax?.titulosLongos, LIMITES.tituloLongo, LIMITES.titulosLongos, 1),
+      descricoes: textos(r.pmax?.descricoes, LIMITES.descricao, LIMITES.descricoesPmax, 2),
+      temas: (r.pmax?.temas ?? []).map((t) => corta(t, 80)).filter(Boolean).slice(0, LIMITES.temas),
+    } : undefined,
+    sitelinks: (r.sitelinks ?? []).slice(0, LIMITES.sitelinks)
+      .filter((x) => x?.texto && String(x.texto).length <= LIMITES.sitelinkTexto)
+      .map((x) => {
+        const d1 = corta(x.descricao1, 100), d2 = corta(x.descricao2, 100);
+        const ok = d1 && d2 && d1.length <= LIMITES.sitelinkDescricao && d2.length <= LIMITES.sitelinkDescricao;
+        return { texto: corta(x.texto, LIMITES.sitelinkTexto), descricao1: ok ? d1 : "", descricao2: ok ? d2 : "", url: "" };
+      }),
+    frases: textos(r.frases, LIMITES.frase, LIMITES.frases),
   });
-  return { config, nome: corta(r.nome, 80), observacoes: corta(r.observacoes, 400), cortados: t.cortados + d.cortados };
+  return { config, nome: corta(r.nome, 80), observacoes: corta(r.observacoes, 400), cortados };
 }

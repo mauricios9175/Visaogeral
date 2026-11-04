@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { normalizarGoogle, OBJETIVO_GOOGLE } from "@/lib/modelos-google";
+import { normalizarGoogle, OBJETIVO_GOOGLE, OBJETIVO_PMAX } from "@/lib/modelos-google";
 import { MODELOS_PADRAO, normalizarConfig, normalizarFormulario, OBJETIVO_FORMULARIO, OBJETIVOS, type ObjetivoMeta } from "@/lib/modelos";
 
 function aviso(msg: string, extra = ""): never {
@@ -22,7 +22,7 @@ export async function salvarModeloGoogle(form: FormData) {
   } catch {
     aviso("Não foi possível ler o modelo.", volta);
   }
-  const dados = { nome, objetivo: OBJETIVO_GOOGLE, plataforma: "google", config, atualizado_em: new Date().toISOString() };
+  const dados = { nome, objetivo: config?.tipo === "pmax" ? OBJETIVO_PMAX : OBJETIVO_GOOGLE, plataforma: "google", config, atualizado_em: new Date().toISOString() };
   const { error } = id
     ? await db().from("modelos").update(dados).eq("id", id)
     : await db().from("modelos").insert(dados);

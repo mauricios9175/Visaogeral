@@ -366,86 +366,99 @@ export async function buscarLocaisGoogle(acesso: string, loginCustomerId: string
     .map((g) => ({ id: String(g.id), nome: String(g.canonicalName ?? g.name), tipo: TIPO_LOCAL[g.targetType] ?? g.targetType ?? "" }));
 }
 
-export type CampanhaPesquisa = {
+type TipoPalavra = "BROAD" | "PHRASE" | "EXACT";
+type Extensoes = {
+  sitelinks: { texto: string; descricao1: string; descricao2: string; url: string }[];
+  frases: string[];
+};
+type Base = Extensoes & {
   nome: string;
   orcamentoDiario: number;
   lance: "maximizar_conversoes" | "cpa_desejado" | "maximizar_cliques";
   cpaDesejado: number;
-  parceiros: boolean;
   locais: string[];          // ids de geoTargetConstant
-  negativas: { texto: string; tipo: "BROAD" | "PHRASE" | "EXACT" }[];
+};
+
+export type CampanhaPesquisa = Base & {
+  parceiros: boolean;
+  negativas: { texto: string; tipo: TipoPalavra }[];
   grupos: {
     nome: string;
-    palavras: { texto: string; tipo: "BROAD" | "PHRASE" | "EXACT" }[];
+    palavras: { texto: string; tipo: TipoPalavra }[];
     sufixoUrl: string;
     titulos: string[];
     descricoes: string[];
+    url: string;
+    caminho1: string;
+    caminho2: string;
   }[];
+};
+
+export type CampanhaPmax = Base & {
   url: string;
-  caminho1: string;
-  caminho2: string;
+  sufixoUrl: string;
+  nomeEmpresa: string;
+  titulos: string[];
+  titulosLongos: string[];
+  descricoes: string[];
+  temas: string[];
+  imagens: { tipo: "logo" | "paisagem" | "quadrada" | "retrato"; dados: string }[]; // dados = base64 (JPEG/PNG)
 };
 
 const IDIOMA_PORTUGUES = "languageConstants/1014";
 const micros = (reais: number) => String(Math.round(reais * 100) * 10_000);
 
-/**
- * Cria a campanha de Pesquisa inteira numa chamada só (orçamento, campanha PAUSADA, locais, idioma, negativas,
- * grupos, palavras-chave e um anúncio responsivo por grupo). É tudo ou nada: se algo falhar, nada fica criado.
- */
-export async function criarCampanhaPesquisa(acesso: string, customerId: string, loginCustomerId: string | null, c: CampanhaPesquisa) {
-  const cid = `customers/${customerId}`;
-  const orc = `${cid}/campaignBudgets/-1`;
-  const camp = `${cid}/campaigns/-2`;
-  const lance = c.lance === "maximizar_cliques" ? { targetSpend: {} }
-    : c.lance === "cpa_desejado" && c.cpaDesejado > 0 ? { maximizeConversions: { targetCpaMicros: micros(c.cpaDesejado) } }
-    : { maximizeConversions: {} };
+/** Gera nomes temporários (-1, -2…) para criar tudo numa chamada só. */
+function contador() {
+  let n = 0;
+  return () => --n;
+}
+
+/** Operações comuns: orçamento, critérios (idioma e locais) e as extensões (sitelinks e frases de destaque). */
+function opsBase(cid: string, camp: string, orc: string, c: Base, novo: () => number) {
   const ops: object[] = [
     { campaignBudgetOperation: { create: { resourceName: orc, name: `${c.nome} (${Date.now()})`, amountMicros: micros(c.orcamentoDiario), deliveryMethod: "STANDARD", explicitlyShared: false } } },
-    {
-      campaignOperation: {
-        create: {
-          resourceName: camp, name: c.nome, status: "PAUSED", advertisingChannelType: "SEARCH", campaignBudget: orc,
-          networkSettings: { targetGoogleSearch: true, targetSearchNetwork: c.parceiros, targetContentNetwork: false, targetPartnerSearchNetwork: false },
-          // só quem está (ou costuma estar) no local, não quem "se interessa" por ele
-          geoTargetTypeSetting: { positiveGeoTargetType: "PRESENCE", negativeGeoTargetType: "PRESENCE" },
-          containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
-          ...lance,
-        },
-      },
-    },
+  ];
+  const criterios: object[] = [
     { campaignCriterionOperation: { create: { campaign: camp, language: { languageConstant: IDIOMA_PORTUGUES } } } },
     ...c.locais.map((id) => ({ campaignCriterionOperation: { create: { campaign: camp, location: { geoTargetConstant: `geoTargetConstants/${id}` } } } })),
-    ...c.negativas.map((n) => ({ campaignCriterionOperation: { create: { campaign: camp, negative: true, keyword: { text: n.texto, matchType: n.tipo } } } })),
   ];
-  c.grupos.forEach((g, i) => {
-    const grupo = `${cid}/adGroups/-${10 + i}`;
-    ops.push({ adGroupOperation: { create: { resourceName: grupo, name: g.nome, campaign: camp, status: "ENABLED", type: "SEARCH_STANDARD", ...(g.sufixoUrl && { finalUrlSuffix: g.sufixoUrl }) } } });
-    for (const p of g.palavras) ops.push({ adGroupCriterionOperation: { create: { adGroup: grupo, status: "ENABLED", keyword: { text: p.texto, matchType: p.tipo } } } });
-    ops.push({
-      adGroupAdOperation: {
+  const extensoes: object[] = [];
+  for (const s of c.sitelinks) {
+    const asset = `${cid}/assets/${novo()}`;
+    extensoes.push({
+      assetOperation: {
         create: {
-          adGroup: grupo, status: "ENABLED",
-          ad: {
-            finalUrls: [c.url],
-            responsiveSearchAd: {
-              headlines: g.titulos.map((text) => ({ text })),
-              descriptions: g.descricoes.map((text) => ({ text })),
-              ...(c.caminho1 && { path1: c.caminho1 }), ...(c.caminho1 && c.caminho2 && { path2: c.caminho2 }),
-            },
-          },
+          resourceName: asset, finalUrls: [s.url],
+          sitelinkAsset: { linkText: s.texto, ...(s.descricao1 && s.descricao2 && { description1: s.descricao1, description2: s.descricao2 }) },
         },
       },
-    });
-  });
+    }, { campaignAssetOperation: { create: { campaign: camp, asset, fieldType: "SITELINK" } } });
+  }
+  for (const f of c.frases) {
+    const asset = `${cid}/assets/${novo()}`;
+    extensoes.push(
+      { assetOperation: { create: { resourceName: asset, calloutAsset: { calloutText: f } } } },
+      { campaignAssetOperation: { create: { campaign: camp, asset, fieldType: "CALLOUT" } } },
+    );
+  }
+  return { ops, criterios, extensoes };
+}
 
-  const res = await fetch(`${BASE}/${cid}/googleAds:mutate`, {
+const lanceDe = (c: Base) =>
+  c.lance === "maximizar_cliques" ? { targetSpend: {} }
+    : c.lance === "cpa_desejado" && c.cpaDesejado > 0 ? { maximizeConversions: { targetCpaMicros: micros(c.cpaDesejado) } }
+    : { maximizeConversions: {} };
+
+/** Manda as operações numa chamada só (tudo ou nada) e devolve o id da campanha criada. */
+async function mutarTudo(acesso: string, customerId: string, loginCustomerId: string | null, ops: object[]) {
+  const res = await fetch(`${BASE}/customers/${customerId}/googleAds:mutate`, {
     method: "POST", headers: cabecalhos(acesso, loginCustomerId), cache: "no-store",
-    body: JSON.stringify({ mutateOperations: ops }), signal: AbortSignal.timeout(90_000),
+    body: JSON.stringify({ mutateOperations: ops }), signal: AbortSignal.timeout(120_000),
   });
   const json = await res.json();
   if (!res.ok) {
-    // erro com o texto que o Google recusou (ex.: política de anúncios, palavra-chave inválida)
+    // erro com o texto que o Google recusou (ex.: política de anúncios, palavra-chave inválida, imagem fora do formato)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const erros = ((Array.isArray(json) ? json[0] : json)?.error?.details?.[0]?.errors ?? []) as any[];
     const lista = erros.slice(0, 4).map((e) => {
@@ -462,4 +475,109 @@ export async function criarCampanhaPesquisa(acesso: string, customerId: string, 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const criada = ((json.mutateOperationResponses ?? []) as any[]).find((r) => r.campaignResult)?.campaignResult?.resourceName as string | undefined;
   return { campanhaId: criada?.split("/").pop() ?? null };
+}
+
+/**
+ * Cria a campanha de Pesquisa inteira numa chamada só (orçamento, campanha PAUSADA, locais, idioma, negativas,
+ * sitelinks, frases de destaque, grupos, palavras-chave e o anúncio responsivo de cada grupo). Tudo ou nada.
+ */
+export async function criarCampanhaPesquisa(acesso: string, customerId: string, loginCustomerId: string | null, c: CampanhaPesquisa) {
+  const cid = `customers/${customerId}`;
+  const novo = contador();
+  const orc = `${cid}/campaignBudgets/${novo()}`;
+  const camp = `${cid}/campaigns/${novo()}`;
+  const { ops, criterios, extensoes } = opsBase(cid, camp, orc, c, novo);
+  ops.push({
+    campaignOperation: {
+      create: {
+        resourceName: camp, name: c.nome, status: "PAUSED", advertisingChannelType: "SEARCH", campaignBudget: orc,
+        networkSettings: { targetGoogleSearch: true, targetSearchNetwork: c.parceiros, targetContentNetwork: false, targetPartnerSearchNetwork: false },
+        // só quem está (ou costuma estar) no local, não quem "se interessa" por ele
+        geoTargetTypeSetting: { positiveGeoTargetType: "PRESENCE", negativeGeoTargetType: "PRESENCE" },
+        containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
+        ...lanceDe(c),
+      },
+    },
+  }, ...criterios);
+  ops.push(...c.negativas.map((n) => ({ campaignCriterionOperation: { create: { campaign: camp, negative: true, keyword: { text: n.texto, matchType: n.tipo } } } })));
+  for (const g of c.grupos) {
+    const grupo = `${cid}/adGroups/${novo()}`;
+    ops.push({ adGroupOperation: { create: { resourceName: grupo, name: g.nome, campaign: camp, status: "ENABLED", type: "SEARCH_STANDARD", ...(g.sufixoUrl && { finalUrlSuffix: g.sufixoUrl }) } } });
+    for (const p of g.palavras) ops.push({ adGroupCriterionOperation: { create: { adGroup: grupo, status: "ENABLED", keyword: { text: p.texto, matchType: p.tipo } } } });
+    ops.push({
+      adGroupAdOperation: {
+        create: {
+          adGroup: grupo, status: "ENABLED",
+          ad: {
+            finalUrls: [g.url],
+            responsiveSearchAd: {
+              headlines: g.titulos.map((text) => ({ text })),
+              descriptions: g.descricoes.map((text) => ({ text })),
+              ...(g.caminho1 && { path1: g.caminho1 }), ...(g.caminho1 && g.caminho2 && { path2: g.caminho2 }),
+            },
+          },
+        },
+      },
+    });
+  }
+  ops.push(...extensoes);
+  return mutarTudo(acesso, customerId, loginCustomerId, ops);
+}
+
+const CAMPO_IMAGEM = { logo: "LOGO", paisagem: "MARKETING_IMAGE", quadrada: "SQUARE_MARKETING_IMAGE", retrato: "PORTRAIT_MARKETING_IMAGE" } as const;
+
+/**
+ * Cria a Performance Max numa chamada só: orçamento, campanha PAUSADA, locais, idioma, textos e imagens (como recursos),
+ * nome da empresa e logo (diretrizes da marca, na campanha), grupo de recursos, temas de pesquisa e extensões. Tudo ou nada.
+ */
+export async function criarCampanhaPmax(acesso: string, customerId: string, loginCustomerId: string | null, c: CampanhaPmax) {
+  const cid = `customers/${customerId}`;
+  const novo = contador();
+  const orc = `${cid}/campaignBudgets/${novo()}`;
+  const camp = `${cid}/campaigns/${novo()}`;
+  const { ops, criterios, extensoes } = opsBase(cid, camp, orc, c, novo);
+  ops.push({
+    campaignOperation: {
+      create: {
+        resourceName: camp, name: c.nome, status: "PAUSED", advertisingChannelType: "PERFORMANCE_MAX", campaignBudget: orc,
+        geoTargetTypeSetting: { positiveGeoTargetType: "PRESENCE", negativeGeoTargetType: "PRESENCE" },
+        containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
+        // nome da empresa e logo ficam na campanha (diretrizes da marca)
+        brandGuidelinesEnabled: true,
+        ...(c.sufixoUrl && { finalUrlSuffix: c.sufixoUrl }),
+        ...(c.lance === "cpa_desejado" && c.cpaDesejado > 0 ? { maximizeConversions: { targetCpaMicros: micros(c.cpaDesejado) } } : { maximizeConversions: {} }),
+      },
+    },
+  }, ...criterios);
+
+  // recursos: textos e imagens
+  const ligacoes: { asset: string; campo: string }[] = [];
+  const texto = (t: string, campo: string) => {
+    const asset = `${cid}/assets/${novo()}`;
+    ops.push({ assetOperation: { create: { resourceName: asset, textAsset: { text: t } } } });
+    ligacoes.push({ asset, campo });
+  };
+  c.titulos.forEach((t) => texto(t, "HEADLINE"));
+  c.titulosLongos.forEach((t) => texto(t, "LONG_HEADLINE"));
+  c.descricoes.forEach((t) => texto(t, "DESCRIPTION"));
+  const nomeEmpresa = `${cid}/assets/${novo()}`;
+  ops.push({ assetOperation: { create: { resourceName: nomeEmpresa, textAsset: { text: c.nomeEmpresa } } } });
+  let logo: string | null = null;
+  c.imagens.forEach((im, i) => {
+    const asset = `${cid}/assets/${novo()}`;
+    ops.push({ assetOperation: { create: { resourceName: asset, name: `${c.nome} · ${im.tipo} ${i + 1} · ${Date.now()}`, type: "IMAGE", imageAsset: { data: im.dados } } } });
+    if (im.tipo === "logo") { if (!logo) logo = asset; } else ligacoes.push({ asset, campo: CAMPO_IMAGEM[im.tipo] });
+  });
+  if (!logo) throw new Error("A Performance Max precisa de um logo.");
+  ops.push(
+    { campaignAssetOperation: { create: { campaign: camp, asset: nomeEmpresa, fieldType: "BUSINESS_NAME" } } },
+    { campaignAssetOperation: { create: { campaign: camp, asset: logo, fieldType: "LOGO" } } },
+  );
+
+  const grupo = `${cid}/assetGroups/${novo()}`;
+  ops.push({ assetGroupOperation: { create: { resourceName: grupo, name: `${c.nome} · Recursos`, campaign: camp, finalUrls: [c.url], status: "ENABLED" } } });
+  ops.push(...ligacoes.map((l) => ({ assetGroupAssetOperation: { create: { assetGroup: grupo, asset: l.asset, fieldType: l.campo } } })));
+  ops.push(...c.temas.map((t) => ({ assetGroupSignalOperation: { create: { assetGroup: grupo, searchTheme: { text: t } } } })));
+  ops.push(...extensoes);
+  return mutarTudo(acesso, customerId, loginCustomerId, ops);
 }

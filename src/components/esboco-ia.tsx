@@ -18,7 +18,7 @@ type Props = {
 
 const EXEMPLOS = {
   meta: "ex.: campanha de WhatsApp para loja de celulares, foco em iPhone seminovo, R$ 40 por dia",
-  google: "ex.: pesquisa para loja de celulares em Curitiba, foco em iPhone usado e conserto",
+  google: "ex.: pesquisa para loja de celulares em Curitiba, foco em iPhone usado e conserto (ou: Performance Max para…)",
 };
 
 /**
@@ -50,11 +50,14 @@ export function EsbocoIA(p: Props) {
         const e = j as EsbocoGoogle;
         p.onPronto(e);
         const palavras = e.config.grupos.reduce((t, g) => t + g.palavras.length, 0);
+        const extras = `${e.config.sitelinks.length} sitelink(s) e ${e.config.frases.length} frase(s) de destaque`;
         setResumo([
-          `✓ Esboço aplicado: ${e.config.grupos.length} grupo(s), ${palavras} palavra(s)-chave, ${e.config.negativas.length} negativa(s), ${e.config.titulos.filter(Boolean).length} títulos e ${e.config.descricoes.filter(Boolean).length} descrições. Revise abaixo.`,
+          e.config.tipo === "pmax"
+            ? `✓ Esboço de Performance Max aplicado: ${e.config.pmax.titulos.filter(Boolean).length} títulos, ${e.config.pmax.titulosLongos.filter(Boolean).length} títulos longos, ${e.config.pmax.descricoes.filter(Boolean).length} descrições, ${e.config.pmax.temas.length} tema(s) de pesquisa, ${extras}. Revise abaixo.`
+            : `✓ Esboço aplicado: ${e.config.grupos.length} grupo(s), cada um com o seu anúncio; ${palavras} palavra(s)-chave, ${e.config.negativas.length} negativa(s), ${extras}. Revise abaixo.`,
           ...(e.cortados ? [`${e.cortados} texto(s) passaram do limite de caracteres e ficaram de fora.`] : []),
           ...(e.observacoes ? [`💡 ${e.observacoes}`] : []),
-          p.modelo ? "Confira o nome e salve o modelo." : "Falta só: local, link do site (se não veio) e revisar. Textos com [colchetes] são para você completar.",
+          p.modelo ? "Confira o nome e salve o modelo." : `Falta só: local, link do site${e.config.tipo === "pmax" ? ", logo e imagens" : ""} e revisar. Textos com [colchetes] são para você completar.`,
         ]);
       } else {
         const e = j as EsbocoMeta;

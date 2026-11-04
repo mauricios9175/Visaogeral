@@ -139,7 +139,7 @@ async function ModelosGoogle({ msg, editar, abas }: { msg?: string; editar?: str
       <div>
         <h1 className="text-xl font-semibold">Modelos de campanha</h1>
         <p className="text-sm text-texto-2">
-          Campanhas de <b>Pesquisa</b> do Google: grupos, palavras-chave, negativas e anúncio responsivo. Tudo é criado
+          Campanhas de <b>Pesquisa</b> (cada grupo com as suas palavras e o seu anúncio) e <b>Performance Max</b>, com sitelinks e frases de destaque. Tudo é criado
           <b> pausado</b>. Para usar, abra o cliente e clique em “Montar campanha” → Google.
         </p>
       </div>
@@ -153,8 +153,10 @@ async function ModelosGoogle({ msg, editar, abas }: { msg?: string; editar?: str
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{m.nome}</div>
                 <div className="text-xs text-texto-3">
-                  {m.config.grupos.length} grupo(s) · {m.config.grupos.reduce((t, g) => t + g.palavras.length, 0)} palavra(s)-chave ·{" "}
-                  {m.config.negativas.length} negativa(s) · {m.config.titulos.filter(Boolean).length} títulos
+                  {m.config.tipo === "pmax"
+                    ? <>Performance Max · {m.config.pmax.titulos.filter(Boolean).length} títulos · {m.config.pmax.temas.length} tema(s) de pesquisa</>
+                    : <>Pesquisa · {m.config.grupos.length} grupo(s) · {m.config.grupos.reduce((t, g) => t + g.palavras.length, 0)} palavra(s)-chave · {m.config.negativas.length} negativa(s)</>}
+                  {m.config.sitelinks.length > 0 && <> · {m.config.sitelinks.length} sitelink(s)</>}
                 </div>
               </div>
               <Link href={`/modelos?plataforma=google&editar=${m.id}#editor`} className={botao}>Editar</Link>

@@ -1,7 +1,8 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { montarCampanhaGoogle, type ResultadoGoogle } from "@/app/acoes-montagem-google";
+import { montarCampanhaGoogle, type ImagemPmax, type ResultadoGoogle } from "@/app/acoes-montagem-google";
+import { ImagensPmax } from "./imagens-pmax";
 import { CONFIG_GOOGLE_PADRAO, normalizarGoogle, problemasDoAnuncio, type ConfigGoogle } from "@/lib/modelos-google";
 import { campo } from "./campos-meta";
 import { CamposGoogle } from "./campos-google";
@@ -17,6 +18,7 @@ export function MontagemGoogle({ clienteId, contas, modelos, pedidoInicial }: {
   const [modeloId, setModeloId] = useState(pedidoInicial ? "zero" : modelos[0]?.id ?? "zero");
   const [config, setConfig] = useState<ConfigGoogle>(() => normalizarGoogle(pedidoInicial ? CONFIG_GOOGLE_PADRAO : modelos[0]?.config ?? CONFIG_GOOGLE_PADRAO));
   const [salvarModeloComo, setSalvarModeloComo] = useState("");
+  const [imagens, setImagens] = useState<ImagemPmax[]>([]);
   const [resultado, enviar, montando] = useActionState<ResultadoGoogle | null, FormData>(montarCampanhaGoogle, null);
 
   function trocarModelo(id: string) {
@@ -26,7 +28,12 @@ export function MontagemGoogle({ clienteId, contas, modelos, pedidoInicial }: {
     setConfig((atual) => normalizarGoogle({ ...(m?.config ?? CONFIG_GOOGLE_PADRAO), locais: atual.locais.length ? atual.locais : m?.config.locais ?? [] }));
   }
 
-  const faltando = !conta ? "Escolha a conta do Google." : problemasDoAnuncio(config) ?? (!config.locais.length ? "Escolha pelo menos um local." : null);
+  const pmax = config.tipo === "pmax";
+  const faltando = !conta ? "Escolha a conta do Google." : problemasDoAnuncio(config)
+    ?? (!config.locais.length ? "Escolha pelo menos um local." : null)
+    ?? (pmax && !imagens.some((i) => i.tipo === "logo") ? "Escolha o logo." : null)
+    ?? (pmax && !imagens.some((i) => i.tipo === "paisagem") ? "Escolha pelo menos uma imagem paisagem." : null)
+    ?? (pmax && !imagens.some((i) => i.tipo === "quadrada") ? "Escolha pelo menos uma imagem quadrada." : null);
   return (
     <div className="space-y-6">
       <EsbocoIA plataforma="google" clienteId={clienteId} pedidoInicial={pedidoInicial} onPronto={(e) => {
@@ -48,16 +55,16 @@ export function MontagemGoogle({ clienteId, contas, modelos, pedidoInicial }: {
         </label>
       </section>
 
-      <CamposGoogle valor={config} onChange={setConfig} conta={conta} />
+      <CamposGoogle valor={config} onChange={setConfig} conta={conta} imagens={<ImagensPmax valor={imagens} onChange={setImagens} />} />
 
       <form action={enviar} className="space-y-3 rounded-2xl border border-borda bg-superficie p-4">
-        <input type="hidden" name="payload" value={JSON.stringify({ clienteId, conta, config, salvarModeloComo })} />
+        <input type="hidden" name="payload" value={JSON.stringify({ clienteId, conta, config, salvarModeloComo, imagens: pmax ? imagens : [] })} />
         <label className="block space-y-1 text-sm">Salvar esta configuração também como modelo <span className="text-xs text-texto-3">(opcional)</span>
           <input value={salvarModeloComo} onChange={(e) => setSalvarModeloComo(e.target.value)} placeholder="Nome do modelo" className={campo} />
         </label>
         {faltando && <p className="text-sm text-atencao">{faltando}</p>}
         <button disabled={!!faltando || montando} className="min-h-11 rounded-[10px] bg-destaque px-5 text-sm font-semibold text-white disabled:opacity-50">
-          {montando ? "Criando no Google…" : "Criar campanha no Google (pausada)"}
+          {montando ? "Criando no Google…" : `Criar ${pmax ? "Performance Max" : "campanha de Pesquisa"} no Google (pausada)`}
         </button>
         {resultado && (
           <div className={`space-y-1 rounded-xl border p-4 text-sm ${resultado.ok ? "border-bom bg-bom-bg" : "border-critico bg-critico-bg"}`}>
