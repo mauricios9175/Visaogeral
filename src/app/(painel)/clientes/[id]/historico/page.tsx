@@ -135,6 +135,10 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
                 <input type="checkbox" name="agrupar" defaultChecked />
                 Juntar públicos e anúncios de mesmo nome
               </label>
+              <label className="flex items-center gap-2 self-center text-sm">
+                <input type="checkbox" name="motivos_perda" />
+                Slide de motivos de perda <span className="text-xs text-texto-3">(do CRM)</span>
+              </label>
               <BotaoEnviar className={botaoPrimario} aguardando="Gerando…" aviso="Leva uns 20 segundos.">Gerar relatório</BotaoEnviar>
             </form>
             <p className="text-xs text-texto-3">

@@ -342,6 +342,7 @@ export type PedidoRelatorio = {
   clienteId: string; desde: string; ate: string;
   qualificacoes: DimensaoUtm[]; // um slide de qualificação por UTM escolhida; vazio = sem qualificação
   agrupar: boolean; // junta públicos e anúncios de mesmo nome (duplicados para teste)
+  motivosPerda?: boolean; // slide com os motivos de perda do CRM (opcional)
 };
 
 /** Rótulo do período: "Outubro/2026" para mês fechado, senão "01/10 a 15/10/2026". */
@@ -669,6 +670,24 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
   };
   const qualificacoes = p.qualificacoes.map((d) => ({ d, linhas: linhasQualificacao(d) })).filter((q) => q.linhas.length);
   const mq = marcadores.get("tabela:qualificacao");
+  // Motivos de perda (opcional): cópia do slide de qualificação com a tabela dos motivos. Criada antes das cópias
+  // da qualificação, fica depois delas.
+  const perdas = p.motivosPerda && crm ? crm.motivosPerda : null;
+  if (mq && perdas?.total) {
+    const slide = novoId("mp"), elemento = novoId("mpe");
+    reqs.push({ duplicateObject: { objectId: mq.slide, objectIds: { [mq.slide]: slide, [mq.elemento]: elemento } } });
+    reqs.push({ replaceAllText: { containsText: { text: "Qualificação por público", matchCase: false }, replaceText: "Motivos de perda", pageObjectIds: [slide] } });
+    reqs.push({ deleteObject: { objectId: elemento } });
+    const lista = perdas.lista;
+    const mostrados = lista.length > LINHAS_POR_TABELA + 1 ? lista.slice(0, LINHAS_POR_TABELA) : lista;
+    const resto = lista.slice(mostrados.length);
+    const linhas = [...mostrados, ...(resto.length ? [{ motivo: `Outros (${resto.length})`, total: resto.reduce((t, x) => t + x.total, 0), valor: resto.reduce((t, x) => t + x.valor, 0) }] : [])];
+    const temValor = lista.some((x) => x.valor > 0);
+    reqs.push(...tabela(slide, { ...mq.caixa, h: alturaSlide - mq.caixa.y - 150_000 },
+      ["Motivo", "Perdidos", "% dos perdidos", ...(temValor ? ["Valor perdido"] : [])],
+      linhas.map((x) => [curto(x.motivo, 60), inteiro(x.total), pct(taxa(x.total, perdas.total)), ...(temValor ? [dinheiro(x.valor)] : [])]),
+      { total: ["Total", inteiro(perdas.total), "100%", ...(temValor ? [dinheiro(lista.reduce((t, x) => t + x.valor, 0))] : [])], larguraPrimeira: 0.5 }));
+  }
   if (mq) {
     if (!qualificacoes.length) reqs.push({ deleteObject: { objectId: mq.slide } });
     else {
