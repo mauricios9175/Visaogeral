@@ -1,5 +1,6 @@
 import { db, EMPRESA_PADRAO, type Cliente, type ContaAnuncio, type TokenMeta } from "@/lib/db";
 import { diasAte, dinheiro, quandoFoi } from "@/lib/formato";
+import { AvisosCelular } from "@/components/avisos-celular";
 import { Aviso } from "@/components/ui";
 import { BotaoChurn, BotaoEnviar } from "@/components/botao";
 import {
@@ -119,8 +120,20 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
 
   return (
     <div className="space-y-8">
-      <h1 className="text-xl font-semibold">Configurações</h1>
+      <h1 className="text-[26px] font-extrabold tracking-tight">Configurações</h1>
       {msg && <Aviso>{msg}</Aviso>}
+
+      <section id="avisos" className="space-y-3 rounded-2xl border border-borda bg-superficie p-4 lg:p-5">
+        <div>
+          <h2 className="font-bold">Notificações no celular</h2>
+          <p className="text-sm text-texto-2">
+            Os alertas importantes chegam como notificação, mesmo com o app fechado: saldo acabando, conta bloqueada ou com
+            pagamento pendente e alertas críticos de desempenho (ex.: gasto sem resultado). Verificado de hora em hora; o mesmo
+            alerta não repete no mesmo dia. Ligue em cada aparelho (celular e, se quiser, o computador).
+          </p>
+        </div>
+        <AvisosCelular />
+      </section>
 
       {!!execucoes?.length && (
         <section className="rounded-2xl border border-borda bg-superficie p-4 text-sm">

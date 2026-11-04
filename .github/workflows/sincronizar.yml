@@ -29,6 +29,17 @@ jobs:
             -H "Authorization: Bearer $CRON_SECRET" \
             "$APP_URL/api/cron/sync?modo=$MODO"
 
+      # Notificações no celular com os alertas novos (o mesmo alerta não repete no dia)
+      - name: Avisos no celular
+        if: always()
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -sS --fail-with-body --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/sync?modo=avisos"
+
       # Google Ads: a cada 3 horas (cota do nível Explorer) e 30 dias de madrugada.
       - name: Sincronizar Google Ads
         if: always()
