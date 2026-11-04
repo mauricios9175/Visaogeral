@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Voltar } from "@/components/ui";
 import { notFound } from "next/navigation";
 import { db, type ContaAnuncio } from "@/lib/db";
