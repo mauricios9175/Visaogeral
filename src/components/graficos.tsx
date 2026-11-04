@@ -17,8 +17,8 @@ export function BarrasDiarias({ dados, campo, titulo, formato, cor = "var(--seri
 }) {
   const formatar = (v: number) => FORMATOS[formato](v);
   return (
-    <div className="rounded-xl border border-borda bg-superficie p-4">
-      <div className="mb-3 text-sm font-medium">{titulo}</div>
+    <div className="rounded-2xl border border-borda bg-superficie p-4 lg:p-5">
+      <div className="mb-3 text-[15px] font-bold">{titulo}</div>
       <div className="h-56">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={dados} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} barCategoryGap={2}>

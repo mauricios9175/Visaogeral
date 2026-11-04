@@ -1,47 +1,36 @@
 @import "tailwindcss";
 
 :root {
-  --fundo: #f6f6f4;
-  --superficie: #fcfcfb;
-  --borda: #e4e3de;
-  --texto: #0b0b0b;
-  --texto-2: #52514e;
-  --texto-3: #7a7974;
-  --destaque: #2a78d6;
-  --serie-1: #2a78d6;
-  --serie-2: #eb6834;
-  --bom: #1a7f37;
-  --atencao: #b26b00;
-  --critico: #c62828;
-  --bom-bg: #e7f4ea;
-  --atencao-bg: #fdf1dc;
-  --critico-bg: #fbe7e7;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --fundo: #121211;
-    --superficie: #1a1a19;
-    --borda: #2e2e2c;
-    --texto: #f0efec;
-    --texto-2: #c3c2b7;
-    --texto-3: #8f8e86;
-    --destaque: #3987e5;
-    --serie-1: #3987e5;
-    --serie-2: #d95926;
-    --bom: #4cc06a;
-    --atencao: #e0a030;
-    --critico: #ef6b6b;
-    --bom-bg: #16301d;
-    --atencao-bg: #3a2c12;
-    --critico-bg: #3a1a1a;
-  }
+  /* tema escuro (o do protótipo aprovado): fundo, superfícies em camadas e roxo de destaque */
+  color-scheme: dark;
+  --fundo: #0e0e12;
+  --superficie: #17171d;
+  --superficie-2: #1f1f27;
+  --lateral: #121217;
+  --borda: #26262f;
+  --texto: #ededf2;
+  --texto-2: #b4b4c2;
+  --texto-3: #9696a6;
+  --destaque: #7c4dff;        /* botões e preenchimentos (texto branco por cima) */
+  --destaque-texto: #c4b5fd;  /* links e textos em roxo sobre o fundo escuro */
+  --destaque-bg: #221d36;
+  --serie-1: #7c4dff;
+  --serie-2: #67e8f9;
+  --bom: #6ee7b7;
+  --atencao: #fcd34d;
+  --critico: #fca5a5;
+  --bom-bg: #123026;
+  --atencao-bg: #33290f;
+  --critico-bg: #3a1d24;
 }
 
 @theme inline {
   --color-fundo: var(--fundo);
   --color-superficie: var(--superficie);
+  --color-superficie-2: var(--superficie-2);
+  --color-lateral: var(--lateral);
   --color-borda: var(--borda);
+  --color-destaque-bg: var(--destaque-bg);
   --color-texto: var(--texto);
   --color-texto-2: var(--texto-2);
   --color-texto-3: var(--texto-3);
@@ -52,7 +41,7 @@
   --color-bom-bg: var(--bom-bg);
   --color-atencao-bg: var(--atencao-bg);
   --color-critico-bg: var(--critico-bg);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-jakarta);
 }
 
 body {
@@ -62,4 +51,17 @@ body {
 
 .num {
   font-variant-numeric: tabular-nums;
+}
+
+/* Roxo de texto mais claro que o de botão, para ler bem no fundo escuro (vence o utilitário do Tailwind) */
+.text-destaque {
+  color: var(--destaque-texto);
+}
+a.text-destaque:hover {
+  color: #ddd6fe;
+}
+
+/* Campos de formulário no tema escuro */
+input, select, textarea {
+  color-scheme: dark;
 }

@@ -7,15 +7,16 @@ import type { Metricas } from "@/lib/db";
 /** `extra`: filtros a manter ao trocar de período (ex.: { empresa: "Viccon" }). */
 export function SeletorPeriodo({ atual, base, extra = {} }: { atual: Periodo; base: string; extra?: Record<string, string> }) {
   const qsExtra = Object.entries(extra).map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join("");
-  const campo = "rounded-md border border-borda bg-fundo px-2 py-1 text-sm";
+  const campo = "rounded-lg border border-borda bg-superficie px-2 py-1.5 text-sm";
   return (
     <div className="flex flex-col items-end gap-2">
-      <div className="flex flex-wrap justify-end rounded-lg border border-borda bg-superficie p-0.5 text-sm">
+      <div className="flex flex-wrap justify-end rounded-[11px] border border-borda bg-superficie p-1 text-[13px]">
         {PERIODOS.map((p) => (
           <Link
             key={p.chave}
             href={`${base}?p=${p.chave}${qsExtra}`}
-            className={`rounded-md px-3 py-1 ${p.chave === atual.chave ? "bg-fundo font-medium" : "text-texto-2 hover:text-texto"}`}
+            aria-current={p.chave === atual.chave ? "page" : undefined}
+            className={`rounded-[8px] px-3 py-1.5 ${p.chave === atual.chave ? "bg-destaque-bg font-semibold text-texto" : "text-texto-2 hover:text-texto"}`}
           >
             {p.rotulo}
           </Link>
@@ -31,7 +32,7 @@ export function SeletorPeriodo({ atual, base, extra = {} }: { atual: Periodo; ba
         <label className="flex items-center gap-1">
           até <input type="date" name="ate" required defaultValue={atual.ate} className={campo} />
         </label>
-        <button className={`rounded-md border px-3 py-1 ${atual.chave === "livre" ? "border-destaque text-texto" : "border-borda hover:border-destaque"}`}>
+        <button className={`rounded-lg border px-3 py-1.5 ${atual.chave === "livre" ? "border-destaque bg-destaque-bg text-texto" : "border-borda hover:border-destaque"}`}>
           Aplicar
         </button>
       </form>
@@ -69,7 +70,7 @@ export function Variacao({ atual, anterior, menorMelhor = false, neutro = false 
 }
 
 const SAUDE: Record<Saude, { rotulo: string; classe: string; icone: string }> = {
-  ok: { rotulo: "Saudável", classe: "bg-bom-bg text-bom", icone: "●" },
+  ok: { rotulo: "No alvo", classe: "bg-bom-bg text-bom", icone: "●" },
   atencao: { rotulo: "Atenção", classe: "bg-atencao-bg text-atencao", icone: "▲" },
   critico: { rotulo: "Crítico", classe: "bg-critico-bg text-critico", icone: "■" },
   sem_dados: { rotulo: "Sem gasto", classe: "bg-fundo text-texto-3", icone: "○" },
@@ -78,20 +79,36 @@ const SAUDE: Record<Saude, { rotulo: string; classe: string; icone: string }> = 
 export function SeloSaude({ saude }: { saude: Saude }) {
   const s = SAUDE[saude];
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${s.classe}`}>
+    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${s.classe}`}>
       <span aria-hidden>{s.icone}</span>
       {s.rotulo}
     </span>
   );
 }
 
-export function Kpi({ rotulo, valor, children }: { rotulo: string; valor: string; children?: React.ReactNode }) {
+/** Card de número principal; `serie` desenha a tendência do período por baixo. */
+export function Kpi({ rotulo, valor, children, serie, cor }: {
+  rotulo: string; valor: string; children?: React.ReactNode; serie?: number[]; cor?: string;
+}) {
   return (
-    <div className="rounded-xl border border-borda bg-superficie p-4">
-      <div className="text-xs text-texto-2">{rotulo}</div>
-      <div className="num mt-1 text-2xl font-semibold">{valor}</div>
-      <div className="mt-1">{children}</div>
+    <div className="flex flex-col gap-2 rounded-2xl border border-borda bg-superficie p-4 lg:p-5">
+      <div className="text-[13px] font-medium text-texto-2">{rotulo}</div>
+      <div className="num text-2xl font-extrabold tracking-tight lg:text-[28px]">{valor}</div>
+      {serie && serie.length > 1 && <Tendencia valores={serie} cor={cor} />}
+      <div>{children}</div>
     </div>
+  );
+}
+
+/** Mini-gráfico de linha (tendência), sem eixos. */
+export function Tendencia({ valores, cor = "var(--serie-1)", altura = 34 }: { valores: number[]; cor?: string; altura?: number }) {
+  const max = Math.max(...valores), min = Math.min(...valores);
+  const faixa = max - min || 1;
+  const pontos = valores.map((v, i) => `${(i / (valores.length - 1)) * 200},${altura - 3 - ((v - min) / faixa) * (altura - 6)}`).join(" ");
+  return (
+    <svg width="100%" height={altura} viewBox={`0 0 200 ${altura}`} preserveAspectRatio="none" aria-hidden="true">
+      <polyline points={pontos} fill="none" stroke={cor} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+    </svg>
   );
 }
 
@@ -103,7 +120,7 @@ export function Aviso({ children }: { children: React.ReactNode }) {
           ? <a key={i} href={parte} target="_blank" rel="noreferrer" className="text-destaque underline">abrir ↗</a>
           : parte)
     : children;
-  return <div className="rounded-lg border border-borda bg-superficie px-4 py-3 text-sm text-texto-2">{conteudo}</div>;
+  return <div className="rounded-xl border border-borda bg-superficie px-4 py-3 text-sm text-texto-2">{conteudo}</div>;
 }
 
 /** "12 conversas · 3 formulário · 5 conv. personalizada"; cliques/engajamento aparecem à parte. */
