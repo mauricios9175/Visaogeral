@@ -17,7 +17,7 @@ export function EsbocoIA({ clienteId, conta, pedidoInicial, onPronto }: {
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [feito, setFeito] = useState<Esboco | null>(null);
-  const { ouvindo, falar } = useMicrofone(setPedido, setErro);
+  const { ouvindo, falar, parar } = useMicrofone(setPedido, setErro);
   const automatico = useRef(false);
 
   async function esbocar(texto = pedido) {
@@ -56,18 +56,18 @@ export function EsbocoIA({ clienteId, conta, pedidoInicial, onPronto }: {
         Descreva a campanha (objetivo, nicho, público, oferta). A IA escolhe os interesses (conferidos no Meta) e escreve
         textos, títulos e descrição. <b>Nada é publicado</b>: só preenche a tela abaixo para você revisar.
       </p>
-      <form onSubmit={(e) => { e.preventDefault(); void esbocar(); }} className="flex gap-2">
+      <form onSubmit={(e) => { e.preventDefault(); parar(); void esbocar(); }} className="flex gap-2">
         <input
           value={pedido} onChange={(e) => setPedido(e.target.value)} aria-label="Descrição da campanha"
           placeholder="ex.: campanha de WhatsApp para loja de celulares, foco em iPhone seminovo, R$ 40 por dia"
           className="min-h-11 min-w-0 flex-1 rounded-[10px] border border-borda bg-fundo px-3 text-sm placeholder:text-texto-3 focus:border-destaque focus:outline-none"
         />
-        <BotaoMicrofone ouvindo={ouvindo} falar={falar} />
+        <BotaoMicrofone ouvindo={ouvindo} falar={() => falar(pedido)} />
         <button disabled={ocupado} className="min-h-11 shrink-0 rounded-[10px] bg-destaque px-4 text-sm font-semibold text-white disabled:opacity-60">
           {ocupado ? "Montando…" : "Montar esboço"}
         </button>
       </form>
-      {ouvindo && <p className="mt-2 text-xs text-destaque">Ouvindo… toque no microfone de novo para parar.</p>}
+      {ouvindo && <p className="mt-2 text-xs text-destaque">● Ouvindo… pode fazer pausas. Toque no microfone de novo quando terminar.</p>}
       {ocupado && <p className="mt-2 text-sm text-texto-3">Escrevendo os textos e conferindo os interesses no Meta (uns 20 a 40 segundos)…</p>}
       {erro && <p className="mt-2 text-sm text-critico">{erro}</p>}
       {feito && !ocupado && (

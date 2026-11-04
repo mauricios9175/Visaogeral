@@ -7,7 +7,11 @@ import { useRef, useState } from "react";
 type Resultado = { cliente: { id: string; nome: string }; periodo: { rotulo: string; qs: string }; texto: string };
 
 // reconhecimento de voz do navegador (Chrome/Android/Safari); sem custo
-type Reconhecedor = { lang: string; interimResults: boolean; start: () => void; stop: () => void; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null };
+type ResultadoVoz = ArrayLike<{ transcript: string }> & { isFinal: boolean };
+type Reconhecedor = {
+  lang: string; interimResults: boolean; continuous: boolean; start: () => void; stop: () => void;
+  onresult: ((e: { results: ArrayLike<ResultadoVoz> }) => void) | null; onend: (() => void) | null; onerror: ((e: { error: string }) => void) | null;
+};
 const criarReconhecedor = (): Reconhecedor | null => {
   if (typeof window === "undefined") return null;
   const C = (window as unknown as { SpeechRecognition?: new () => Reconhecedor; webkitSpeechRecognition?: new () => Reconhecedor }).SpeechRecognition
@@ -15,30 +19,73 @@ const criarReconhecedor = (): Reconhecedor | null => {
   return C ? new C() : null;
 };
 
-/** Microfone do navegador: vai escrevendo o que a pessoa fala em `setTexto`. */
+const LIMITE_MIC_MS = 3 * 60_000; // desliga sozinho depois de 3 minutos, por segurança
+
+/**
+ * Microfone do navegador: vai escrevendo o que a pessoa fala em `setTexto` e só para quando ela tocar de novo.
+ * O navegador encerra a escuta sozinho depois de uma pausa; aqui ela é religada na hora, guardando o que já foi dito.
+ */
 export function useMicrofone(setTexto: (t: string) => void, setErro: (e: string) => void) {
   const [ouvindo, setOuvindo] = useState(false);
   const rec = useRef<Reconhecedor | null>(null);
-  function falar() {
-    if (ouvindo) { rec.current?.stop(); return; }
+  const quer = useRef(false);      // a pessoa ainda quer falar (não tocou para parar)
+  const dito = useRef("");         // texto das escutas anteriores (antes do navegador religar)
+  const inicio = useRef(0);
+
+  function parar() {
+    quer.current = false;
+    rec.current?.stop();
+    setOuvindo(false);
+  }
+
+  function escutar() {
     const r = criarReconhecedor();
-    if (!r) { setErro("Este navegador não tem reconhecimento de voz. Use o Chrome, ou o microfone do teclado do celular."); return; }
-    r.lang = "pt-BR";
+    if (!r) { parar(); setErro("Este navegador não tem reconhecimento de voz. Use o Chrome, ou o microfone do teclado do celular."); return; }
+    // no Android o modo contínuo repete as frases; lá cada escuta é curta e religamos a cada pausa
+    r.continuous = !/android/i.test(navigator.userAgent);
     r.interimResults = true;
-    r.onresult = (ev) => setTexto(Array.from(ev.results).map((x) => x[0].transcript).join(" "));
-    r.onend = () => setOuvindo(false);
-    r.onerror = () => setOuvindo(false);
+    r.lang = "pt-BR";
+    let daVez = "";
+    r.onresult = (ev) => {
+      daVez = Array.from(ev.results).map((x) => x[0].transcript.trim()).filter(Boolean).join(" ");
+      setTexto([dito.current, daVez].filter(Boolean).join(" "));
+    };
+    r.onerror = (ev) => {
+      // sem permissão: não adianta religar
+      if (ev.error === "not-allowed" || ev.error === "service-not-allowed" || ev.error === "audio-capture") {
+        parar();
+        setErro(ev.error === "audio-capture" ? "Não achei o microfone deste aparelho." : "O navegador bloqueou o microfone. Libere a permissão do microfone para o painel e tente de novo.");
+      }
+      // "no-speech", "network", "aborted": o onend religa
+    };
+    r.onend = () => {
+      dito.current = [dito.current, daVez].filter(Boolean).join(" ");
+      if (quer.current && Date.now() - inicio.current < LIMITE_MIC_MS) {
+        try { escutar(); } catch { parar(); }
+      } else {
+        parar();
+      }
+    };
     rec.current = r;
-    setOuvindo(true);
     r.start();
   }
-  return { ouvindo, falar };
+
+  /** Toque no botão: liga (continuando o texto que já está na caixa) ou desliga. */
+  function falar(textoAtual = "") {
+    if (quer.current) { parar(); return; }
+    quer.current = true;
+    dito.current = textoAtual.trim();
+    inicio.current = Date.now();
+    setOuvindo(true);
+    try { escutar(); } catch { parar(); }
+  }
+  return { ouvindo, falar, parar };
 }
 
 /** Botão do microfone (mesmo visual nas caixas de IA). */
 export function BotaoMicrofone({ ouvindo, falar }: { ouvindo: boolean; falar: () => void }) {
   return (
-    <button type="button" onClick={falar} aria-label={ouvindo ? "Parar de ouvir" : "Falar o pedido"} title="Falar"
+    <button type="button" onClick={() => falar()} aria-label={ouvindo ? "Parar de ouvir" : "Falar o pedido"} title="Falar"
       className={`flex min-h-11 w-11 shrink-0 items-center justify-center rounded-[10px] border ${ouvindo ? "border-destaque bg-destaque-bg text-destaque" : "border-borda text-texto-2 hover:text-texto"}`}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
     </button>
@@ -100,11 +147,12 @@ export function AnaliseIA({ clienteId, periodo, rotuloPeriodo }: { clienteId?: s
 
   function enviar(e: React.FormEvent) {
     e.preventDefault();
+    parar();
     if (!pedido.trim()) return clienteId && periodo ? analisar({ clienteId, ...periodo }) : setErro("Escreva o pedido, ex.: “últimos 14 dias da Loja X”.");
     analisar({ pedido, clienteId });
   }
 
-  const { ouvindo, falar } = useMicrofone(setPedido, setErro);
+  const { ouvindo, falar, parar } = useMicrofone(setPedido, setErro);
 
   const exemplo = clienteId
     ? "ex.: do dia 1 ao dia 15, mês passado, ou “monta uma campanha de WhatsApp…”"
@@ -128,12 +176,12 @@ export function AnaliseIA({ clienteId, periodo, rotuloPeriodo }: { clienteId?: s
           aria-label="Pedido de análise"
           className="min-h-11 min-w-0 flex-1 rounded-[10px] border border-borda bg-fundo px-3 text-sm placeholder:text-texto-3 focus:border-destaque focus:outline-none"
         />
-        <BotaoMicrofone ouvindo={ouvindo} falar={falar} />
+        <BotaoMicrofone ouvindo={ouvindo} falar={() => falar(pedido)} />
         <button disabled={ocupado} className="min-h-11 shrink-0 rounded-[10px] border border-borda bg-superficie-2 px-4 text-sm font-semibold hover:border-destaque disabled:opacity-60">
           {ocupado ? "…" : "Analisar"}
         </button>
       </form>
-      {ouvindo && <p className="mt-2 text-xs text-destaque">Ouvindo… fale o pedido e toque no microfone de novo para parar.</p>}
+      {ouvindo && <p className="mt-2 text-xs text-destaque">● Ouvindo… pode fazer pausas. Toque no microfone de novo quando terminar.</p>}
       {ocupado && <p className="mt-3 text-sm text-texto-3">Juntando os números e escrevendo a análise (leva uns 10 a 30 segundos)…</p>}
       {erro && <p className="mt-3 text-sm text-critico">{erro}</p>}
       {res && !ocupado && (
