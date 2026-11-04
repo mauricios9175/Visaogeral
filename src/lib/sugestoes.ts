@@ -39,6 +39,9 @@ export type Sugestao = {
 };
 
 export type ResultadoSugestoes = {
+  id?: string;          // id no histórico
+  criado_em?: string;
+  feitas?: number[];    // índices das sugestões marcadas como feitas
   periodo: { rotulo: string; desde: string; ate: string };
   diagnostico: { cpa: string; qualidade: string; decisao: string; resumo: string };
   passo: number;
@@ -173,6 +176,34 @@ Regras de resposta:
 - Use os ids exatamente como aparecem na lista. Ordene por prioridade. No máximo 8 sugestões.
 - Não invente números. Português do Brasil, direto.`;
 
+// ---------- Histórico (as últimas sugestões de cada cliente ficam salvas) ----------
+
+const MAX_HISTORICO = 15;
+const chaveHistorico = (clienteId: string) => `ia_sugestoes:${clienteId}`;
+
+export async function lerHistoricoSugestoes(clienteId: string): Promise<ResultadoSugestoes[]> {
+  const { data } = await db().from("configuracoes").select("valor").eq("chave", chaveHistorico(clienteId)).maybeSingle();
+  return Array.isArray(data?.valor) ? (data.valor as ResultadoSugestoes[]) : [];
+}
+
+async function gravarHistorico(clienteId: string, lista: ResultadoSugestoes[]) {
+  const { error } = await db().from("configuracoes")
+    .upsert({ chave: chaveHistorico(clienteId), valor: lista.slice(0, MAX_HISTORICO), atualizado_em: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+}
+
+/** Marca (ou desmarca) uma sugestão como feita. */
+export async function marcarSugestao(clienteId: string, id: string, indice: number, feito: boolean) {
+  const lista = await lerHistoricoSugestoes(clienteId);
+  const r = lista.find((x) => x.id === id);
+  if (!r) throw new Error("Sugestão não encontrada no histórico.");
+  const feitas = new Set(r.feitas ?? []);
+  if (feito) feitas.add(indice); else feitas.delete(indice);
+  r.feitas = [...feitas].sort((a, b) => a - b);
+  await gravarHistorico(clienteId, lista);
+  return r;
+}
+
 /** Sugestões de otimização do cliente (padrão: últimos 14 dias, para ter volume). */
 export async function sugerirOtimizacoes(clienteId: string, params?: { p?: string; de?: string; ate?: string }): Promise<ResultadoSugestoes> {
   const { atual, anterior } = resolverPeriodo(params?.p ? params : { p: "14" });
@@ -186,7 +217,10 @@ export async function sugerirOtimizacoes(clienteId: string, params?: { p?: strin
   } catch {
     throw new Error("A IA respondeu num formato inesperado. Tente de novo.");
   }
-  return {
+  const resultado: ResultadoSugestoes = {
+    id: crypto.randomUUID(),
+    criado_em: new Date().toISOString(),
+    feitas: [],
     periodo: { rotulo: atual.rotulo, desde: atual.desde, ate: atual.ate },
     diagnostico: {
       cpa: String(r.diagnostico?.cpa ?? ""), qualidade: String(r.diagnostico?.qualidade ?? ""),
@@ -202,4 +236,7 @@ export async function sugerirOtimizacoes(clienteId: string, params?: { p?: strin
       item: (s.id && itens.get(String(s.id).trim())) || null,
     })).filter((s) => s.titulo),
   };
+  // guarda no histórico (se falhar, as sugestões aparecem do mesmo jeito)
+  await lerHistoricoSugestoes(clienteId).then((h) => gravarHistorico(clienteId, [resultado, ...h])).catch(() => null);
+  return resultado;
 }

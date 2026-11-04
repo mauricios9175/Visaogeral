@@ -8,8 +8,8 @@ import { decimal, dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
 import { Aviso, Kpi, SeletorPeriodo, SeloStatus, TiposResultado, Variacao, Voltar } from "@/components/ui";
 import { BarrasDiarias } from "@/components/graficos";
 import { AnaliseIA } from "@/components/analise-ia";
-import { SugestoesIA } from "@/components/sugestoes-ia";
-import { lerParams } from "@/lib/sugestoes";
+import { SugestoesIA, type AcaoPainel } from "@/components/sugestoes-ia";
+import { lerHistoricoSugestoes, lerParams } from "@/lib/sugestoes";
 import { PARAMS_PADRAO } from "@/lib/manual-ia";
 import { AcoesRapidas, type DestinosDuplicar } from "@/components/acoes-rapidas";
 import { db } from "@/lib/db";
@@ -47,7 +47,15 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
     detalheGoogle(id, atual, anterior).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })),
     db().from("acoes_log").select("*").eq("cliente_id", id).order("criado_em", { ascending: false }).limit(30),
   ]);
-  const paramsIA = await lerParams(id).catch(() => PARAMS_PADRAO);
+  const [paramsIA, historicoIA] = await Promise.all([
+    lerParams(id).catch(() => PARAMS_PADRAO),
+    lerHistoricoSugestoes(id).catch(() => []),
+  ]);
+  // ações feitas pelo painel depois da sugestão mais antiga guardada (para marcar "✓ feito")
+  const desdeIA = historicoIA.at(-1)?.criado_em;
+  const { data: acoesIA } = desdeIA
+    ? await db().from("acoes_log").select("objeto_id, acao, depois, criado_em").eq("cliente_id", id).eq("ok", true).gte("criado_em", desdeIA)
+    : { data: [] };
   if (!d) notFound();
   // Em produção o Next esconde a mensagem do erro; mostramos aqui para facilitar o diagnóstico.
   if ("erroGeral" in d) {
@@ -123,7 +131,8 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
 
       <AnaliseIA clienteId={id} periodo={{ p: atual.chave, ...(atual.chave === "livre" ? { de: atual.desde, ate: atual.ate } : {}) }} rotuloPeriodo={atual.rotulo} />
       <SugestoesIA
-        clienteId={id} params={paramsIA} cplMeta={c.cpl_meta} voltar={voltar} rotuloPeriodo={atual.rotulo}
+        clienteId={id} params={paramsIA} cplMeta={c.cpl_meta} voltar={`${voltar}#sugestoes`} rotuloPeriodo={atual.rotulo}
+        historico={historicoIA} acoesPainel={(acoesIA ?? []) as AcaoPainel[]}
         periodo={{ p: atual.chave, ...(atual.chave === "livre" ? { de: atual.desde, ate: atual.ate } : {}) }}
       />
 
