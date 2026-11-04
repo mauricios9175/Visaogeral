@@ -8,6 +8,7 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   // /login e /privacidade ficam abertos; /api/cron usa o próprio CRON_SECRET;
+  // /portal/<token> é o link só de leitura do cliente (o token é a chave; a página não tem nenhuma ação);
   // o manifesto e os ícones do app também (o celular busca antes de você entrar)
-  matcher: ["/((?!login|privacidade|api/cron|_next/static|_next/image|favicon.ico|manifest.webmanifest|icones/|sw.js).*)"],
+  matcher: ["/((?!login|privacidade|portal/|api/cron|_next/static|_next/image|favicon.ico|manifest.webmanifest|icones/|sw.js).*)"],
 };

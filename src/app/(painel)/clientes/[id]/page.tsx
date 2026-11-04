@@ -9,6 +9,8 @@ import { Aviso, Kpi, SeletorPeriodo, SeloStatus, TiposResultado, Variacao, Volta
 import { BarrasDiarias } from "@/components/graficos";
 import { AnaliseIA } from "@/components/analise-ia";
 import { SugestoesIA, type AcaoPainel } from "@/components/sugestoes-ia";
+import { LinkCliente } from "@/components/link-cliente";
+import { linkDoCliente } from "@/lib/portal";
 import { lerHistoricoSugestoes, lerParams } from "@/lib/sugestoes";
 import { PARAMS_PADRAO } from "@/lib/manual-ia";
 import { AcoesRapidas, type DestinosDuplicar } from "@/components/acoes-rapidas";
@@ -47,9 +49,10 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
     detalheGoogle(id, atual, anterior).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })),
     db().from("acoes_log").select("*").eq("cliente_id", id).order("criado_em", { ascending: false }).limit(30),
   ]);
-  const [paramsIA, historicoIA] = await Promise.all([
+  const [paramsIA, historicoIA, tokenPortal] = await Promise.all([
     lerParams(id).catch(() => PARAMS_PADRAO),
     lerHistoricoSugestoes(id).catch(() => []),
+    linkDoCliente(id).catch(() => null),
   ]);
   // ações feitas pelo painel depois da sugestão mais antiga guardada (para marcar "✓ feito")
   const desdeIA = historicoIA.at(-1)?.criado_em;
@@ -107,6 +110,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
           </div>
         </div>
         <div className="flex flex-wrap gap-2.5">
+          <LinkCliente clienteId={id} token={tokenPortal} />
           <Link href={`${base}/historico#relatorio`} className="inline-flex min-h-[42px] items-center rounded-[10px] border border-borda bg-superficie px-4 text-sm font-semibold hover:border-destaque">
             Gerar relatório
           </Link>
