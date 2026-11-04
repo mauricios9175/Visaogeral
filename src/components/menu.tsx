@@ -82,7 +82,7 @@ export function MenuCelular() {
   const pathname = usePathname();
   return (
     <>
-      <header className="sticky top-0 z-30 flex items-center gap-2.5 border-b border-borda bg-lateral/95 px-4 py-3 backdrop-blur lg:hidden">
+      <header className="sticky top-0 z-30 flex items-center gap-2.5 border-b border-borda bg-lateral/95 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur lg:hidden">
         <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-destaque">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M4 18 L9 11 L13 14 L20 5" /></svg>
         </span>
