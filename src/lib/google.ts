@@ -581,3 +581,81 @@ export async function criarCampanhaPmax(acesso: string, customerId: string, logi
   ops.push(...extensoes);
   return mutarTudo(acesso, customerId, loginCustomerId, ops);
 }
+
+// ---------- Detalhe para as sugestões com IA (lido na hora: grupos, palavras-chave e termos de pesquisa) ----------
+
+export type GrupoMetricas = { campanhaId: string; campanha: string; id: string; nome: string; status: string; gasto: number; cliques: number; impressoes: number; conversoes: number };
+export type PalavraMetricas = GrupoMetricas & { grupoId: string; grupo: string; criterioId: string; texto: string; correspondencia: string; qualidade: number | null };
+export type TermoMetricas = { campanhaId: string; campanha: string; grupoId: string; grupo: string; termo: string; status: string; gasto: number; cliques: number; impressoes: number; conversoes: number };
+
+const num = (x: unknown) => Number(x ?? 0) || 0;
+
+/** Grupos, palavras-chave e termos de pesquisa de uma conta no período (só o que teve impressão/clique). */
+export async function detalheParaSugestoes(acesso: string, customerId: string, loginCustomerId: string | null, desde: string, ate: string) {
+  const periodo = `segments.date BETWEEN '${desde}' AND '${ate}'`;
+  const [grupos, palavras, termos] = await Promise.all([
+    consultar(acesso, customerId, loginCustomerId, `
+      SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, ad_group.status,
+             metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions
+      FROM ad_group WHERE ${periodo} AND campaign.status != 'REMOVED' AND ad_group.status != 'REMOVED' AND metrics.impressions > 0`),
+    consultar(acesso, customerId, loginCustomerId, `
+      SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, ad_group_criterion.criterion_id, ad_group_criterion.status,
+             ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.quality_info.quality_score,
+             metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions
+      FROM keyword_view WHERE ${periodo} AND ad_group_criterion.status != 'REMOVED' AND metrics.impressions > 0
+      ORDER BY metrics.cost_micros DESC LIMIT 60`),
+    consultar(acesso, customerId, loginCustomerId, `
+      SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, search_term_view.search_term, search_term_view.status,
+             metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions
+      FROM search_term_view WHERE ${periodo} AND metrics.clicks > 0
+      ORDER BY metrics.cost_micros DESC LIMIT 80`).catch(() => []),
+  ]);
+  const m = (l: { metrics?: Record<string, unknown> }) => ({
+    gasto: num(l.metrics?.costMicros) / 1_000_000, cliques: num(l.metrics?.clicks), impressoes: num(l.metrics?.impressions), conversoes: num(l.metrics?.conversions),
+  });
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  return {
+    grupos: grupos.map((l: any): GrupoMetricas => ({
+      campanhaId: String(l.campaign?.id), campanha: l.campaign?.name ?? "", id: String(l.adGroup?.id), nome: l.adGroup?.name ?? "", status: l.adGroup?.status ?? "", ...m(l),
+    })).sort((a, b) => b.gasto - a.gasto),
+    palavras: palavras.map((l: any): PalavraMetricas => ({
+      campanhaId: String(l.campaign?.id), campanha: l.campaign?.name ?? "", grupoId: String(l.adGroup?.id), grupo: l.adGroup?.name ?? "",
+      id: `${l.adGroup?.id}~${l.adGroupCriterion?.criterionId}`, criterioId: String(l.adGroupCriterion?.criterionId), nome: l.adGroupCriterion?.keyword?.text ?? "",
+      texto: l.adGroupCriterion?.keyword?.text ?? "", correspondencia: l.adGroupCriterion?.keyword?.matchType ?? "", status: l.adGroupCriterion?.status ?? "",
+      qualidade: l.adGroupCriterion?.qualityInfo?.qualityScore ?? null, ...m(l),
+    })),
+    termos: termos.map((l: any): TermoMetricas => ({
+      campanhaId: String(l.campaign?.id), campanha: l.campaign?.name ?? "", grupoId: String(l.adGroup?.id), grupo: l.adGroup?.name ?? "",
+      termo: l.searchTermView?.searchTerm ?? "", status: l.searchTermView?.status ?? "", ...m(l),
+    })),
+  };
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+}
+
+/** Pausa ou ativa um grupo de anúncios. */
+export async function mudarStatusGrupoGoogle(acesso: string, customerId: string, loginCustomerId: string | null, grupoId: string, ativo: boolean) {
+  await mutar(acesso, customerId, loginCustomerId, "adGroups", {
+    update: { resourceName: `customers/${customerId}/adGroups/${grupoId}`, status: ativo ? "ENABLED" : "PAUSED" }, updateMask: "status",
+  });
+}
+
+/** Pausa ou ativa uma palavra-chave (id = "grupo~critério"). */
+export async function mudarStatusPalavraGoogle(acesso: string, customerId: string, loginCustomerId: string | null, id: string, ativo: boolean) {
+  await mutar(acesso, customerId, loginCustomerId, "adGroupCriteria", {
+    update: { resourceName: `customers/${customerId}/adGroupCriteria/${id}`, status: ativo ? "ENABLED" : "PAUSED" }, updateMask: "status",
+  });
+}
+
+/** Palavra negativa na campanha. */
+export async function negativarNaCampanhaGoogle(acesso: string, customerId: string, loginCustomerId: string | null, campanhaId: string, texto: string, tipo: "EXACT" | "PHRASE" | "BROAD") {
+  await mutar(acesso, customerId, loginCustomerId, "campaignCriteria", {
+    create: { campaign: `customers/${customerId}/campaigns/${campanhaId}`, negative: true, keyword: { text: texto, matchType: tipo } },
+  });
+}
+
+/** Termo de pesquisa que converte vira palavra-chave (exata) no grupo. */
+export async function adicionarPalavraGoogle(acesso: string, customerId: string, loginCustomerId: string | null, grupoId: string, texto: string, tipo: "EXACT" | "PHRASE" | "BROAD") {
+  await mutar(acesso, customerId, loginCustomerId, "adGroupCriteria", {
+    create: { adGroup: `customers/${customerId}/adGroups/${grupoId}`, status: "ENABLED", keyword: { text: texto, matchType: tipo } },
+  });
+}

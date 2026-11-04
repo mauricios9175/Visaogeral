@@ -6,15 +6,20 @@ import { diasEntre, resolverPeriodo, type Periodo } from "./datas";
 import { decimal, dinheiro, inteiro, pct } from "./formato";
 import { chaveDe, nomeDoAnuncio, nomeDoPublico } from "./agrupar";
 import { perguntarIA } from "./ia";
-import { CHAVE_MANUAL, chaveParams, MANUAL_PADRAO, normalizarParams, type ParamsIA } from "./manual-ia";
+import { CHAVE_MANUAL, CHAVE_MANUAL_GOOGLE, chaveParams, MANUAL_GOOGLE_PADRAO, MANUAL_PADRAO, normalizarParams, type ParamsIA } from "./manual-ia";
+import { detalheGoogle } from "./consultas-google";
+import { detalheParaSugestoes } from "./google";
+import { acessoGoogle } from "./acesso-google";
 
 // Sugestões de otimização com IA: o manual do gestor + os parâmetros do cliente + os números do Meta cruzados
 // com o CRM (por UTM: campanha, público e anúncio). A IA só sugere; quem executa é o gestor, pelos botões.
 
-export async function lerManual(): Promise<string> {
-  const { data } = await db().from("configuracoes").select("valor").eq("chave", CHAVE_MANUAL).maybeSingle();
+export type PlataformaIA = "meta" | "google";
+
+export async function lerManual(plataforma: PlataformaIA = "meta"): Promise<string> {
+  const { data } = await db().from("configuracoes").select("valor").eq("chave", plataforma === "google" ? CHAVE_MANUAL_GOOGLE : CHAVE_MANUAL).maybeSingle();
   const texto = (data?.valor as { texto?: string } | null)?.texto;
-  return texto?.trim() ? texto : MANUAL_PADRAO;
+  return texto?.trim() ? texto : plataforma === "google" ? MANUAL_GOOGLE_PADRAO : MANUAL_PADRAO;
 }
 
 export async function lerParams(clienteId: string): Promise<ParamsIA> {
@@ -22,10 +27,12 @@ export async function lerParams(clienteId: string): Promise<ParamsIA> {
   return normalizarParams(data?.valor as Partial<ParamsIA> | null);
 }
 
-type Nivel = "anuncio" | "conjunto" | "campanha";
+type Nivel = "anuncio" | "conjunto" | "campanha" | "grupo" | "palavra" | "termo";
 const ACOES = [
   "manter", "aguardar", "pausar", "escalar", "reduzir_orcamento", "otimizar_publico", "revisar_formulario",
   "novo_criativo", "recriar_campanha", "campanha_testes", "dividir_campanha", "mudar_objetivo",
+  // Google
+  "negativar", "adicionar_palavra", "novo_anuncio", "mudar_correspondencia", "revisar_lance", "revisar_pagina",
 ] as const;
 export type AcaoIA = (typeof ACOES)[number];
 
@@ -34,11 +41,17 @@ export type Sugestao = {
   titulo: string;
   motivo: string;
   confianca: "alta" | "media" | "baixa";
+  correspondencia?: "EXACT" | "PHRASE"; // Google: negativar/adicionar palavra
   // item do Meta a que a sugestão se refere (para os botões de pausar/orçamento)
-  item: { id: string; nivel: Nivel; nome: string; conta: string; status: string | null; orcamento: LinhaTabela["orcamento"] } | null;
+  item: {
+    id: string; nivel: Nivel; nome: string; conta: string; status: string | null; orcamento: LinhaTabela["orcamento"];
+    plataforma?: PlataformaIA;
+    campanhaId?: string; campanha?: string; grupoId?: string; grupo?: string; // Google: para negativar/adicionar palavra
+  } | null;
 };
 
 export type ResultadoSugestoes = {
+  plataforma?: PlataformaIA; // sem = Meta (histórico antigo)
   id?: string;          // id no histórico
   criado_em?: string;
   feitas?: number[];    // índices das sugestões marcadas como feitas
@@ -148,6 +161,134 @@ async function dados(clienteId: string, atual: Periodo, anterior: Periodo, param
   return { texto: L.join("\n"), itens };
 }
 
+// ---------- Google Ads ----------
+
+/** Números do Google (campanhas, grupos, palavras e termos) cruzados com o CRM, para a IA. */
+async function dadosGoogle(clienteId: string, atual: Periodo, anterior: Periodo, params: ParamsIA) {
+  const [{ data: cliente }, google, crm, acoes] = await Promise.all([
+    db().from("clientes").select("nome, nicho, cpl_meta, orcamento_mensal").eq("id", clienteId).maybeSingle(),
+    detalheGoogle(clienteId, atual, anterior),
+    detalheCrm(clienteId, atual, anterior).catch(() => null),
+    acoesDoPeriodo(clienteId, atual.desde, atual.ate).catch(() => [] as string[]),
+  ]);
+  if (!cliente) throw new Error("Cliente não encontrado.");
+  if (!google) throw new Error("Este cliente não tem conta do Google Ads vinculada.");
+  const dias = diasEntre(atual.desde, atual.ate);
+  const L: string[] = [];
+  L.push(`CLIENTE: ${cliente.nome}${cliente.nicho ? ` (nicho: ${cliente.nicho})` : ""}`);
+  L.push(`PERÍODO ANALISADO: ${atual.desde} a ${atual.ate} (${dias} dias). Anterior: ${anterior.desde} a ${anterior.ate}.`);
+  L.push("PARÂMETROS DO CLIENTE:");
+  L.push(`- CPA desejado: ${cliente.cpl_meta ? dinheiro(cliente.cpl_meta) : "NÃO CADASTRADO (avalie pela média da conta e avise)"}; tolerância ${params.tolerancia}%`);
+  L.push(`- Volume mínimo para julgar palavra/termo: gasto de ${params.gastoMinimo ? dinheiro(params.gastoMinimo) : cliente.cpl_meta ? `${dinheiro(cliente.cpl_meta * 2)} (2× o CPA)` : "2× o CPA médio"} ou ${params.diasMinimos} dias de dados`);
+  L.push(`- Qualidade boa: ${params.qualificacaoMinima}% ou mais dos leads qualificados no CRM`);
+  if (params.notas.trim()) L.push(`- Observações do gestor sobre este cliente: ${params.notas.trim()}`);
+
+  const a = google.atual, b = google.anterior;
+  L.push("", "== CONTA NO GOOGLE (período vs anterior) ==");
+  L.push(`Gasto ${dinheiro(a.gasto)} (antes ${dinheiro(b.gasto)}) | conversões ${decimal(a.conversoes)} (antes ${decimal(b.conversoes)}) | CPA ${dinheiro(a.cpa)} (antes ${dinheiro(b.cpa)}) | CTR ${pct(a.ctr)} | CPC ${dinheiro(a.cpc)}`);
+  if (google.porAcao.length) L.push(`Conversões por ação: ${google.porAcao.slice(0, 6).map(([n, q]) => `${curto(n, 40)} ${decimal(q)}`).join("; ")}`);
+
+  // CRM pelas UTMs: utm_campaign = campanha, utm_content = grupo, utm_term = palavra-chave (ou termo, se o CRM guardar)
+  const idx = (d: "utm_campaign" | "utm_content" | "utm_term") => {
+    const m = new Map<string, NumerosCrm>();
+    for (const l of crm?.porUtm[d] ?? []) if (l.nome !== "(sem UTM)") m.set(chaveDe(decodeURIComponent(l.nome.replace(/\+/g, " ")).replace(/[[\]"+]/g, "")), l);
+    return m;
+  };
+  const crmCamp = idx("utm_campaign"), crmGrupo = idx("utm_content"), crmTermo = idx("utm_term");
+  const cruzou = { n: 0 };
+  const crmTxt = (n: NumerosCrm | undefined) => {
+    if (!n) return " | CRM: sem cruzamento";
+    cruzou.n++;
+    const q = qualificadosDe(n);
+    const f = n.funil;
+    return ` | CRM: ${inteiro(f.leads)} leads, ${q == null ? "qualificação não configurada" : `${inteiro(q)} qualificados (${f.leads ? Math.round((q / f.leads) * 100) : 0}%)`}, ${inteiro(f.vendas)} vendas${f.faturamento ? ` (${dinheiro(f.faturamento)})` : ""}`;
+  };
+  const met = (x: { gasto: number; cliques: number; impressoes: number; conversoes: number }) =>
+    `gasto ${dinheiro(x.gasto)} | cliques ${inteiro(x.cliques)} | CTR ${pct(x.impressoes ? (x.cliques / x.impressoes) * 100 : null)} | conversões ${decimal(x.conversoes)} | CPA ${x.conversoes ? dinheiro(x.gasto / x.conversoes) : "—"}`;
+
+  const itens = new Map<string, Sugestao["item"]>();
+  L.push("", "== CAMPANHAS ==");
+  for (const c of google.campanhas.filter((x) => x.gasto > 0).slice(0, 10)) {
+    itens.set(`c:${c.id}`, { id: c.id, nivel: "campanha", nome: c.nome, conta: c.contaId, status: c.status, plataforma: "google", campanhaId: c.id,
+      orcamento: c.orcamento != null ? { valor: c.orcamento, tipo: "dia" } : null });
+    L.push(`- id=c:${c.id} | ${curto(c.nome)} (${c.canal ?? "?"}, ${c.status ?? "?"}) | ${met(c)}${c.orcamento != null ? ` | orçamento ${dinheiro(c.orcamento)}/dia${c.compartilhado ? " (compartilhado)" : ""}` : ""}${crmTxt(crmCamp.get(chaveDe(c.nome)))}`);
+  }
+
+  // detalhe lido na hora (grupos, palavras, termos), conta por conta
+  const contas = [...new Set(google.campanhas.map((c) => c.contaId))];
+  const detalhes = await Promise.all(contas.map(async (contaId) => {
+    try {
+      const { acesso, conta } = await acessoGoogle(contaId);
+      return { contaId, ...(await detalheParaSugestoes(acesso, contaId, conta?.login_customer_id ?? null, atual.desde, atual.ate)) };
+    } catch (e) {
+      L.push(`(Não deu para ler grupos/palavras/termos da conta ${contaId}: ${e instanceof Error ? e.message : e})`);
+      return null;
+    }
+  }));
+  const grupos = detalhes.flatMap((d) => d?.grupos.map((g) => ({ ...g, conta: d.contaId })) ?? []).slice(0, 15);
+  const palavras = detalhes.flatMap((d) => d?.palavras.map((g) => ({ ...g, conta: d.contaId })) ?? []).sort((x, y) => y.gasto - x.gasto).slice(0, 40);
+  const termos = detalhes.flatMap((d) => d?.termos.map((g) => ({ ...g, conta: d.contaId })) ?? []).sort((x, y) => y.gasto - x.gasto).slice(0, 50);
+
+  if (grupos.length) {
+    L.push("", "== GRUPOS DE ANÚNCIOS ==");
+    for (const g of grupos) {
+      itens.set(`g:${g.id}`, { id: g.id, nivel: "grupo", nome: g.nome, conta: g.conta, status: g.status, orcamento: null, plataforma: "google", campanhaId: g.campanhaId, campanha: g.campanha, grupoId: g.id, grupo: g.nome });
+      L.push(`- id=g:${g.id} | ${curto(g.nome)} [em: ${curto(g.campanha, 45)}] | status ${g.status} | ${met(g)}${crmTxt(crmGrupo.get(chaveDe(g.nome)))}`);
+    }
+  }
+  if (palavras.length) {
+    L.push("", "== PALAVRAS-CHAVE (maior gasto primeiro) ==");
+    for (const k of palavras) {
+      itens.set(`k:${k.id}`, { id: k.id, nivel: "palavra", nome: k.texto, conta: k.conta, status: k.status, orcamento: null, plataforma: "google", campanhaId: k.campanhaId, campanha: k.campanha, grupoId: k.grupoId, grupo: k.grupo });
+      L.push(`- id=k:${k.id} | ${k.texto} (${k.correspondencia}) [grupo: ${curto(k.grupo, 40)}] | status ${k.status}${k.qualidade ? ` | índice de qualidade ${k.qualidade}` : ""} | ${met(k)}${crmTxt(crmTermo.get(chaveDe(k.texto)))}`);
+    }
+  }
+  if (termos.length) {
+    L.push("", "== TERMOS DE PESQUISA (o que as pessoas digitaram; maior gasto primeiro) ==");
+    termos.forEach((t, i) => {
+      itens.set(`t:${i}`, { id: `t:${i}`, nivel: "termo", nome: t.termo, conta: t.conta, status: t.status, orcamento: null, plataforma: "google", campanhaId: t.campanhaId, campanha: t.campanha, grupoId: t.grupoId, grupo: t.grupo });
+      L.push(`- id=t:${i} | "${t.termo}" [grupo: ${curto(t.grupo, 40)}] | ${t.status === "ADDED" ? "já é palavra-chave" : t.status === "EXCLUDED" ? "já negativado" : "não adicionado"} | ${met(t)}${crmTxt(crmTermo.get(chaveDe(t.termo)))}`);
+    });
+  }
+  if (!crm) L.push("", "Cliente sem CRM conectado: decida pelas conversões do Google e avise que falta a qualidade.");
+  else if (!cruzou.n) L.push("", "O CRM não tem UTMs que cruzem com campanhas, grupos, palavras ou termos do Google: decida pelas conversões do Google e avise.");
+  else {
+    const f = crm.atual.funil;
+    L.push("", `CRM total do período (todas as fontes do funil): ${inteiro(f.leads)} leads, ${inteiro(f.vendas)} vendas.`);
+  }
+  if (acoes.length) L.push("", "== AÇÕES JÁ FEITAS NO PERÍODO (não repetir) ==", ...acoes.map((t) => `- ${t}`));
+  return { texto: L.join("\n"), itens };
+}
+
+const FORMATO_GOOGLE = `Responda SÓ com um JSON neste formato:
+{
+  "diagnostico": {
+    "cpa": "dentro" | "acima" | "sem_meta",
+    "qualidade": "boa" | "ruim" | "sem_dados",
+    "decisao": "manter" | "otimizar_custo" | "otimizar_qualidade" | "prioridade_maxima" | "aguardar",
+    "resumo": "2 a 3 frases com o diagnóstico da conta, citando os números"
+  },
+  "passo": número do passo do manual em que a otimização está (0 = nada a fazer),
+  "sugestoes": [
+    {
+      "id": "id exato do item da lista (c:…, g:…, k:… ou t:…), ou vazio se for algo geral",
+      "acao": "manter" | "aguardar" | "pausar" | "escalar" | "reduzir_orcamento" | "negativar" | "adicionar_palavra" | "novo_anuncio" | "mudar_correspondencia" | "revisar_lance" | "revisar_pagina",
+      "correspondencia": "EXACT" | "PHRASE" (só em negativar/adicionar_palavra),
+      "titulo": "frase curta com a ação (ex.: Negativar o termo X)",
+      "motivo": "por quê, com os números do Google e do CRM (quando houver), citando a regra do manual",
+      "confianca": "alta" | "media" | "baixa"
+    }
+  ],
+  "faltando": "dados que faltaram para decidir melhor (ou vazio)"
+}
+
+Regras de resposta:
+- Siga o manual à risca e na ordem dos passos. "negativar" e "adicionar_palavra" só para termos de pesquisa (id t:…); "pausar" serve para campanha (c:), grupo (g:) ou palavra-chave (k:); orçamento só para campanha (c:).
+- Não negative termo que já é palavra-chave nem termo com conversão/lead qualificado. Não pause nada sem o volume mínimo: use "aguardar".
+- Quando não houver cruzamento com o CRM, decida pelas conversões do Google e diga isso no motivo.
+- Use os ids exatamente como aparecem. Ordene por prioridade. No máximo 10 sugestões.
+- Não invente números. Português do Brasil, direto.`;
+
 const FORMATO = `Responda SÓ com um JSON neste formato:
 {
   "diagnostico": {
@@ -178,7 +319,7 @@ Regras de resposta:
 
 // ---------- Histórico (as últimas sugestões de cada cliente ficam salvas) ----------
 
-const MAX_HISTORICO = 15;
+const MAX_HISTORICO = 25;
 const chaveHistorico = (clienteId: string) => `ia_sugestoes:${clienteId}`;
 
 export async function lerHistoricoSugestoes(clienteId: string): Promise<ResultadoSugestoes[]> {
@@ -205,19 +346,21 @@ export async function marcarSugestao(clienteId: string, id: string, indice: numb
 }
 
 /** Sugestões de otimização do cliente (padrão: últimos 14 dias, para ter volume). */
-export async function sugerirOtimizacoes(clienteId: string, params?: { p?: string; de?: string; ate?: string }): Promise<ResultadoSugestoes> {
+export async function sugerirOtimizacoes(clienteId: string, params?: { p?: string; de?: string; ate?: string }, plataforma: PlataformaIA = "meta"): Promise<ResultadoSugestoes> {
   const { atual, anterior } = resolverPeriodo(params?.p ? params : { p: "14" });
-  const [manual, prm] = await Promise.all([lerManual(), lerParams(clienteId)]);
-  const { texto, itens } = await dados(clienteId, atual, anterior, prm);
-  const sistema = `Você é a IA de otimização de campanhas de um gestor de tráfego no Brasil. Você recebe o MANUAL DO GESTOR (as regras dele), os parâmetros do cliente e os números do Meta Ads cruzados com o CRM. Decida o que fazer seguindo o manual.\n\n=== MANUAL DO GESTOR ===\n${manual}\n=== FIM DO MANUAL ===\n\n${FORMATO}`;
+  const google = plataforma === "google";
+  const [manual, prm] = await Promise.all([lerManual(plataforma), lerParams(clienteId)]);
+  const { texto, itens } = google ? await dadosGoogle(clienteId, atual, anterior, prm) : await dados(clienteId, atual, anterior, prm);
+  const sistema = `Você é a IA de otimização de campanhas de um gestor de tráfego no Brasil. Você recebe o MANUAL DO GESTOR (as regras dele), os parâmetros do cliente e os números do ${google ? "Google Ads" : "Meta Ads"} cruzados com o CRM. Decida o que fazer seguindo o manual.\n\n=== MANUAL DO GESTOR ===\n${manual}\n=== FIM DO MANUAL ===\n\n${google ? FORMATO_GOOGLE : FORMATO}`;
   const bruto = await perguntarIA(sistema, texto, { json: true, temperatura: 0.3 });
-  let r: { diagnostico?: Partial<ResultadoSugestoes["diagnostico"]>; passo?: number; sugestoes?: { id?: string; acao?: string; titulo?: string; motivo?: string; confianca?: string }[]; faltando?: string };
+  let r: { diagnostico?: Partial<ResultadoSugestoes["diagnostico"]>; passo?: number; sugestoes?: { id?: string; acao?: string; titulo?: string; motivo?: string; confianca?: string; correspondencia?: string }[]; faltando?: string };
   try {
     r = JSON.parse(bruto.replace(/^```(?:json)?\s*|\s*```$/g, ""));
   } catch {
     throw new Error("A IA respondeu num formato inesperado. Tente de novo.");
   }
   const resultado: ResultadoSugestoes = {
+    plataforma,
     id: crypto.randomUUID(),
     criado_em: new Date().toISOString(),
     feitas: [],
@@ -228,11 +371,12 @@ export async function sugerirOtimizacoes(clienteId: string, params?: { p?: strin
     },
     passo: Math.max(0, Math.min(5, Math.round(Number(r.passo) || 0))),
     faltando: String(r.faltando ?? "").slice(0, 600),
-    sugestoes: (r.sugestoes ?? []).slice(0, 8).map((s) => ({
+    sugestoes: (r.sugestoes ?? []).slice(0, google ? 10 : 8).map((s) => ({
       acao: (ACOES as readonly string[]).includes(String(s.acao)) ? (s.acao as AcaoIA) : "manter",
       titulo: String(s.titulo ?? "").slice(0, 200),
       motivo: String(s.motivo ?? "").slice(0, 800),
       confianca: (s.confianca === "alta" || s.confianca === "baixa" ? s.confianca : "media") as Sugestao["confianca"],
+      correspondencia: s.correspondencia === "PHRASE" ? "PHRASE" as const : "EXACT" as const,
       item: (s.id && itens.get(String(s.id).trim())) || null,
     })).filter((s) => s.titulo),
   };

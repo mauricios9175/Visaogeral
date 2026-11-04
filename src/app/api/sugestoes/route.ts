@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
   try {
     const m = corpo.marcar;
     if (m && typeof m.id === "string") return NextResponse.json(await marcarSugestao(corpo.clienteId, m.id, Number(m.indice), Boolean(m.feito)));
-    return NextResponse.json(await sugerirOtimizacoes(corpo.clienteId, { p: corpo.p, de: corpo.de, ate: corpo.ate }));
+    return NextResponse.json(await sugerirOtimizacoes(corpo.clienteId, { p: corpo.p, de: corpo.de, ate: corpo.ate }, corpo.plataforma === "google" ? "google" : "meta"));
   } catch (e) {
     return NextResponse.json({ erro: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

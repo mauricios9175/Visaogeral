@@ -1,7 +1,7 @@
 import { db, EMPRESA_PADRAO, type Cliente, type ContaAnuncio, type TokenMeta } from "@/lib/db";
 import { salvarManualIA } from "@/app/acoes-ia";
 import { lerManual } from "@/lib/sugestoes";
-import { MANUAL_PADRAO } from "@/lib/manual-ia";
+import { MANUAL_GOOGLE_PADRAO, MANUAL_PADRAO } from "@/lib/manual-ia";
 import { diasAte, dinheiro, quandoFoi } from "@/lib/formato";
 import { AvisosCelular } from "@/components/avisos-celular";
 import { Aviso } from "@/components/ui";
@@ -25,7 +25,10 @@ const botao = "rounded-lg border border-borda bg-superficie px-3 py-1.5 text-sm 
 const botaoPrimario = "rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium text-white";
 
 export default async function Configuracoes({ searchParams }: PageProps<"/configuracoes">) {
-  const manualIA = await lerManual().catch(() => MANUAL_PADRAO);
+  const [manualIA, manualGoogle] = await Promise.all([
+    lerManual("meta").catch(() => MANUAL_PADRAO),
+    lerManual("google").catch(() => MANUAL_GOOGLE_PADRAO),
+  ]);
   const { msg, mbusca, gbusca, gacesso, gcanceladas: canceladasParam } =
     (await searchParams) as { msg?: string; mbusca?: string; gbusca?: string; gacesso?: string; gcanceladas?: string };
   const gcanceladas = canceladasParam === "1";
@@ -135,14 +138,20 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
             os números de cada cliente (tolerância, qualificação mínima, observações) ficam na tela do cliente.
           </p>
         </div>
-        <form action={salvarManualIA} className="space-y-2">
-          <textarea name="texto" rows={16} defaultValue={manualIA}
-            className="w-full rounded-xl border border-borda bg-fundo p-3 font-mono text-[13px] leading-relaxed" />
-          <div className="flex flex-wrap gap-2">
-            <button className="min-h-10 rounded-[10px] bg-destaque px-4 text-sm font-semibold text-white">Salvar manual</button>
-            <button name="restaurar" value="1" className="min-h-10 rounded-[10px] border border-borda px-4 text-sm text-texto-2 hover:text-texto">Voltar ao padrão</button>
-          </div>
-        </form>
+        {([["meta", "Meta Ads", manualIA], ["google", "Google Ads", manualGoogle]] as const).map(([k, rotulo, texto]) => (
+          <details key={k} open={k === "meta"} className="rounded-xl border border-borda p-3">
+            <summary className="cursor-pointer text-sm font-semibold">{rotulo}</summary>
+            <form action={salvarManualIA} className="mt-2 space-y-2">
+              <input type="hidden" name="plataforma" value={k} />
+              <textarea name="texto" rows={16} defaultValue={texto}
+                className="w-full rounded-xl border border-borda bg-fundo p-3 font-mono text-[13px] leading-relaxed" />
+              <div className="flex flex-wrap gap-2">
+                <button className="min-h-10 rounded-[10px] bg-destaque px-4 text-sm font-semibold text-white">Salvar manual ({rotulo})</button>
+                <button name="restaurar" value="1" className="min-h-10 rounded-[10px] border border-borda px-4 text-sm text-texto-2 hover:text-texto">Voltar ao padrão</button>
+              </div>
+            </form>
+          </details>
+        ))}
       </section>
 
       <section id="avisos" className="space-y-3 rounded-2xl border border-borda bg-superficie p-4 lg:p-5">

@@ -4,46 +4,100 @@ import Link from "next/link";
 import { useState } from "react";
 import { AcoesRapidas } from "./acoes-rapidas";
 import { salvarParamsIA } from "@/app/acoes-ia";
+import { acaoGoogleDetalhe } from "@/app/acoes-anuncios";
 import type { ParamsIA } from "@/lib/manual-ia";
-import type { ResultadoSugestoes, Sugestao } from "@/lib/sugestoes";
+import type { PlataformaIA, ResultadoSugestoes, Sugestao } from "@/lib/sugestoes";
 
 const ROTULO_ACAO: Record<Sugestao["acao"], string> = {
   manter: "Manter", aguardar: "Aguardar", pausar: "Pausar", escalar: "Escalar", reduzir_orcamento: "Reduzir orçamento",
   otimizar_publico: "Otimizar público", revisar_formulario: "Revisar formulário/oferta", novo_criativo: "Novo criativo",
   recriar_campanha: "Recriar do zero", campanha_testes: "Campanha de testes", dividir_campanha: "Dividir campanha",
-  mudar_objetivo: "Mudar objetivo",
+  mudar_objetivo: "Mudar objetivo", negativar: "Negativar termo", adicionar_palavra: "Adicionar palavra-chave",
+  novo_anuncio: "Reescrever anúncio", mudar_correspondencia: "Mudar correspondência", revisar_lance: "Revisar lance",
+  revisar_pagina: "Revisar página",
 };
 const COR_ACAO: Partial<Record<Sugestao["acao"], string>> = {
   pausar: "bg-critico-bg text-critico", reduzir_orcamento: "bg-atencao-bg text-atencao", escalar: "bg-bom-bg text-bom",
-  manter: "bg-bom-bg text-bom", aguardar: "bg-superficie-2 text-texto-2",
+  manter: "bg-bom-bg text-bom", aguardar: "bg-superficie-2 text-texto-2", negativar: "bg-critico-bg text-critico",
+  adicionar_palavra: "bg-bom-bg text-bom",
 };
 const DECISAO: Record<string, string> = {
   manter: "Manter: não há motivo para mexer", otimizar_custo: "Otimizar com foco em custo",
   otimizar_qualidade: "Otimizar com foco em qualidade", prioridade_maxima: "Otimizar: prioridade máxima", aguardar: "Aguardar mais dados",
 };
-const NIVEL: Record<string, string> = { anuncio: "Anúncio", conjunto: "Conjunto", campanha: "Campanha" };
-const ATIVOS = ["ACTIVE", "IN_PROCESS", "PENDING_REVIEW", "PREAPPROVED"];
+const NIVEL: Record<string, string> = {
+  anuncio: "Anúncio", conjunto: "Conjunto", campanha: "Campanha", grupo: "Grupo", palavra: "Palavra-chave", termo: "Termo de pesquisa",
+};
+const ATIVOS = ["ACTIVE", "IN_PROCESS", "PENDING_REVIEW", "PREAPPROVED", "ENABLED"];
+
+/** Botão com confirmação que chama a ação do Google abaixo da campanha (grupo, palavra, termo). */
+function BotaoGoogle({ campos, rotulo, confirmar, voltar }: { campos: Record<string, string>; rotulo: string; confirmar: string; voltar: string }) {
+  return (
+    <form action={acaoGoogleDetalhe} onSubmit={(e) => { if (!confirm(confirmar)) e.preventDefault(); }}>
+      {Object.entries({ ...campos, voltar }).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
+      <button className="rounded-md border border-borda bg-superficie px-2.5 py-1 text-xs font-semibold hover:border-destaque">{rotulo}</button>
+    </form>
+  );
+}
+
+/** Botões prontos de cada sugestão (pausar, orçamento, negativar, adicionar palavra). */
+function Botoes({ s, voltar }: { s: Sugestao; voltar: string }) {
+  const it = s.item;
+  if (!it) return null;
+  const google = it.plataforma === "google";
+  if (!google || it.nivel === "campanha") {
+    if (!["pausar", "escalar", "reduzir_orcamento"].includes(s.acao)) return null;
+    return (
+      <AcoesRapidas
+        plataforma={google ? "google" : "meta"} contaId={it.conta} objetoId={it.id} nivel={it.nivel as "campanha" | "conjunto" | "anuncio"} nome={it.nome}
+        ativo={it.status ? ATIVOS.includes(it.status) : null}
+        orcamento={it.orcamento} mostrarOrcamento={s.acao !== "pausar" && it.nivel !== "anuncio"} voltar={voltar}
+      />
+    );
+  }
+  const tipo = s.correspondencia ?? "EXACT";
+  const simbolo = tipo === "PHRASE" ? `"${it.nome}"` : `[${it.nome}]`;
+  if (s.acao === "pausar" && (it.nivel === "grupo" || it.nivel === "palavra")) {
+    return <BotaoGoogle voltar={voltar} rotulo={`Pausar ${it.nivel === "grupo" ? "grupo" : "palavra-chave"}`}
+      confirmar={`Pausar ${it.nivel === "grupo" ? "o grupo" : "a palavra-chave"} “${it.nome}” no Google?`}
+      campos={{ conta_id: it.conta, nivel: it.nivel, acao: "pausar", objeto_id: it.id, nome: it.nome }} />;
+  }
+  if (s.acao === "negativar" && it.nivel === "termo" && it.campanhaId) {
+    return <BotaoGoogle voltar={voltar} rotulo={`Negativar ${simbolo}`}
+      confirmar={`Adicionar ${simbolo} como negativa na campanha “${it.campanha ?? ""}”?`}
+      campos={{ conta_id: it.conta, nivel: "termo", acao: "negativar", objeto_id: it.campanhaId, texto: it.nome, tipo, nome: it.campanha ?? "" }} />;
+  }
+  if (s.acao === "adicionar_palavra" && it.nivel === "termo" && it.grupoId) {
+    return <BotaoGoogle voltar={voltar} rotulo={`Adicionar ${simbolo}`}
+      confirmar={`Adicionar ${simbolo} como palavra-chave no grupo “${it.grupo ?? ""}”?`}
+      campos={{ conta_id: it.conta, nivel: "termo", acao: "adicionar", objeto_id: it.grupoId, texto: it.nome, tipo, nome: it.grupo ?? "" }} />;
+  }
+  return null;
+}
 
 export type AcaoPainel = { objeto_id: string; acao: string; depois: string | null; criado_em: string };
 
 const quando = (iso: string) => new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-const FEITO: Record<string, string> = { pausar: "Pausado", ativar: "Ativado", orcamento: "Orçamento alterado" };
+const FEITO: Record<string, string> = { pausar: "Pausado", ativar: "Ativado", orcamento: "Orçamento alterado", negativar: "Negativado", adicionar: "Adicionado" };
 
 /** Sugestões de otimização com IA, seguindo o manual do gestor e os parâmetros do cliente. As últimas ficam salvas. */
-export function SugestoesIA({ clienteId, params, cplMeta, periodo, rotuloPeriodo, voltar, historico, acoesPainel }: {
+export function SugestoesIA({ clienteId, params, cplMeta, periodo, rotuloPeriodo, voltar, historico, acoesPainel, temMeta = true, temGoogle = false }: {
   clienteId: string; params: ParamsIA; cplMeta: number | null;
   periodo: { p: string; de?: string; ate?: string }; rotuloPeriodo: string; voltar: string;
-  historico: ResultadoSugestoes[]; acoesPainel: AcaoPainel[];
+  historico: ResultadoSugestoes[]; acoesPainel: AcaoPainel[]; temMeta?: boolean; temGoogle?: boolean;
 }) {
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [lista, setLista] = useState<ResultadoSugestoes[]>(historico);
+  const [plataforma, setPlataforma] = useState<PlataformaIA>(!temMeta && temGoogle ? "google" : (historico[0]?.plataforma ?? "meta"));
+  const [todas, setLista] = useState<ResultadoSugestoes[]>(historico);
+  const lista = todas.filter((x) => (x.plataforma ?? "meta") === plataforma);
   const [atualId, setAtualId] = useState<string | undefined>(historico[0]?.id);
   const res = lista.find((x) => x.id === atualId) ?? lista[0] ?? null;
 
-  /** Ação do painel feita no item depois desta rodada de sugestões. */
+  /** Ação do painel feita no item depois desta rodada de sugestões (termos: pelo texto negativado/adicionado). */
   const feitaNoPainel = (s: Sugestao) =>
-    s.item && res?.criado_em ? acoesPainel.find((a) => a.objeto_id === s.item!.id && Date.parse(a.criado_em) >= Date.parse(res.criado_em!)) : undefined;
+    s.item && res?.criado_em ? acoesPainel.find((a) => Date.parse(a.criado_em) >= Date.parse(res.criado_em!) &&
+      (s.item!.nivel === "termo" ? (a.acao === "negativar" || a.acao === "adicionar") && a.depois === s.item!.nome.toLowerCase() : a.objeto_id === s.item!.id)) : undefined;
 
   async function marcar(indice: number, feito: boolean) {
     if (!res?.id) return;
@@ -57,7 +111,7 @@ export function SugestoesIA({ clienteId, params, cplMeta, periodo, rotuloPeriodo
     setOcupado(true);
     setErro(null);
     try {
-      const r = await fetch("/api/sugestoes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clienteId, ...p }) });
+      const r = await fetch("/api/sugestoes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clienteId, plataforma, ...p }) });
       const j = await r.json().catch(() => ({ erro: `erro ${r.status}` }));
       if (j.erro) throw new Error(j.erro);
       const novo = j as ResultadoSugestoes;
@@ -77,9 +131,19 @@ export function SugestoesIA({ clienteId, params, cplMeta, periodo, rotuloPeriodo
         <div>
           <h2 className="flex items-center gap-2 font-bold"><span aria-hidden className="text-destaque">✦</span> Sugestões de otimização</h2>
           <p className="text-xs text-texto-3">
-            A IA segue o seu <Link href="/configuracoes#manual-ia" className="underline hover:text-texto">manual</Link> e cruza Meta com a qualidade no CRM.
+            A IA segue o seu <Link href="/configuracoes#manual-ia" className="underline hover:text-texto">manual</Link> e cruza {plataforma === "google" ? "campanhas, grupos, palavras-chave e termos de pesquisa" : "campanhas, conjuntos e anúncios"} com a qualidade no CRM.
             Nada é feito sozinho.
           </p>
+          {temMeta && temGoogle && (
+            <div className="mt-2 flex gap-1 text-xs">
+              {(["meta", "google"] as const).map((x) => (
+                <button key={x} type="button" onClick={() => { setPlataforma(x); setAtualId(undefined); }}
+                  className={`rounded-full border px-3 py-1 ${plataforma === x ? "border-destaque bg-destaque-bg font-semibold text-texto" : "border-borda text-texto-2 hover:text-texto"}`}>
+                  {x === "meta" ? "Meta Ads" : "Google Ads"}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={ocupado} onClick={() => gerar({ p: "14" })}
@@ -118,7 +182,7 @@ export function SugestoesIA({ clienteId, params, cplMeta, periodo, rotuloPeriodo
         </form>
       </details>
 
-      {ocupado && <p className="mt-3 text-sm text-texto-3">Cruzando anúncios, conjuntos e campanhas com o CRM e aplicando o manual (uns 20 a 40 segundos)…</p>}
+      {ocupado && <p className="mt-3 text-sm text-texto-3">Cruzando {plataforma === "google" ? "campanhas, grupos, palavras-chave e termos" : "anúncios, conjuntos e campanhas"} com o CRM e aplicando o manual (uns 20 a 40 segundos)…</p>}
       {erro && <p className="mt-3 text-sm text-critico">{erro}</p>}
 
       {res && !ocupado && (
@@ -176,14 +240,8 @@ export function SugestoesIA({ clienteId, params, cplMeta, periodo, rotuloPeriodo
                     </label>
                   )}
                 </div>
-                {!painel && s.item && ["pausar", "escalar", "reduzir_orcamento"].includes(s.acao) && (
-                  <div className="mt-2">
-                    <AcoesRapidas
-                      plataforma="meta" contaId={s.item.conta} objetoId={s.item.id} nivel={s.item.nivel} nome={s.item.nome}
-                      ativo={s.item.status ? ATIVOS.includes(s.item.status) : null}
-                      orcamento={s.item.orcamento} mostrarOrcamento={s.acao !== "pausar" && s.item.nivel !== "anuncio"} voltar={voltar}
-                    />
-                  </div>
+                {!painel && s.item && (
+                  <div className="mt-2"><Botoes s={s} voltar={voltar} /></div>
                 )}
               </li>
               );

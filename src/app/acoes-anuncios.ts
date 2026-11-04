@@ -6,7 +6,10 @@ import { db, type ContaAnuncio } from "@/lib/db";
 import {
   duplicarAnuncio, duplicarCampanha, duplicarConjunto, linkGerenciador, mudarOrcamento, mudarStatus, orcamentoDe,
 } from "@/lib/meta";
-import { mudarOrcamentoGoogle, mudarStatusCampanhaGoogle, orcamentoCampanhaGoogle, tokenDeAcesso } from "@/lib/google";
+import {
+  adicionarPalavraGoogle, mudarOrcamentoGoogle, mudarStatusCampanhaGoogle, mudarStatusGrupoGoogle, mudarStatusPalavraGoogle,
+  negativarNaCampanhaGoogle, orcamentoCampanhaGoogle, tokenDeAcesso,
+} from "@/lib/google";
 import { tokenDaConta } from "@/lib/sync";
 import { dinheiro } from "@/lib/formato";
 
@@ -147,6 +150,52 @@ export async function acaoGoogle(form: FormData) {
     } else {
       throw new Error("Ação desconhecida.");
     }
+  } catch (e) {
+    await registrar({ ...base, acao }, e);
+    msg = `Não foi possível concluir no Google: ${e instanceof Error ? e.message : e}`;
+  }
+  revalidatePath("/", "layout");
+  voltar(form, msg);
+}
+
+/**
+ * Google, abaixo da campanha (usado pelas sugestões com IA): pausar/ativar grupo ou palavra-chave,
+ * negativar um termo de pesquisa na campanha e transformar um termo em palavra-chave do grupo.
+ */
+export async function acaoGoogleDetalhe(form: FormData) {
+  const contaId = String(form.get("conta_id"));
+  const nivel = String(form.get("nivel")); // grupo | palavra | termo
+  const acao = String(form.get("acao"));   // pausar | ativar | negativar | adicionar
+  const objetoId = String(form.get("objeto_id"));
+  const texto = String(form.get("texto") ?? "").trim().toLowerCase().slice(0, 80);
+  const tipo = (["EXACT", "PHRASE", "BROAD"].includes(String(form.get("tipo"))) ? String(form.get("tipo")) : "EXACT") as "EXACT" | "PHRASE" | "BROAD";
+  const nome = String(form.get("nome") ?? "") || null;
+  const banco = db();
+  const { data: conta } = await banco.from("contas_google").select("id, cliente_id, login_customer_id, token_id").eq("id", contaId).maybeSingle();
+  if (!conta) voltar(form, "Conta do Google não encontrada.");
+  const base = { plataforma: "google" as const, cliente_id: conta.cliente_id, conta_id: contaId, nivel, objeto_id: objetoId, objeto_nome: nome };
+  let msg: string;
+  try {
+    const { data: t } = await banco.from("tokens_google").select("refresh_token").eq("id", conta.token_id ?? "").maybeSingle();
+    if (!t) throw new Error("Sem login do Google para esta conta (reconecte em Configurações).");
+    const acesso = await tokenDeAcesso(t.refresh_token);
+    const lc = conta.login_customer_id;
+    if ((acao === "pausar" || acao === "ativar") && nivel === "grupo") {
+      await mudarStatusGrupoGoogle(acesso, contaId, lc, objetoId, acao === "ativar");
+      msg = `${acao === "ativar" ? "Ativado" : "Pausado"} no Google: grupo “${nome ?? objetoId}”.`;
+    } else if ((acao === "pausar" || acao === "ativar") && nivel === "palavra") {
+      await mudarStatusPalavraGoogle(acesso, contaId, lc, objetoId, acao === "ativar");
+      msg = `${acao === "ativar" ? "Ativada" : "Pausada"} no Google: palavra-chave “${nome ?? objetoId}”.`;
+    } else if (acao === "negativar" && texto) {
+      await negativarNaCampanhaGoogle(acesso, contaId, lc, objetoId, texto, tipo);
+      msg = `Negativa adicionada no Google: ${tipo === "EXACT" ? `[${texto}]` : tipo === "PHRASE" ? `"${texto}"` : texto} na campanha “${nome ?? objetoId}”.`;
+    } else if (acao === "adicionar" && texto) {
+      await adicionarPalavraGoogle(acesso, contaId, lc, objetoId, texto, tipo);
+      msg = `Palavra-chave adicionada no Google: [${texto}] no grupo “${nome ?? objetoId}”.`;
+    } else {
+      throw new Error("Ação desconhecida.");
+    }
+    await registrar({ ...base, acao, depois: texto || (acao === "ativar" ? "ativo" : acao === "pausar" ? "pausado" : null) });
   } catch (e) {
     await registrar({ ...base, acao }, e);
     msg = `Não foi possível concluir no Google: ${e instanceof Error ? e.message : e}`;

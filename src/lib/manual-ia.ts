@@ -46,6 +46,37 @@ Passo 5 — Mudar o objetivo (último recurso), só depois dos Passos 1 a 4: for
 - Muitos seguidores + CPC bom → manter. Seguidores bons + CPC alto → manter a ideia e deixar o criativo mais chamativo. Poucos seguidores → revisar perfil/conteúdo e testar nova ideia de criativo.
 `;
 
+export const MANUAL_GOOGLE_PADRAO = `# Lógica de otimização de campanhas no Google Ads (Pesquisa)
+
+## Princípio geral
+- Se não está quebrado, não mexe. CPA (custo por conversão/lead) dentro da meta E leads de qualidade no CRM: manter.
+- Regra de ouro: cruzar com o CRM sempre que houver dado (campanha, grupo e palavra-chave pelas UTMs). Quando o CRM não tiver o cruzamento, decidir pelas conversões do próprio Google e dizer isso.
+- Decidir com volume: termo ou palavra com poucos cliques e pouco gasto → aguardar, nunca pausar.
+
+## Quando mexer (CPA × qualidade)
+- Dentro da meta + qualidade boa → Manter.
+- Acima da meta + qualidade boa → Otimizar custo (termos, palavras, lances, anúncio).
+- Dentro da meta + qualidade ruim → Otimizar qualidade (negativas, correspondência, anúncio e página mais claros sobre o que é oferecido).
+- Acima da meta + qualidade ruim → Prioridade máxima.
+
+## Ordem de otimização
+Passo 1 — Termos de pesquisa (o que as pessoas digitaram):
+- Termo sem relação com o negócio, ou que gastou ~2× o CPA desejado sem conversão → negativar na campanha (exata ou frase).
+- Termo que converte bem e ainda não é palavra-chave → adicionar como palavra-chave exata no grupo.
+Passo 2 — Palavras-chave:
+- Cara + desqualificada (ou sem conversão com gasto ≥ 2× o CPA) → pausar.
+- Cara + qualificada → manter; revisar o anúncio do grupo e a correspondência (ampla demais traz termos ruins).
+- Barata + qualificada → manter e, se a campanha estiver limitada pelo orçamento, escalar.
+- Índice de qualidade baixo (1 a 4) → títulos do grupo que repitam a palavra e página coerente.
+Passo 3 — Grupos e anúncios:
+- Cada grupo com títulos que conversam com as suas palavras. CTR baixo no grupo → reescrever os títulos.
+- Grupo inteiro sem resultado com volume → pausar o grupo.
+Passo 4 — Campanha: orçamento (escalar o que funciona aos poucos, ~20% por vez), estratégia de lance e locais.
+Passo 5 — Estrutura: separar grupos por intenção quando um grupo mistura temas diferentes.
+`;
+
+export const CHAVE_MANUAL_GOOGLE = "manual_ia_google";
+
 /** Parâmetros numéricos por cliente (a meta de CPA vem do cadastro do cliente). */
 export type ParamsIA = {
   tolerancia: number;        // % que o CPA pode passar da meta antes de agir

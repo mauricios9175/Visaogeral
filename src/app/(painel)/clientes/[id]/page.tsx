@@ -136,6 +136,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
       <SugestoesIA
         clienteId={id} params={paramsIA} cplMeta={c.cpl_meta} voltar={`${voltar}#sugestoes`} rotuloPeriodo={atual.rotulo}
         historico={historicoIA} acoesPainel={(acoesIA ?? []) as AcaoPainel[]}
+        temMeta={d.contas.length > 0} temGoogle={!!g}
         periodo={{ p: atual.chave, ...(atual.chave === "livre" ? { de: atual.desde, ate: atual.ate } : {}) }}
       />
 
