@@ -660,6 +660,8 @@ export async function detalheCrm(clienteId: string, atual: Periodo, anterior: Pe
 
   return {
     conexao: cx,
+    // nomes do funil do relatório do cliente (Leads, Interessados…, Vendas)
+    nomesFunil: (() => { const { leads, vendas, passos } = funilDaConexao(cx); return { leads, vendas, passos: passos.map((x) => x.nome) }; })(),
     porUtm,
     temUtm,
     fontesManuais: cx.fontes_anuncio != null,

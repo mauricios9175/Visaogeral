@@ -140,6 +140,13 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
         )}
       </div>
 
+      {crm && !("erro" in crm) && (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          <FunilDoPeriodo crm={crm} gasto={gastoTotal} />
+          <AnunciosQueVendem linhas={crm.porUtm.utm_content} gastos={gastoPorNome(d.anuncios)} />
+        </div>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-3">
         <BarrasDiarias dados={d.serie} campo="gasto" titulo="Investido por dia" formato="dinheiro" />
         <BarrasDiarias dados={d.serie} campo="resultados" titulo="Resultados por dia" formato="inteiro" />
@@ -719,5 +726,86 @@ function Historico({ itens }: { itens: ItemHistorico[] }) {
         ))}
       </ul>
     </details>
+  );
+}
+
+type DetalheCrm = NonNullable<Awaited<ReturnType<typeof detalheCrm>>>;
+
+/** Funil do período com o funil do relatório do cliente: barras que afunilam e a taxa entre os passos. */
+function FunilDoPeriodo({ crm, gasto }: { crm: DetalheCrm; gasto: number }) {
+  const f = crm.atual.funil;
+  const n = crm.nomesFunil;
+  const etapas = [
+    { nome: n.leads, valor: f.leads },
+    ...n.passos.map((nome) => ({ nome, valor: f.passos.find((x) => x.nome === nome)?.valor ?? 0 })),
+    { nome: n.vendas, valor: f.vendas },
+  ];
+  const cores = ["bg-destaque", "bg-[#9f7aea]", "bg-[var(--serie-2)]", "bg-[#a5b4fc]", "bg-bom"];
+  return (
+    <section aria-labelledby="funil" className="flex flex-col gap-4 rounded-2xl border border-borda bg-superficie p-4 lg:p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id="funil" className="text-[15px] font-bold">Funil do período</h2>
+        <span className="text-xs text-texto-3">só leads de anúncio · vendas pela data de fechamento</span>
+      </div>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-[repeat(auto-fit,minmax(120px,1fr))]">
+        {etapas.map((e, i) => {
+          const anterior = i > 0 ? etapas[i - 1].valor : null;
+          const largura = f.leads ? Math.max((e.valor / f.leads) * 100, e.valor ? 3 : 0) : 0;
+          return (
+            <div key={e.nome} className="flex flex-col gap-2">
+              <div className="h-2.5 overflow-hidden rounded-full bg-superficie-2">
+                <div className={`h-full rounded-full ${cores[i % cores.length]}`} style={{ width: `${largura}%` }} />
+              </div>
+              <div className="text-[13px] text-texto-2">{e.nome}</div>
+              <div className="num text-2xl font-extrabold">{inteiro(e.valor)}</div>
+              <div className="text-xs font-semibold text-destaque">
+                {anterior == null ? "\u00a0" : anterior ? `${pct((e.valor / anterior) * 100)} de ${etapas[i - 1].nome.toLowerCase()}` : "—"}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap gap-2 text-[13px] text-texto-2">
+        {f.valorPropostas > 0 && <span className="rounded-[10px] bg-superficie-2 px-3 py-2">Valor das propostas <b className="text-texto">{dinheiro(f.valorPropostas)}</b></span>}
+        <span className="rounded-[10px] bg-superficie-2 px-3 py-2">Valor das vendas <b className="text-texto">{dinheiro(f.faturamento)}</b></span>
+        {f.vendas > 0 && <span className="rounded-[10px] bg-superficie-2 px-3 py-2">Custo por venda <b className="text-texto">{dinheiro(gasto / f.vendas)}</b></span>}
+        {gasto > 0 && f.faturamento > 0 && <span className="rounded-[10px] bg-superficie-2 px-3 py-2">ROAS <b className="text-texto">{(f.faturamento / gasto).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}x</b></span>}
+      </div>
+    </section>
+  );
+}
+
+/** Anúncios (pela utm_content) que mais venderam, com custo por venda e ROAS cruzando com o gasto do mesmo nome. */
+function AnunciosQueVendem({ linhas, gastos }: { linhas: DetalheCrm["porUtm"]["utm_content"]; gastos: Map<string, number> }) {
+  const top = linhas
+    .filter((l) => l.nome !== "(sem UTM)" && l.funil.vendas > 0)
+    .sort((a, b) => b.funil.vendas - a.funil.vendas || b.funil.faturamento - a.funil.faturamento)
+    .slice(0, 5)
+    .map((l) => ({ ...l, gasto: gastos.get(chaveDe(l.nome)) ?? null }));
+  return (
+    <section aria-labelledby="vendem" className="flex flex-col gap-3 rounded-2xl border border-borda bg-superficie p-4 lg:p-5">
+      <h2 id="vendem" className="text-[15px] font-bold">Anúncios que mais vendem</h2>
+      {!top.length ? (
+        <p className="text-sm text-texto-3">Nenhuma venda com o anúncio na UTM (utm_content) neste período.</p>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {top.map((a) => (
+            <li key={a.nome} className="flex items-center gap-3">
+              <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-destaque-bg text-sm font-bold text-destaque">{a.funil.vendas}</span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold" title={a.nome}>{a.nome}</div>
+                <div className="text-xs text-texto-3">
+                  {a.funil.vendas} venda(s) · {dinheiro(a.funil.faturamento)}
+                  {a.gasto ? <> · custo por venda {dinheiro(a.gasto / a.funil.vendas)}</> : null}
+                </div>
+              </div>
+              {a.gasto && a.funil.faturamento > 0 ? (
+                <span className="num text-[13px] font-bold text-bom">{(a.funil.faturamento / a.gasto).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}x</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
