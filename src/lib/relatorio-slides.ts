@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "./db";
 import { tokenDeAcesso, tokenSoDrive } from "./google";
+import { atividadesDaConta } from "./meta";
+import { tokenDaConta } from "./sync";
+import type { ContaAnuncio } from "./db";
 import { detalheCliente, detalheCrm, type DimensaoUtm, type LinhaTabela } from "./consultas";
 import { detalheGoogle } from "./consultas-google";
 import { funilDoCliente, lerHistorico, mesDe, nomeMes, somarMeses, type MesConsolidado } from "./historico";
@@ -422,18 +425,74 @@ const VERBO: Record<string, string> = {
   pausar: "Pausamos", ativar: "Ativamos", orcamento: "Ajustamos o orçamento de", duplicar: "Duplicamos", montar: "Criamos",
 };
 
-/** Ações registradas pelo painel no período (pausas, orçamento, campanhas novas), em frases curtas. */
+const diaCurto = (iso: string) =>
+  new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit" }).format(new Date(iso));
+
+/** Tipos do histórico do Meta que interessam ao cliente: criar, pausar/ativar, orçamento, público, lance, criativo. */
+const ATIVIDADE_RELEVANTE = /create|run_status|budget|target|bid|creative|optimization|schedule/i;
+const ATIVIDADE_IGNORADA = /review|billing|funding|payment|account_|spend_limit|delete|archive/i;
+
+/** Orçamento antes → depois no extra_data do Meta (centavos), quando vier. */
+function mudancaDeOrcamento(extra?: string) {
+  try {
+    const j = JSON.parse(extra ?? "{}");
+    const valor = (x: unknown): number | null => {
+      if (x == null) return null;
+      if (typeof x === "number") return x;
+      if (typeof x === "object") return valor((x as Record<string, unknown>).old_value ?? (x as Record<string, unknown>).new_value ?? (x as Record<string, unknown>).value);
+      const n = Number(x);
+      return Number.isFinite(n) ? n : null;
+    };
+    const antes = valor(j.old_value), depois = valor(j.new_value);
+    if (antes == null || depois == null) return "";
+    return ` de ${dinheiro(antes / 100)} para ${dinheiro(depois / 100)}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Ações do período para o slide "Ações realizadas": o histórico de atividades do Meta (o que foi feito pelo
+ * Gerenciador ou pelo painel) e as ações do painel no Google. Repetições do mesmo item no mesmo dia viram uma linha.
+ */
 async function acoesDoPeriodo(clienteId: string, desde: string, ate: string) {
-  const { data } = await db().from("acoes_log").select("criado_em, acao, nivel, objeto_nome, depois, plataforma")
-    .eq("cliente_id", clienteId).eq("ok", true).gte("criado_em", `${desde}T00:00:00-03:00`).lte("criado_em", `${ate}T23:59:59-03:00`)
-    .order("criado_em").limit(12);
-  return ((data ?? []) as { criado_em: string; acao: string; nivel: string | null; objeto_nome: string | null; depois: string | null; plataforma: string }[])
-    .map((a) => {
-      const dia = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit" }).format(new Date(a.criado_em));
-      const oque = `${a.nivel ?? "item"} “${curto(a.objeto_nome ?? "", 40)}”`;
-      const extra = a.acao === "orcamento" && a.depois ? ` para ${a.depois}` : "";
-      return `${dia}: ${VERBO[a.acao] ?? a.acao} ${oque}${extra}${a.plataforma === "google" ? " (Google)" : ""}`;
-    });
+  const banco = db();
+  const [{ data: log }, { data: contas }] = await Promise.all([
+    banco.from("acoes_log").select("criado_em, acao, nivel, objeto_nome, depois, plataforma")
+      .eq("cliente_id", clienteId).eq("ok", true).gte("criado_em", `${desde}T00:00:00-03:00`).lte("criado_em", `${ate}T23:59:59-03:00`)
+      .order("criado_em").limit(50),
+    banco.from("contas_anuncio").select("*").eq("cliente_id", clienteId),
+  ]);
+  type Linha = { quando: string; texto: string };
+  const linhas: Linha[] = [];
+  let leuMeta = false;
+  for (const c of (contas ?? []) as ContaAnuncio[]) {
+    const token = await tokenDaConta(c);
+    if (!token) continue;
+    const atividades = await atividadesDaConta(c.id, token, desde, ate).catch(() => null);
+    if (!atividades) continue;
+    leuMeta = true;
+    for (const a of atividades) {
+      if (!ATIVIDADE_RELEVANTE.test(a.event_type) || ATIVIDADE_IGNORADA.test(a.event_type)) continue;
+      const oque = a.translated_event_type || a.event_type.replace(/_/g, " ");
+      const extra = /budget/i.test(a.event_type) ? mudancaDeOrcamento(a.extra_data) : "";
+      linhas.push({ quando: a.event_time, texto: `${oque}${a.object_name ? ` “${curto(a.object_name, 40)}”` : ""}${extra}` });
+    }
+  }
+  // do painel: sempre o Google; o Meta só se o histórico do Meta não pôde ser lido (senão apareceria duas vezes)
+  type Log = { criado_em: string; acao: string; nivel: string | null; objeto_nome: string | null; depois: string | null; plataforma: string };
+  for (const a of (log ?? []) as Log[]) {
+    if (a.plataforma === "meta" && leuMeta) continue;
+    const oque = `${a.nivel ?? "item"} “${curto(a.objeto_nome ?? "", 40)}”`;
+    const extra = a.acao === "orcamento" && a.depois ? ` para ${a.depois}` : "";
+    linhas.push({ quando: a.criado_em, texto: `${VERBO[a.acao] ?? a.acao} ${oque}${extra}${a.plataforma === "google" ? " (Google)" : ""}` });
+  }
+  const vistos = new Set<string>();
+  return linhas
+    .sort((a, b) => a.quando.localeCompare(b.quando))
+    .map((l) => `${diaCurto(l.quando)}: ${l.texto.charAt(0).toUpperCase()}${l.texto.slice(1)}`)
+    .filter((t) => !vistos.has(t) && vistos.add(t))
+    .slice(-12);
 }
 
 /** Gera o relatório: copia o modelo, preenche e devolve o link da apresentação nova. */

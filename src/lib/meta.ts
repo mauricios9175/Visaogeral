@@ -199,6 +199,21 @@ export async function insightsMensais(contaId: string, token: string, desde: str
   return buscar(base);
 }
 
+/** Alteração registrada no histórico de atividades da conta (o mesmo do Gerenciador). */
+export type AtividadeMeta = {
+  event_type: string; event_time: string; object_name?: string; object_type?: string;
+  translated_event_type?: string; extra_data?: string; actor_name?: string;
+};
+
+/** Histórico de atividades da conta no período (pausas, orçamentos, criação de campanhas e anúncios…). */
+export function atividadesDaConta(contaId: string, token: string, desde: string, ate: string) {
+  const unix = (iso: string, fim = false) => String(Math.floor(Date.parse(`${iso}T${fim ? "23:59:59" : "00:00:00"}-03:00`) / 1000));
+  return todasPaginas<AtividadeMeta>(montarUrl(`${contaId}/activities`, token, {
+    fields: "event_type,event_time,object_name,object_type,translated_event_type,extra_data,actor_name",
+    since: unix(desde), until: unix(ate, true), limit: "200", locale: "pt_BR",
+  }));
+}
+
 /** Soma os valores de uma lista de ações do Meta (ex.: video_p25_watched_actions). */
 export function somaAcoes(lista?: Acao[], tipo?: string) {
   return (lista ?? []).filter((a) => !tipo || a.action_type === tipo).reduce((s, a) => s + Number(a.value ?? 0), 0);
