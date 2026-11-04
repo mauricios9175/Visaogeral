@@ -1,6 +1,6 @@
 import "server-only";
 import { db, EMPRESA_PADRAO, type Cliente, type ContaAnuncio } from "./db";
-import { alertasContas, buscarTudo } from "./consultas";
+import { buscarTudo } from "./consultas";
 import { diasAtras, somarDias } from "./datas";
 import { dinheiro, inteiro } from "./formato";
 import { somarGoogle, type LinhaGoogle } from "./consultas-google";
@@ -51,6 +51,7 @@ const ctr = (s: Soma) => (s.impr ? (s.cliques / s.impr) * 100 : null);
 /**
  * Alertas de desempenho calculados com os dados já sincronizados (sem chamar o Meta):
  * janela recente = últimos 7 dias fechados (até ontem), comparada com os 7 dias antes.
+ * Saldo, limite e status das contas ficam à parte, em alertasContas().
  */
 export async function calcularAlertas(): Promise<Alerta[]> {
   const banco = db();
@@ -170,16 +171,6 @@ export async function calcularAlertas(): Promise<Alerta[]> {
           }) });
       }
     }
-  }
-
-  // Saldo, limite de gastos e status das contas do Meta
-  const contasAlertas = await alertasContas().catch(() => []);
-  const empresaPorCliente = new Map(clientes.map((c) => [c.id, c.empresa || EMPRESA_PADRAO]));
-  for (const a of contasAlertas) {
-    alertas.push({
-      clienteId: a.clienteId, clienteNome: a.clienteNome, empresa: empresaPorCliente.get(a.clienteId) ?? EMPRESA_PADRAO,
-      nivel: a.nivel, titulo: `Conta ${a.contaNome}`, detalhe: a.mensagem, sugestao: "Resolva na conta de anúncios ou avise o cliente.",
-    });
   }
 
   const ordem: Record<Nivel, number> = { critico: 0, atencao: 1, oportunidade: 2 };

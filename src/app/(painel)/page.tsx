@@ -256,10 +256,10 @@ function PainelAlertas({ alertas, linkTodos }: { alertas: AlertaConta[]; linkTod
     <section aria-labelledby="atencao" className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="atencao" className="text-lg font-bold">
-          Precisa de atenção agora
+          💳 Saldo e contas
           {alertas.length > 0 && <span className="ml-2 rounded-full bg-critico-bg px-2.5 py-0.5 text-[13px] text-critico">{alertas.length}</span>}
         </h2>
-        <Link href={linkTodos} className="text-sm font-semibold text-destaque">Alertas de desempenho →</Link>
+        <Link href={`${linkTodos}#desempenho`} className="text-sm font-semibold text-destaque">Alertas de desempenho →</Link>
       </div>
       {alertas.length === 0 ? (
         <p className="rounded-2xl border border-borda bg-superficie px-4 py-3 text-sm text-texto-2">● Nenhum problema de saldo ou de conta agora.</p>
