@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Voltar } from "@/components/ui";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { normalizarConfig, OBJETIVO_FORMULARIO, type Modelo } from "@/lib/modelos";
@@ -19,7 +20,7 @@ export default async function Montar({ params }: PageProps<"/clientes/[id]/monta
   return (
     <div className="space-y-5">
       <div>
-        <Link href={`/clientes/${id}`} className="text-sm text-texto-3 hover:text-texto">← {cliente.nome}</Link>
+        <Voltar href={`/clientes/${id}`}>Voltar para {cliente.nome}</Voltar>
         <h1 className="text-xl font-semibold">Montar campanha no Meta</h1>
         <p className="text-sm text-texto-2">
           Escolha o modelo, a página e os criativos. O painel cria a campanha, o conjunto e um anúncio por criativo,

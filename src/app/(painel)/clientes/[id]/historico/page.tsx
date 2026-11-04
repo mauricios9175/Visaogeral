@@ -7,7 +7,7 @@ import type { FunilCliente } from "@/lib/funil";
 import { configRelatorio, linkApresentacao, ORDEM_QUALIFICACAO, TITULO_QUALIFICACAO } from "@/lib/relatorio-slides";
 import { DIMENSOES_UTM } from "@/lib/consultas";
 import { hojeISO } from "@/lib/datas";
-import { Aviso } from "@/components/ui";
+import { Aviso, Voltar } from "@/components/ui";
 import { BotaoEnviar } from "@/components/botao";
 import { EscolherPasta } from "@/components/escolher-pasta";
 import { BuscarHistorico } from "@/components/buscar-historico";
@@ -55,7 +55,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   return (
     <div className="space-y-6">
       <div>
-        <Link href={`/clientes/${id}`} className="text-sm text-texto-3 hover:text-texto">← {cliente.nome}</Link>
+        <Voltar href={`/clientes/${id}`}>Voltar para {cliente.nome}</Voltar>
         <h1 className="text-xl font-semibold">Histórico de {cliente.nome}</h1>
         <p className="text-sm text-texto-2">
           Um registro por mês, como a planilha: investimento (Meta + Google), funil do CRM e vendas. Cada mês fica salvo;

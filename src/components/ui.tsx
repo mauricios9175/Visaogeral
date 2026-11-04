@@ -163,3 +163,16 @@ export function SeloStatus({ status }: { status: string | null }) {
     </span>
   );
 }
+
+/** Botão de voltar, bem visível no topo das telas internas (cliente, criativos, histórico…). */
+export function Voltar({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="mb-2 inline-flex min-h-10 items-center gap-2 self-start rounded-[10px] border border-borda bg-superficie px-3.5 text-sm font-semibold text-texto-2 hover:border-destaque hover:text-texto"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+      {children}
+    </Link>
+  );
+}

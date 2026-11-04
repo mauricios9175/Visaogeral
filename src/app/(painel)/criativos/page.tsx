@@ -3,7 +3,7 @@ import { resolverPeriodo } from "@/lib/datas";
 import { db, EMPRESA_PADRAO, type Cliente } from "@/lib/db";
 import { listarCriativos, type Criativo, type Selo } from "@/lib/criativos";
 import { decimal, dinheiro, inteiro, pct } from "@/lib/formato";
-import { Aviso, SeletorPeriodo, SeloStatus } from "@/components/ui";
+import { Aviso, SeletorPeriodo, SeloStatus, Voltar } from "@/components/ui";
 import { Miniatura } from "@/components/miniatura";
 
 const ATIVOS = ["ACTIVE", "IN_PROCESS", "PENDING_REVIEW", "PREAPPROVED"];
@@ -73,7 +73,8 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Criativos{cliente ? ` · ${cliente.nome}` : empresa ? ` · ${empresa}` : ""}</h1>
+          <Voltar href={cliente ? `/clientes/${cliente.id}?${atual.qs}` : `/?${atual.qs}`}>{cliente ? `Voltar para ${cliente.nome}` : "Visão geral"}</Voltar>
+          <h1 className="mt-1 text-[26px] font-extrabold tracking-tight">Criativos{cliente ? ` · ${cliente.nome}` : empresa ? ` · ${empresa}` : ""}</h1>
           <p className="text-sm text-texto-2">
             {inteiro(todos.length)} anúncios do Meta veicularam no período · ordenados por {ordem.rotulo.toLowerCase()}
           </p>

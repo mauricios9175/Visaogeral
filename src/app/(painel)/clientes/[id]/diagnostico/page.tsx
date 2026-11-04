@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Voltar } from "@/components/ui";
 import { notFound } from "next/navigation";
 import { db, type ContaAnuncio } from "@/lib/db";
 import { diasAtras } from "@/lib/datas";
@@ -38,7 +39,7 @@ export default async function Diagnostico({ params }: PageProps<"/clientes/[id]/
   return (
     <div className="space-y-6">
       <div>
-        <Link href={`/clientes/${id}`} className="text-sm text-texto-3 hover:text-texto">← {cliente.nome}</Link>
+        <Voltar href={`/clientes/${id}`}>Voltar para {cliente.nome}</Voltar>
         <h1 className="text-xl font-semibold">Diagnóstico de resultados</h1>
         <p className="text-sm text-texto-2">
           Dados ao vivo do Meta, por conjunto, de {desde.split("-").reverse().join("/")} a {ate.split("-").reverse().join("/")}.

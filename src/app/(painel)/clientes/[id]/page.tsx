@@ -5,7 +5,7 @@ import { detalheCliente, detalheCrm, DIMENSOES_UTM, somarGeral, type DimensaoUtm
 import { detalheGoogle } from "@/lib/consultas-google";
 import { formatarIdGoogle } from "@/lib/google";
 import { decimal, dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
-import { Aviso, Kpi, SeletorPeriodo, SeloStatus, TiposResultado, Variacao } from "@/components/ui";
+import { Aviso, Kpi, SeletorPeriodo, SeloStatus, TiposResultado, Variacao, Voltar } from "@/components/ui";
 import { BarrasDiarias } from "@/components/graficos";
 import { AcoesRapidas, type DestinosDuplicar } from "@/components/acoes-rapidas";
 import { db } from "@/lib/db";
@@ -48,7 +48,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
   if ("erroGeral" in d) {
     return (
       <div className="space-y-3">
-        <Link href={`/?${atual.qs}`} className="text-sm text-texto-3 hover:text-texto">← Visão geral</Link>
+        <Voltar href={`/?${atual.qs}`}>Visão geral</Voltar>
         <Aviso>Erro ao carregar o cliente: {d.erroGeral}</Aviso>
       </div>
     );
@@ -76,7 +76,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-col gap-2.5">
-          <Link href={`/?${atual.qs}`} className="text-[13px] text-texto-3 hover:text-texto">← Visão geral</Link>
+          <Voltar href={`/?${atual.qs}`}>Visão geral</Voltar>
           <div className="flex flex-wrap items-center gap-3.5">
             <span aria-hidden className="flex h-[52px] w-[52px] items-center justify-center rounded-[14px] bg-destaque-bg text-lg font-extrabold text-destaque">
               {c.nome.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]).join("").toUpperCase()}

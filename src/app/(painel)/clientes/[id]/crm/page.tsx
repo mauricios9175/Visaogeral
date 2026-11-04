@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { quandoFoi } from "@/lib/formato";
 import type { FunilRd } from "@/lib/crm/rd";
 import { listarFunisCrm, NOME_CRM, type ConexaoCrm } from "@/lib/crm/sync";
-import { Aviso } from "@/components/ui";
+import { Aviso, Voltar } from "@/components/ui";
 import { BotaoEnviar } from "@/components/botao";
 import { removerConexaoCrm, salvarConexaoCrm, salvarFontesCrm, salvarFunilCrm, salvarMapaUtm, sincronizarCrmAgora } from "../../../../acoes";
 import { camposDoClienteCrm, ehFonteAnuncio, fontesDoCliente, SEM_FONTE } from "@/lib/consultas";
@@ -67,7 +67,7 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <Link href={`/clientes/${id}`} className="text-sm text-texto-3 hover:text-texto">← {cliente.nome}</Link>
+        <Voltar href={`/clientes/${id}`}>Voltar para {cliente.nome}</Voltar>
         <h1 className="text-xl font-semibold">CRM de {cliente.nome}</h1>
         <p className="text-sm text-texto-2">
           O painel só lê o CRM: traz os negócios, a etapa em que estão, se viraram venda e o valor. Nada é alterado lá.
