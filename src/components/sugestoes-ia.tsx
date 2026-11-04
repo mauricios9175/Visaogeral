@@ -188,13 +188,13 @@ export function SugestoesIA({ clienteId, params, cplMeta, periodo, rotuloPeriodo
       {res && !ocupado && (
         <div className="mt-4 space-y-3 border-t border-borda pt-4">
           <div className="flex flex-wrap items-center gap-2 text-xs text-texto-3">
-            <span>Gerada {res.criado_em ? quando(res.criado_em) : "agora"}</span>
+            <span>Gerada {res.criado_em ? quando(res.criado_em) : "agora"}{res.automatica ? ` na rodada automática da madrugada${res.sinais?.length ? ` (sinais: ${res.sinais.join("; ")})` : ""}` : ""}</span>
             {lista.length > 1 && (
               <label className="ml-auto flex items-center gap-1.5">Ver anteriores
                 <select value={res.id} onChange={(e) => setAtualId(e.target.value)} className="min-h-8 rounded-lg border border-borda bg-fundo px-2 text-xs text-texto">
                   {lista.map((x) => (
                     <option key={x.id} value={x.id}>
-                      {x.criado_em ? quando(x.criado_em) : "agora"} · {x.periodo.rotulo} · {x.sugestoes.length} sugest{x.sugestoes.length === 1 ? "ão" : "ões"}{x.feitas?.length ? ` (${x.feitas.length} feita(s))` : ""}
+                      {x.criado_em ? quando(x.criado_em) : "agora"}{x.automatica ? " (automática)" : ""} · {x.periodo.rotulo} · {x.sugestoes.length} sugest{x.sugestoes.length === 1 ? "ão" : "ões"}{x.feitas?.length ? ` (${x.feitas.length} feita(s))` : ""}
                     </option>
                   ))}
                 </select>

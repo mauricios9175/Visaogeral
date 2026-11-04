@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { calcularAlertas, type Alerta, type Nivel } from "@/lib/alertas";
 import { alertasContas, type AlertaConta } from "@/lib/consultas";
+import type { ResultadoSugestoes } from "@/lib/sugestoes";
 import { Aviso } from "@/components/ui";
 import { AcoesRapidas } from "@/components/acoes-rapidas";
 import { db, EMPRESA_PADRAO } from "@/lib/db";
@@ -14,14 +15,24 @@ const NIVEIS: { chave: Nivel; titulo: string; classe: string; icone: string }[] 
 
 export default async function Alertas({ searchParams }: PageProps<"/alertas">) {
   const { empresa, msg } = (await searchParams) as { empresa?: string; msg?: string };
-  const [todos, todasContas, { data: clientes }, { data: feitas }] = await Promise.all([
+  const [todos, todasContas, { data: clientes }, { data: feitas }, { data: historicosIA }] = await Promise.all([
     calcularAlertas(),
     alertasContas().catch(() => [] as AlertaConta[]),
-    db().from("clientes").select("id, empresa").eq("ativo", true),
+    db().from("clientes").select("id, nome, empresa").eq("ativo", true),
     // ações das últimas 24 h: o alerta só some quando os dados do dia virarem, então mostramos o que já foi feito
     db().from("acoes_log").select("objeto_id, acao, depois, criado_em").eq("ok", true)
       .gte("criado_em", horasAtras(24)).order("criado_em", { ascending: false }),
+    db().from("configuracoes").select("chave, valor").like("chave", "ia_sugestoes:%"),
   ]);
+  // sugestões automáticas (de madrugada) das últimas 36 h
+  const nomeCliente = new Map(((clientes ?? []) as { id: string; nome: string }[]).map((c) => [c.id, c.nome]));
+  const desdeIA = Date.parse(horasAtras(36));
+  const daNoite = ((historicosIA ?? []) as { chave: string; valor: ResultadoSugestoes[] }[]).flatMap((h) => {
+    const clienteId = h.chave.split(":")[1];
+    return (Array.isArray(h.valor) ? h.valor : [])
+      .filter((r) => r.automatica && r.criado_em && Date.parse(r.criado_em) >= desdeIA)
+      .map((r) => ({ ...r, clienteId, nome: nomeCliente.get(clienteId) ?? "Cliente" }));
+  }).filter((r) => nomeCliente.has(r.clienteId)).sort((a, b) => b.sugestoes.length - a.sugestoes.length);
   const feitaPorObjeto = new Map<string, { acao: string; depois: string | null; criado_em: string }>();
   for (const f of feitas ?? []) if (!feitaPorObjeto.has(f.objeto_id)) feitaPorObjeto.set(f.objeto_id, f);
   const voltar = empresa ? `/alertas?empresa=${encodeURIComponent(empresa)}` : "/alertas";
@@ -55,6 +66,28 @@ export default async function Alertas({ searchParams }: PageProps<"/alertas">) {
       {msg && <Aviso>{msg}</Aviso>}
 
       <SaldoEContas contas={contas} />
+
+      {daNoite.length > 0 && (
+        <section id="ia" className="space-y-2 rounded-2xl border border-destaque/40 bg-destaque-bg/30 p-4 lg:p-5">
+          <h2 className="text-lg font-bold"><span className="text-destaque">✦</span> Sugestões da IA desta noite</h2>
+          <p className="text-xs text-texto-3">Feitas de madrugada nos clientes com sinal de problema, seguindo o seu manual. Abra o cliente para ver e aplicar.</p>
+          <ul className="divide-y divide-borda rounded-xl border border-borda bg-superficie text-sm">
+            {daNoite.map((r) => {
+              const acoes = r.sugestoes.filter((x) => x.acao !== "manter" && x.acao !== "aguardar");
+              return (
+                <li key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <Link href={`/clientes/${r.clienteId}#sugestoes`} className="font-semibold hover:underline">{r.nome}</Link>
+                    <span className="text-xs text-texto-3"> · {r.plataforma === "google" ? "Google Ads" : "Meta Ads"} · {r.diagnostico.resumo.slice(0, 140)}{r.diagnostico.resumo.length > 140 ? "…" : ""}</span>
+                    {acoes[0] && <div className="text-xs text-texto-2">→ {acoes[0].titulo}{acoes.length > 1 ? ` (e mais ${acoes.length - 1})` : ""}</div>}
+                  </div>
+                  <span className="rounded-full bg-destaque-bg px-2.5 py-0.5 text-xs font-semibold text-destaque">{acoes.length} sugestão(ões)</span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       <section id="desempenho" className="space-y-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2 border-t border-borda pt-5">

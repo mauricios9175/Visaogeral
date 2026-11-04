@@ -4,6 +4,7 @@ import { sincronizarCrms } from "@/lib/crm/sync";
 import { sincronizarGoogle } from "@/lib/sync-google";
 import { atualizarHistoricoRecente } from "@/lib/historico";
 import { enviarAvisos } from "@/lib/push";
+import { rodadaAutomaticaSugestoes } from "@/lib/sugestoes-auto";
 
 export const maxDuration = 300;
 
@@ -12,6 +13,7 @@ export const maxDuration = 300;
 // ?modo=crm&dias=30 — CRM de todos os clientes ativos (chamada separada para não estourar o tempo)
 // ?modo=google&dias=2 — Google Ads (a cada 3 horas; 30 dias de madrugada)
 // ?modo=avisos — notificações no celular com os alertas novos (de hora em hora, depois do Meta)
+// ?modo=sugestoes — sugestões com IA nos clientes com sinal de problema (de madrugada; repetir enquanto restantes > 0)
 // ?modo=historico — grava o mês atual (e o anterior até o dia 10) no histórico mensal de cada cliente
 export async function GET(request: NextRequest) {
   const segredo = process.env.CRON_SECRET;
@@ -25,6 +27,7 @@ export async function GET(request: NextRequest) {
   }
   if (modo === "historico") return NextResponse.json(await atualizarHistoricoRecente());
   if (modo === "avisos") return NextResponse.json(await enviarAvisos());
+  if (modo === "sugestoes") return NextResponse.json(await rodadaAutomaticaSugestoes());
   if (modo === "google") {
     const dias = Math.min(Number(request.nextUrl.searchParams.get("dias")) || 2, 90);
     return NextResponse.json(await sincronizarGoogle(dias));

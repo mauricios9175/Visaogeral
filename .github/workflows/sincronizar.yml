@@ -76,3 +76,23 @@ jobs:
           curl -sS --fail-with-body --max-time 300 \
             -H "Authorization: Bearer $CRON_SECRET" \
             "$APP_URL/api/cron/sync?modo=historico"
+
+
+  # Sugestões com IA de madrugada, só nos clientes com sinal de problema (depois da sincronização; job próprio
+  # porque leva alguns minutos: cada chamada faz o que couber no tempo).
+  sugestoes:
+    needs: sync
+    if: always() && (github.event.schedule == '17 6 * * *' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Sugestões com IA
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          for i in 1 2 3; do
+            R=$(curl -sS --fail-with-body --max-time 300 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/sync?modo=sugestoes") || exit 1
+            echo "$R"
+            echo "$R" | grep -q '"restantes":0' && break
+          done

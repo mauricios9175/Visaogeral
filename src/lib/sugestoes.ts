@@ -52,6 +52,8 @@ export type Sugestao = {
 
 export type ResultadoSugestoes = {
   plataforma?: PlataformaIA; // sem = Meta (histórico antigo)
+  automatica?: boolean;      // gerada pela rodada de madrugada
+  sinais?: string[];         // alertas que fizeram a rodada automática olhar este cliente
   id?: string;          // id no histórico
   criado_em?: string;
   feitas?: number[];    // índices das sugestões marcadas como feitas
@@ -346,7 +348,10 @@ export async function marcarSugestao(clienteId: string, id: string, indice: numb
 }
 
 /** Sugestões de otimização do cliente (padrão: últimos 14 dias, para ter volume). */
-export async function sugerirOtimizacoes(clienteId: string, params?: { p?: string; de?: string; ate?: string }, plataforma: PlataformaIA = "meta"): Promise<ResultadoSugestoes> {
+export async function sugerirOtimizacoes(
+  clienteId: string, params?: { p?: string; de?: string; ate?: string }, plataforma: PlataformaIA = "meta",
+  extra: { automatica?: boolean; sinais?: string[] } = {},
+): Promise<ResultadoSugestoes> {
   const { atual, anterior } = resolverPeriodo(params?.p ? params : { p: "14" });
   const google = plataforma === "google";
   const [manual, prm] = await Promise.all([lerManual(plataforma), lerParams(clienteId)]);
@@ -361,6 +366,7 @@ export async function sugerirOtimizacoes(clienteId: string, params?: { p?: strin
   }
   const resultado: ResultadoSugestoes = {
     plataforma,
+    ...(extra.automatica && { automatica: true, sinais: extra.sinais?.slice(0, 6) }),
     id: crypto.randomUUID(),
     criado_em: new Date().toISOString(),
     feitas: [],
