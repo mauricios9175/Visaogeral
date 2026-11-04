@@ -10,6 +10,9 @@ import { BarrasDiarias } from "@/components/graficos";
 import { AnaliseIA } from "@/components/analise-ia";
 import { SugestoesIA, type AcaoPainel } from "@/components/sugestoes-ia";
 import { LinkCliente } from "@/components/link-cliente";
+import { NIVEIS_GOOGLE, TabelaNivelGoogle } from "@/components/google-niveis";
+import { nivelGoogle, type LinhaNivelGoogle } from "@/lib/google";
+import { acessoGoogle } from "@/lib/acesso-google";
 import { linkDoCliente } from "@/lib/portal";
 import { lerHistoricoSugestoes, lerParams } from "@/lib/sugestoes";
 import { PARAMS_PADRAO } from "@/lib/manual-ia";
@@ -37,6 +40,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
   const busca = (await searchParams) as {
     p?: string; de?: string; ate?: string; nivel?: string; status?: string; utm?: string; msg?: string;
     campanha?: string; conjunto?: string;
+    gnivel?: string; gcampanha?: string; ggrupo?: string; // navegação no Google
   };
   const dimensao = (DIMENSOES_UTM.find((x) => x.chave === busca.utm) ?? DIMENSOES_UTM[0]).chave;
   const { nivel } = busca;
@@ -238,7 +242,9 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
         />
       </div>
 
-      {google && ("erro" in google ? <Aviso>Erro ao carregar o Google Ads: {google.erro}</Aviso> : <SecaoGoogle g={google} voltar={voltar} />)}
+      {google && ("erro" in google ? <Aviso>Erro ao carregar o Google Ads: {google.erro}</Aviso> : <SecaoGoogle g={google} nav={{
+        base, qs: atual.qs, desde: atual.desde, ate: atual.ate, nivel: busca.gnivel, campanha: busca.gcampanha, grupo: busca.ggrupo,
+      }} />)}
 
       <SecaoCrm crm={crm} gasto={gastoTotal} gastoAnterior={gastoTotalAnterior} base={base} comGoogle={!!g}
         dimensao={dimensao} qs={atual.qs} periodo={atual}
@@ -295,8 +301,34 @@ const CANAL: Record<string, string> = {
 
 const STATUS_GOOGLE: Record<string, string> = { ENABLED: "ACTIVE", PAUSED: "PAUSED", REMOVED: "DELETED" };
 
-function SecaoGoogle({ g, voltar }: { g: NonNullable<Awaited<ReturnType<typeof detalheGoogle>>>; voltar: string }) {
+type NavGoogle = { base: string; qs: string; desde: string; ate: string; nivel?: string; campanha?: string; grupo?: string };
+
+async function SecaoGoogle({ g, nav }: { g: NonNullable<Awaited<ReturnType<typeof detalheGoogle>>>; nav: NavGoogle }) {
   const { atual: x, anterior: y } = g;
+  // navegação igual à do Google Ads: campanha → grupos → anúncios / palavras-chave / termos (lido na hora na API)
+  const nivel = (NIVEIS_GOOGLE.find((n) => n.chave === nav.nivel) ?? NIVEIS_GOOGLE[0]).chave;
+  const campSel = g.campanhas.find((c) => c.id === nav.campanha) ?? null;
+  const grupoSel = nav.grupo && /^\d+$/.test(nav.grupo) ? nav.grupo : null;
+  const url = (n: string, camp?: string | null, grupo?: string | null) =>
+    `${nav.base}?${nav.qs}&gnivel=${n}${camp ? `&gcampanha=${camp}` : ""}${grupo ? `&ggrupo=${grupo}` : ""}#google`;
+  const aqui = url(nivel, campSel?.id, grupoSel);
+  let linhas: LinhaNivelGoogle[] = [];
+  const errosNivel: string[] = [];
+  if (nivel !== "campanhas") {
+    const contas = campSel ? [campSel.contaId] : g.contas.map((c) => c.id);
+    const partes = await Promise.all(contas.map(async (id) => {
+      try {
+        const { acesso, conta } = await acessoGoogle(id);
+        return await nivelGoogle(acesso, id, conta?.login_customer_id ?? null, nivel, nav.desde, nav.ate, { campanhaId: campSel?.id, grupoId: grupoSel });
+      } catch (e) {
+        errosNivel.push(e instanceof Error ? e.message : String(e));
+        return [];
+      }
+    }));
+    linhas = partes.flat().sort((a, b) => b.gasto - a.gasto);
+  }
+  const contaDaCampanha = new Map(g.campanhas.map((c) => [c.id, c.contaId]));
+  const nomeGrupo = grupoSel ? linhas.find((l) => l.grupoId === grupoSel)?.grupo ?? null : null;
   const erros = g.contas.filter((c) => c.ultimo_erro);
   return (
     <section id="google" className="space-y-3">
@@ -341,8 +373,42 @@ function SecaoGoogle({ g, voltar }: { g: NonNullable<Awaited<ReturnType<typeof d
         </div>
       )}
 
+      <nav aria-label="Níveis do Google" className="flex flex-wrap gap-1 border-b border-borda text-sm">
+        {NIVEIS_GOOGLE.map((n) => (
+          <Link key={n.chave} href={url(n.chave, campSel?.id, n.chave === "campanhas" || n.chave === "grupos" ? null : grupoSel)}
+            aria-current={n.chave === nivel ? "page" : undefined}
+            className={`px-3 py-2 ${n.chave === nivel ? "border-b-2 border-destaque font-semibold" : "text-texto-2 hover:text-texto"}`}>
+            {n.rotulo}
+          </Link>
+        ))}
+      </nav>
+      {(campSel || grupoSel) && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-texto-2">
+          <span>Filtrando:</span>
+          {campSel && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-superficie-2 px-2.5 py-1">
+              Campanha <b className="text-texto">{campSel.nome}</b>
+              <Link href={url(nivel === "campanhas" ? "campanhas" : nivel)} className="text-texto-3 hover:text-critico" aria-label="Tirar filtro da campanha">✕</Link>
+            </span>
+          )}
+          {grupoSel && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-superficie-2 px-2.5 py-1">
+              Grupo <b className="text-texto">{nomeGrupo ?? grupoSel}</b>
+              <Link href={url(nivel, campSel?.id)} className="text-texto-3 hover:text-critico" aria-label="Tirar filtro do grupo">✕</Link>
+            </span>
+          )}
+        </div>
+      )}
+      {errosNivel.map((e, i) => <Aviso key={i}>Erro ao ler o Google Ads: {e}</Aviso>)}
+
       <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
-        {g.campanhas.length === 0 ? (
+        {nivel !== "campanhas" ? (
+          <TabelaNivelGoogle
+            nivel={nivel} linhas={linhas} voltar={aqui} cpaMedio={x.cpa}
+            contaDe={(c) => contaDaCampanha.get(c)}
+            link={(l) => nivel === "grupos" && l.grupoId ? url("anuncios", l.campanhaId, l.grupoId) : null}
+          />
+        ) : g.campanhas.length === 0 ? (
           <p className="p-4 text-sm text-texto-3">Sem dados do Google no período.</p>
         ) : (
           <table className="w-full text-sm">
@@ -363,7 +429,7 @@ function SecaoGoogle({ g, voltar }: { g: NonNullable<Awaited<ReturnType<typeof d
                     <td className="max-w-80 px-4 py-2">
                       <div className="flex items-center gap-2">
                         <SeloStatus status={l.status ? STATUS_GOOGLE[l.status] ?? l.status : null} />
-                        <span className="truncate" title={l.nome}>{l.nome}</span>
+                        <Link href={url("grupos", l.id)} className="truncate hover:text-destaque hover:underline" title={`${l.nome} (ver grupos)`}>{l.nome}</Link>
                       </div>
                       <div className="truncate text-xs text-texto-3">
                         {[l.canal ? CANAL[l.canal] ?? l.canal : null, g.contas.length > 1 ? l.conta : null].filter(Boolean).join(" · ")}
@@ -386,7 +452,7 @@ function SecaoGoogle({ g, voltar }: { g: NonNullable<Awaited<ReturnType<typeof d
                         plataforma="google" contaId={l.contaId} objetoId={l.id} nivel="campanha" nome={l.nome}
                         ativo={l.status === "ENABLED" ? true : l.status === "PAUSED" ? false : null}
                         orcamento={l.orcamento != null ? { valor: l.orcamento, tipo: "dia" } : null}
-                        mostrarOrcamento={l.status !== "REMOVED"} voltar={`${voltar}#google`}
+                        mostrarOrcamento={l.status !== "REMOVED"} voltar={aqui}
                       />
                     </td>
                   </tr>
@@ -398,7 +464,8 @@ function SecaoGoogle({ g, voltar }: { g: NonNullable<Awaited<ReturnType<typeof d
       </div>
       <p className="text-xs text-texto-3">
         Conversões = coluna “Conversões” do Google Ads (só as ações marcadas como principais). Em vermelho: custo por
-        conversão 30% acima da média do cliente no Google, ou gasto sem conversão.
+        conversão 30% acima da média do cliente no Google, ou gasto sem conversão. Clique na campanha para ver os grupos e no
+        grupo para ver anúncios, palavras-chave e termos (lidos na hora no Google).
       </p>
     </section>
   );

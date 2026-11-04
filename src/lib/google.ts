@@ -659,3 +659,107 @@ export async function adicionarPalavraGoogle(acesso: string, customerId: string,
     create: { adGroup: `customers/${customerId}/adGroups/${grupoId}`, status: "ENABLED", keyword: { text: texto, matchType: tipo } },
   });
 }
+
+// ---------- Navegação na tela do cliente: grupos, anúncios, palavras-chave e termos (lido na hora) ----------
+
+export type NivelGoogle = "grupos" | "anuncios" | "palavras" | "termos";
+export type Metr = { gasto: number; cliques: number; impressoes: number; conversoes: number; valor: number };
+export type LinhaNivelGoogle = Metr & {
+  id: string; nome: string; status: string; campanhaId: string; campanha: string; grupoId: string | null; grupo: string | null;
+  tipo?: string;                       // grupo: "Pesquisa" | "Performance Max"; anúncio: tipo do anúncio
+  detalhe?: string;                    // anúncio: títulos; palavra: correspondência; termo: situação
+  extra?: { qualidade?: number | null; forca?: string | null; aprovacao?: string | null; correspondencia?: string; termoStatus?: string };
+};
+
+const metr = (l: { metrics?: Record<string, unknown> }): Metr => ({
+  gasto: num(l.metrics?.costMicros) / 1_000_000, cliques: num(l.metrics?.clicks), impressoes: num(l.metrics?.impressions),
+  conversoes: num(l.metrics?.conversions), valor: num(l.metrics?.conversionsValue),
+});
+const METRICAS = "metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions, metrics.conversions_value";
+
+/** Um nível abaixo da campanha (no período), opcionalmente só de uma campanha ou de um grupo. */
+export async function nivelGoogle(
+  acesso: string, customerId: string, loginCustomerId: string | null, nivel: NivelGoogle, desde: string, ate: string,
+  filtro: { campanhaId?: string | null; grupoId?: string | null } = {},
+): Promise<LinhaNivelGoogle[]> {
+  const conds = [`segments.date BETWEEN '${desde}' AND '${ate}'`, "campaign.status != 'REMOVED'"];
+  if (filtro.campanhaId && /^\d+$/.test(filtro.campanhaId)) conds.push(`campaign.id = ${filtro.campanhaId}`);
+  const porGrupo = filtro.grupoId && /^\d+$/.test(filtro.grupoId) ? ` AND ad_group.id = ${filtro.grupoId}` : "";
+  const onde = conds.join(" AND ");
+  const q = (sql: string) => consultar(acesso, customerId, loginCustomerId, sql);
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  if (nivel === "grupos") {
+    const [grupos, recursos] = await Promise.all([
+      q(`SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, ad_group.status, ${METRICAS}
+         FROM ad_group WHERE ${onde} AND ad_group.status != 'REMOVED' AND metrics.impressions > 0`),
+      // Performance Max: os "grupos" são os grupos de recursos
+      q(`SELECT campaign.id, campaign.name, asset_group.id, asset_group.name, asset_group.status, asset_group.ad_strength, ${METRICAS}
+         FROM asset_group WHERE ${onde} AND asset_group.status != 'REMOVED' AND metrics.impressions > 0`).catch(() => []),
+    ]);
+    return [
+      ...grupos.map((l: any) => ({
+        id: String(l.adGroup?.id), nome: l.adGroup?.name ?? "", status: l.adGroup?.status ?? "", campanhaId: String(l.campaign?.id),
+        campanha: l.campaign?.name ?? "", grupoId: String(l.adGroup?.id), grupo: l.adGroup?.name ?? "", tipo: "Grupo de anúncios", ...metr(l),
+      })),
+      ...recursos.map((l: any) => ({
+        id: `ag:${l.assetGroup?.id}`, nome: l.assetGroup?.name ?? "", status: l.assetGroup?.status ?? "", campanhaId: String(l.campaign?.id),
+        campanha: l.campaign?.name ?? "", grupoId: null, grupo: null, tipo: "Grupo de recursos (PMax)",
+        extra: { forca: l.assetGroup?.adStrength ?? null }, ...metr(l),
+      })),
+    ].sort((a, b) => b.gasto - a.gasto);
+  }
+  if (nivel === "anuncios") {
+    const ls = await q(`SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, ad_group_ad.ad.id, ad_group_ad.status, ad_group_ad.ad.type,
+        ad_group_ad.ad.name, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.final_urls, ad_group_ad.ad_strength,
+        ad_group_ad.policy_summary.approval_status, ${METRICAS}
+      FROM ad_group_ad WHERE ${onde}${porGrupo} AND ad_group_ad.status != 'REMOVED' AND metrics.impressions > 0`);
+    return ls.map((l: any) => {
+      const ad = l.adGroupAd?.ad ?? {};
+      const titulos = ((ad.responsiveSearchAd?.headlines ?? []) as { text?: string }[]).map((h) => h.text).filter(Boolean);
+      return {
+        id: `${l.adGroup?.id}~${ad.id}`, nome: titulos.slice(0, 3).join(" | ") || ad.name || `Anúncio ${ad.id}`, status: l.adGroupAd?.status ?? "",
+        campanhaId: String(l.campaign?.id), campanha: l.campaign?.name ?? "", grupoId: String(l.adGroup?.id), grupo: l.adGroup?.name ?? "",
+        tipo: ad.type === "RESPONSIVE_SEARCH_AD" ? "Responsivo de pesquisa" : String(ad.type ?? "").toLowerCase().replace(/_/g, " "),
+        detalhe: [titulos.length ? `${titulos.length} títulos` : "", (ad.finalUrls ?? [])[0] ?? ""].filter(Boolean).join(" · "),
+        extra: { forca: l.adGroupAd?.adStrength ?? null, aprovacao: l.adGroupAd?.policySummary?.approvalStatus ?? null }, ...metr(l),
+      };
+    }).sort((a: LinhaNivelGoogle, b: LinhaNivelGoogle) => b.gasto - a.gasto);
+  }
+  if (nivel === "palavras") {
+    const ls = await q(`SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, ad_group_criterion.criterion_id, ad_group_criterion.status,
+        ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.quality_info.quality_score, ${METRICAS}
+      FROM keyword_view WHERE ${onde}${porGrupo} AND ad_group_criterion.status != 'REMOVED' AND metrics.impressions > 0
+      ORDER BY metrics.cost_micros DESC LIMIT 300`);
+    const CORR: Record<string, string> = { EXACT: "Exata", PHRASE: "Frase", BROAD: "Ampla" };
+    return ls.map((l: any) => ({
+      id: `${l.adGroup?.id}~${l.adGroupCriterion?.criterionId}`, nome: l.adGroupCriterion?.keyword?.text ?? "", status: l.adGroupCriterion?.status ?? "",
+      campanhaId: String(l.campaign?.id), campanha: l.campaign?.name ?? "", grupoId: String(l.adGroup?.id), grupo: l.adGroup?.name ?? "",
+      detalhe: CORR[l.adGroupCriterion?.keyword?.matchType] ?? l.adGroupCriterion?.keyword?.matchType,
+      extra: { qualidade: l.adGroupCriterion?.qualityInfo?.qualityScore ?? null, correspondencia: l.adGroupCriterion?.keyword?.matchType }, ...metr(l),
+    }));
+  }
+  const ls = await q(`SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, search_term_view.search_term, search_term_view.status, ${METRICAS}
+    FROM search_term_view WHERE ${onde}${porGrupo} AND metrics.impressions > 0
+    ORDER BY metrics.cost_micros DESC LIMIT 300`);
+  const SIT: Record<string, string> = { ADDED: "já é palavra-chave", EXCLUDED: "negativado", ADDED_EXCLUDED: "adicionado e negativado", NONE: "" };
+  return ls.map((l: any, i: number) => ({
+    id: `t${i}`, nome: l.searchTermView?.searchTerm ?? "", status: "", campanhaId: String(l.campaign?.id), campanha: l.campaign?.name ?? "",
+    grupoId: String(l.adGroup?.id), grupo: l.adGroup?.name ?? "", detalhe: SIT[l.searchTermView?.status] ?? "",
+    extra: { termoStatus: l.searchTermView?.status }, ...metr(l),
+  }));
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+}
+
+/** Pausa ou ativa um anúncio (id = "grupo~anúncio"). */
+export async function mudarStatusAnuncioGoogle(acesso: string, customerId: string, loginCustomerId: string | null, id: string, ativo: boolean) {
+  await mutar(acesso, customerId, loginCustomerId, "adGroupAds", {
+    update: { resourceName: `customers/${customerId}/adGroupAds/${id}`, status: ativo ? "ENABLED" : "PAUSED" }, updateMask: "status",
+  });
+}
+
+/** Pausa ou ativa um grupo de recursos da Performance Max. */
+export async function mudarStatusGrupoRecursosGoogle(acesso: string, customerId: string, loginCustomerId: string | null, id: string, ativo: boolean) {
+  await mutar(acesso, customerId, loginCustomerId, "assetGroups", {
+    update: { resourceName: `customers/${customerId}/assetGroups/${id}`, status: ativo ? "ENABLED" : "PAUSED" }, updateMask: "status",
+  });
+}

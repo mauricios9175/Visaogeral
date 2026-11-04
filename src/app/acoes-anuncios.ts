@@ -7,7 +7,8 @@ import {
   duplicarAnuncio, duplicarCampanha, duplicarConjunto, linkGerenciador, mudarOrcamento, mudarStatus, orcamentoDe,
 } from "@/lib/meta";
 import {
-  adicionarPalavraGoogle, mudarOrcamentoGoogle, mudarStatusCampanhaGoogle, mudarStatusGrupoGoogle, mudarStatusPalavraGoogle,
+  adicionarPalavraGoogle, mudarOrcamentoGoogle, mudarStatusAnuncioGoogle, mudarStatusCampanhaGoogle, mudarStatusGrupoGoogle,
+  mudarStatusGrupoRecursosGoogle, mudarStatusPalavraGoogle,
   negativarNaCampanhaGoogle, orcamentoCampanhaGoogle, tokenDeAcesso,
 } from "@/lib/google";
 import { tokenDaConta } from "@/lib/sync";
@@ -164,7 +165,7 @@ export async function acaoGoogle(form: FormData) {
  */
 export async function acaoGoogleDetalhe(form: FormData) {
   const contaId = String(form.get("conta_id"));
-  const nivel = String(form.get("nivel")); // grupo | palavra | termo
+  const nivel = String(form.get("nivel")); // grupo | anuncio | palavra | termo
   const acao = String(form.get("acao"));   // pausar | ativar | negativar | adicionar
   const objetoId = String(form.get("objeto_id"));
   const texto = String(form.get("texto") ?? "").trim().toLowerCase().slice(0, 80);
@@ -181,11 +182,16 @@ export async function acaoGoogleDetalhe(form: FormData) {
     const acesso = await tokenDeAcesso(t.refresh_token);
     const lc = conta.login_customer_id;
     if ((acao === "pausar" || acao === "ativar") && nivel === "grupo") {
-      await mudarStatusGrupoGoogle(acesso, contaId, lc, objetoId, acao === "ativar");
+      // "ag:<id>" = grupo de recursos da Performance Max
+      if (objetoId.startsWith("ag:")) await mudarStatusGrupoRecursosGoogle(acesso, contaId, lc, objetoId.slice(3), acao === "ativar");
+      else await mudarStatusGrupoGoogle(acesso, contaId, lc, objetoId, acao === "ativar");
       msg = `${acao === "ativar" ? "Ativado" : "Pausado"} no Google: grupo “${nome ?? objetoId}”.`;
     } else if ((acao === "pausar" || acao === "ativar") && nivel === "palavra") {
       await mudarStatusPalavraGoogle(acesso, contaId, lc, objetoId, acao === "ativar");
       msg = `${acao === "ativar" ? "Ativada" : "Pausada"} no Google: palavra-chave “${nome ?? objetoId}”.`;
+    } else if ((acao === "pausar" || acao === "ativar") && nivel === "anuncio") {
+      await mudarStatusAnuncioGoogle(acesso, contaId, lc, objetoId, acao === "ativar");
+      msg = `${acao === "ativar" ? "Ativado" : "Pausado"} no Google: anúncio “${nome ?? objetoId}”.`;
     } else if (acao === "negativar" && texto) {
       await negativarNaCampanhaGoogle(acesso, contaId, lc, objetoId, texto, tipo);
       msg = `Negativa adicionada no Google: ${tipo === "EXACT" ? `[${texto}]` : tipo === "PHRASE" ? `"${texto}"` : texto} na campanha “${nome ?? objetoId}”.`;

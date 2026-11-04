@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { AcoesRapidas } from "./acoes-rapidas";
 import { salvarParamsIA } from "@/app/acoes-ia";
-import { acaoGoogleDetalhe } from "@/app/acoes-anuncios";
+import { BotaoGoogle } from "./botao-google";
 import type { ParamsIA } from "@/lib/manual-ia";
 import type { PlataformaIA, ResultadoSugestoes, Sugestao } from "@/lib/sugestoes";
 
@@ -29,16 +29,6 @@ const NIVEL: Record<string, string> = {
   anuncio: "Anúncio", conjunto: "Conjunto", campanha: "Campanha", grupo: "Grupo", palavra: "Palavra-chave", termo: "Termo de pesquisa",
 };
 const ATIVOS = ["ACTIVE", "IN_PROCESS", "PENDING_REVIEW", "PREAPPROVED", "ENABLED"];
-
-/** Botão com confirmação que chama a ação do Google abaixo da campanha (grupo, palavra, termo). */
-function BotaoGoogle({ campos, rotulo, confirmar, voltar }: { campos: Record<string, string>; rotulo: string; confirmar: string; voltar: string }) {
-  return (
-    <form action={acaoGoogleDetalhe} onSubmit={(e) => { if (!confirm(confirmar)) e.preventDefault(); }}>
-      {Object.entries({ ...campos, voltar }).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
-      <button className="rounded-md border border-borda bg-superficie px-2.5 py-1 text-xs font-semibold hover:border-destaque">{rotulo}</button>
-    </form>
-  );
-}
 
 /** Botões prontos de cada sugestão (pausar, orçamento, negativar, adicionar palavra). */
 function Botoes({ s, voltar }: { s: Sugestao; voltar: string }) {
