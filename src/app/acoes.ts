@@ -9,6 +9,7 @@ import { importarContas } from "@/lib/sync";
 import { importarContasGoogle, sincronizarGoogle } from "@/lib/sync-google";
 import { PARAMETROS_UTM } from "@/lib/utm";
 import { normalizarFunil } from "@/lib/funil";
+import { dominioKommo } from "@/lib/crm/kommo";
 import { avisosUtm, listarFunisCrm, NOME_CRM, sincronizarCrmCliente, type ConexaoCrm, type TipoCrm } from "@/lib/crm/sync";
 
 export async function entrar(_: unknown, form: FormData) {
@@ -163,22 +164,25 @@ export async function salvarConexaoCrm(form: FormData) {
   const tipo = (String(form.get("tipo") ?? "rd_crm") as TipoCrm);
   const token = String(form.get("token") ?? "").trim();
   const locationId = String(form.get("location_id") ?? "").trim() || null;
+  const subdominioBruto = String(form.get("subdominio") ?? "").trim() || null;
   const banco = db();
   const { data: atual } = await banco.from("crm_conexoes").select("token, tipo").eq("cliente_id", clienteId).maybeSingle();
   // token em branco = manter o atual (só se for o mesmo CRM)
   const tokenFinal = token || (atual?.tipo === tipo ? atual?.token : undefined);
   if (!tokenFinal) avisoCrm(clienteId, "Informe o token do CRM.");
   if (tipo === "highlevel" && !locationId) avisoCrm(clienteId, "Informe o ID da subconta do Ávora.");
+  if (tipo === "kommo" && !subdominioBruto) avisoCrm(clienteId, "Informe o endereço da conta do Kommo (ex.: minhaempresa.kommo.com).");
   let msg: string;
   try {
-    const funis = await listarFunisCrm({ tipo, token: tokenFinal, location_id: locationId });
+    const subdominio = tipo === "kommo" ? dominioKommo(subdominioBruto) : null;
+    const funis = await listarFunisCrm({ tipo, token: tokenFinal, location_id: locationId, subdominio });
     if (atual && atual.tipo !== tipo) {
       // trocou de CRM: zera configuração e negócios antigos
       await banco.from("crm_negocios").delete().eq("cliente_id", clienteId);
       await banco.from("crm_conexoes").delete().eq("cliente_id", clienteId);
     }
     const { error } = await banco.from("crm_conexoes").upsert(
-      { cliente_id: clienteId, tipo, token: tokenFinal, location_id: locationId, ultimo_erro: null },
+      { cliente_id: clienteId, tipo, token: tokenFinal, location_id: tipo === "highlevel" ? locationId : null, subdominio, ultimo_erro: null },
       { onConflict: "cliente_id" },
     );
     if (error) throw new Error(error.message);

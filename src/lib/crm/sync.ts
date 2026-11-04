@@ -2,6 +2,7 @@ import "server-only";
 import { db } from "../db";
 import { diasAtras, hojeISO } from "../datas";
 import { camposDoNegocio, campanhaDoNegocio, idNegocio, listarFunis, listarNegocios, utmsDoNegocioRd, type FunilRd } from "./rd";
+import { camposDoLead, idEtapaKommo, listarFunisKommo, listarLeadsKommo, nomesKommo, STATUS_GANHO, STATUS_PERDIDO, utmsDoLead } from "./kommo";
 import {
   atribuicaoDoContato, atribuicoesDaOportunidade, camposDaOportunidade, listarFunisHL, listarOportunidades, motivosDePerdaHL, nomesCamposHL, type CursorHL, type OportunidadeApi,
   SemPermissaoContatos, utmsDe, type Atribuicao, type Utms,
@@ -68,8 +69,9 @@ function motivoDe(o: OportunidadeApi, motivos: Map<string, string>, campos: Reco
 }
 
 /** Funis e etapas do CRM da conexão (também serve para testar a conexão). */
-export function listarFunisCrm(c: Pick<ConexaoCrm, "tipo" | "token" | "location_id">): Promise<FunilRd[]> {
+export function listarFunisCrm(c: Pick<ConexaoCrm, "tipo" | "token" | "location_id" | "subdominio">): Promise<FunilRd[]> {
   if (c.tipo === "rd_crm") return listarFunis(c.token);
+  if (c.tipo === "kommo") return listarFunisKommo(c.token, c.subdominio);
   if (c.tipo === "highlevel") {
     if (!c.location_id) throw new Error("Informe o ID da subconta do Ávora.");
     return listarFunisHL(c.token, c.location_id);
@@ -130,6 +132,41 @@ async function buscarNegocios(c: ConexaoCrm, dias: number, lote?: { cursor: Curs
       })(),
       contatoId: o.contactId ?? o.contact?.id ?? null,
     })) };
+  }
+  if (c.tipo === "kommo") {
+    const [leads, { motivos, usuarios }] = await Promise.all([
+      listarLeadsKommo(c.token, c.subdominio, diasAtras(dias), hojeISO()),
+      nomesKommo(c.token, c.subdominio),
+    ]);
+    return { cursor: null, negocios: leads.map((l) => {
+      const campos = camposDoLead(l);
+      const utms = utmsDoLead(l);
+      const ganho = l.status_id === STATUS_GANHO ? true : l.status_id === STATUS_PERDIDO ? false : null;
+      // origem: campo "Origem"/"Fonte" do lead, senão a utm_source, senão a primeira etiqueta
+      const campoOrigem = Object.entries(campos ?? {}).find(([k]) => /^(origem|fonte|canal|source)\b/i.test(k.trim()))?.[1];
+      return {
+        idExterno: String(l.id),
+        nome: l.name || null,
+        criado_em: new Date(l.created_at * 1000).toISOString(),
+        fechado_em: l.closed_at ? new Date(l.closed_at * 1000).toISOString() : null,
+        etapa_id: idEtapaKommo(l.pipeline_id, l.status_id),
+        etapa_nome: ganho === true ? "Venda ganha" : ganho === false ? "Venda perdida" : null,
+        pipeline_id_api: String(l.pipeline_id),
+        ganho,
+        valor: Number(l.price ?? 0) || 0,
+        origem: campoOrigem || utms?.source || campos?.Etiquetas?.split(", ")[0] || null,
+        campanha: utms?.campaign ?? null,
+        responsavel: (l.responsible_user_id && usuarios.get(l.responsible_user_id)) || null,
+        campos,
+        motivoPerda: ganho === false
+          ? l._embedded?.loss_reason?.[0]?.name?.trim() || (l.loss_reason_id ? motivos.get(l.loss_reason_id) : null)
+            || Object.entries(campos ?? {}).find(([k]) => /motivo.*perd|perd.*motivo|loss/i.test(k))?.[1] || null
+          : null,
+        utms,
+        atribuicao: null,
+        contatoId: null,
+      };
+    }) };
   }
   throw new Error(`${NOME_CRM[c.tipo]} ainda não está disponível.`);
 }

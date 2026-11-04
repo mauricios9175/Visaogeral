@@ -88,7 +88,7 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
               <select name="tipo" defaultValue={c?.tipo ?? "rd_crm"} className={campo}>
                 <option value="rd_crm">RD Station CRM</option>
                 <option value="highlevel">Ávora (HighLevel)</option>
-                <option value="kommo" disabled>Kommo (em breve)</option>
+                <option value="kommo">Kommo</option>
               </select>
             </label>
             <label className="flex min-w-64 flex-1 flex-col gap-1 text-sm">
@@ -101,6 +101,10 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
             <label className="flex min-w-56 flex-col gap-1 text-sm">
               ID da subconta <span className="text-xs text-texto-3">(só Ávora)</span>
               <input name="location_id" defaultValue={c?.location_id ?? ""} className={campo} placeholder="ex.: aBcD1234EfGh" />
+            </label>
+            <label className="flex min-w-56 flex-col gap-1 text-sm">
+              Endereço da conta <span className="text-xs text-texto-3">(só Kommo)</span>
+              <input name="subdominio" defaultValue={c?.subdominio ?? ""} className={campo} placeholder="ex.: minhaempresa.kommo.com" />
             </label>
             <BotaoEnviar className={botaoPrimario} aguardando="Testando…">
               {c ? "Atualizar e testar" : "Conectar"}
@@ -119,6 +123,12 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
             (contacts.readonly), <i>Ver locais</i> (locations.readonly) e <i>Ver campos personalizados</i>
             (locations/customFields.readonly) → crie e copie o token. O <b>ID da subconta</b> aparece no endereço do
             navegador, depois de <code>/location/</code> (ex.: app.avoracrm.com.br/v2/location/<b>aBcD1234EfGh</b>/…).
+          </p>
+          <p className="mt-2">
+            <b>Kommo:</b> entre como administrador → <b>Configurações → Integrações</b> → <b>Criar integração</b> (canto superior
+            direito) → marque “Integração privada”, dê um nome (ex.: Painel), deixe o acesso <i>CRM</i> marcado e salve. Abra a
+            integração → aba <b>Chaves e escopos</b> → <b>Gerar token de longa duração</b> (escolha a validade mais longa) e copie.
+            O <b>endereço da conta</b> é o que aparece no navegador (ex.: <b>minhaempresa.kommo.com</b>).
           </p>
         </details>
         {c && (
