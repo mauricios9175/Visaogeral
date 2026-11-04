@@ -50,6 +50,70 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
     !termoMeta || [c.nome, c.id, c.bm_nome ?? ""].some((x) => x.toLowerCase().includes(termoMeta)));
   const metaFiltradas = metaTodasFiltradas.slice(0, 30);
   const metaFiltradasTotal = metaTodasFiltradas.length;
+  // contas de clientes encerrados (churn) saem da lista principal e ficam num bloco fechado
+  const ativoPorId = new Map(listaClientes.map((c) => [c.id, c.ativo]));
+  const metaAtivas = metaVinculadas.filter((c) => ativoPorId.get(c.cliente_id!) !== false);
+  const metaDeEncerrados = metaVinculadas.filter((c) => ativoPorId.get(c.cliente_id!) === false);
+  /** Clientes para escolher: os ativos, mais o atual se ele estiver encerrado. */
+  const opcoesCliente = (atual: string | null) => listaClientes.filter((c) => c.ativo || c.id === atual);
+  const tabelaMeta = (lista: ContaAnuncio[]) => (
+          <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="text-left text-xs text-texto-3">
+                <tr>
+                  <th className="px-4 py-2 font-normal">Conta</th>
+                  <th className="px-3 py-2 font-normal">Acesso</th>
+                  <th className="px-3 py-2 font-normal">Última sync</th>
+                  <th className="px-3 py-2 font-normal">Saldo / limite</th>
+                  <th className="px-3 py-2 font-normal">Cliente</th>
+                  <th className="px-3 py-2 font-normal">Sincronizar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lista.map((conta) => (
+                  <tr key={conta.id} className="border-t border-borda align-top">
+                    <td className="px-4 py-2">
+                      <div>{conta.nome}</div>
+                      <div className="text-xs text-texto-3">
+                        {conta.id} · {conta.bm_nome ?? "sem BM"}{conta.status !== 1 && " · conta inativa"}
+                      </div>
+                      {conta.ultimo_erro && <div className="text-xs text-critico">Erro: {conta.ultimo_erro}</div>}
+                    </td>
+                    <td className="px-3 py-2 text-texto-2">{conta.origem === "bm" ? "Seu BM" : "Login FB"}</td>
+                    <td className="px-3 py-2 text-texto-2">{quandoFoi(conta.ultima_sync)}</td>
+                    <td className="num px-3 py-2 text-texto-2">
+                      {conta.pre_paga
+                        ? <span title={conta.saldo_texto ?? ""}>Pré-paga: {dinheiro(conta.saldo)}</span>
+                        : conta.pre_paga === false ? "Pós-paga (cartão)" : "—"}
+                      {conta.limite_gasto != null && conta.total_gasto != null && (
+                        <div className="text-xs text-texto-3">
+                          Limite: resta {dinheiro(conta.limite_gasto - conta.total_gasto)}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <form action={vincularConta} className="flex gap-2">
+                        <input type="hidden" name="conta_id" value={conta.id} />
+                        <select name="cliente_id" defaultValue={conta.cliente_id ?? ""} className={campo}>
+                          <option value="">— sem cliente —</option>
+                          {opcoesCliente(conta.cliente_id).map((c) => <option key={c.id} value={c.id}>{c.nome}{c.ativo ? "" : " (encerrado)"}</option>)}
+                        </select>
+                        <BotaoEnviar className={botao} aguardando="…">OK</BotaoEnviar>
+                      </form>
+                    </td>
+                    <td className="px-3 py-2">
+                      <form action={alternarSyncConta}>
+                        <input type="hidden" name="conta_id" value={conta.id} />
+                        <input type="hidden" name="ativa" value={conta.ativa_sync ? "0" : "1"} />
+                        <BotaoEnviar className={botao} aguardando="…">{conta.ativa_sync ? "Ativa · pausar" : "Pausada · ativar"}</BotaoEnviar>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+  );
   const temTokenBm = Boolean(process.env.META_SYSTEM_USER_TOKEN);
   const temApp = Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET);
 
@@ -182,68 +246,23 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
 
       {/* ---------- Contas ---------- */}
       <section id="contas-meta" className="space-y-3">
-        <h2 className="font-medium">3. Contas do Meta → cliente <span className="font-normal text-texto-3">· {metaVinculadas.length} vinculada(s)</span></h2>
+        <h2 className="font-medium">3. Contas do Meta → cliente <span className="font-normal text-texto-3">· {metaAtivas.length} de clientes ativos</span></h2>
         {listaContas.length === 0 ? (
           <Aviso>Nenhuma conta ainda. Clique em “Buscar contas no Meta”.</Aviso>
         ) : !metaVinculadas.length ? (
           <Aviso>Nenhuma conta vinculada ainda. Abra “Vincular outra conta do Meta” abaixo e escolha o cliente.</Aviso>
         ) : (
-          <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
-            <table className="w-full min-w-[900px] text-sm">
-              <thead className="text-left text-xs text-texto-3">
-                <tr>
-                  <th className="px-4 py-2 font-normal">Conta</th>
-                  <th className="px-3 py-2 font-normal">Acesso</th>
-                  <th className="px-3 py-2 font-normal">Última sync</th>
-                  <th className="px-3 py-2 font-normal">Saldo / limite</th>
-                  <th className="px-3 py-2 font-normal">Cliente</th>
-                  <th className="px-3 py-2 font-normal">Sincronizar</th>
-                </tr>
-              </thead>
-              <tbody>
-                {metaVinculadas.map((conta) => (
-                  <tr key={conta.id} className="border-t border-borda align-top">
-                    <td className="px-4 py-2">
-                      <div>{conta.nome}</div>
-                      <div className="text-xs text-texto-3">
-                        {conta.id} · {conta.bm_nome ?? "sem BM"}{conta.status !== 1 && " · conta inativa"}
-                      </div>
-                      {conta.ultimo_erro && <div className="text-xs text-critico">Erro: {conta.ultimo_erro}</div>}
-                    </td>
-                    <td className="px-3 py-2 text-texto-2">{conta.origem === "bm" ? "Seu BM" : "Login FB"}</td>
-                    <td className="px-3 py-2 text-texto-2">{quandoFoi(conta.ultima_sync)}</td>
-                    <td className="num px-3 py-2 text-texto-2">
-                      {conta.pre_paga
-                        ? <span title={conta.saldo_texto ?? ""}>Pré-paga: {dinheiro(conta.saldo)}</span>
-                        : conta.pre_paga === false ? "Pós-paga (cartão)" : "—"}
-                      {conta.limite_gasto != null && conta.total_gasto != null && (
-                        <div className="text-xs text-texto-3">
-                          Limite: resta {dinheiro(conta.limite_gasto - conta.total_gasto)}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <form action={vincularConta} className="flex gap-2">
-                        <input type="hidden" name="conta_id" value={conta.id} />
-                        <select name="cliente_id" defaultValue={conta.cliente_id ?? ""} className={campo}>
-                          <option value="">— sem cliente —</option>
-                          {listaClientes.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.ativo ? "" : " (encerrado)"}</option>)}
-                        </select>
-                        <BotaoEnviar className={botao} aguardando="…">OK</BotaoEnviar>
-                      </form>
-                    </td>
-                    <td className="px-3 py-2">
-                      <form action={alternarSyncConta}>
-                        <input type="hidden" name="conta_id" value={conta.id} />
-                        <input type="hidden" name="ativa" value={conta.ativa_sync ? "0" : "1"} />
-                        <BotaoEnviar className={botao} aguardando="…">{conta.ativa_sync ? "Ativa · pausar" : "Pausada · ativar"}</BotaoEnviar>
-                      </form>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {tabelaMeta(metaAtivas)}
+            {metaDeEncerrados.length > 0 && (
+              <details className="rounded-2xl border border-borda bg-superficie">
+                <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
+                  Contas de clientes encerrados <span className="font-normal text-texto-3">({metaDeEncerrados.length}, não sincronizam)</span>
+                </summary>
+                <div className="border-t border-borda p-3">{tabelaMeta(metaDeEncerrados)}</div>
+              </details>
+            )}
+          </>
         )}
         {metaLivres.length > 0 && (
           <details open={!!mbusca} className="rounded-2xl border border-borda bg-superficie">
@@ -257,7 +276,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
               </form>
               <ListaVincular
                 contas={metaFiltradas.map((c) => ({ id: c.id, nome: c.nome, detalhe: `${c.id} · ${c.bm_nome ?? "sem BM"}${c.status !== 1 ? " · inativa" : ""}` }))}
-                total={metaFiltradasTotal} clientes={listaClientes} acao={vincularConta}
+                total={metaFiltradasTotal} clientes={ativos} acao={vincularConta}
               />
             </div>
           </details>
@@ -307,6 +326,8 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
         {!!contasGoogle?.length && (() => {
           const todas = contasGoogle as ContaGoogle[];
           const vinculadas = todas.filter((c) => c.cliente_id);
+          const vinculadasAtivas = vinculadas.filter((c) => ativoPorId.get(c.cliente_id!) !== false);
+          const vinculadasEncerradas = vinculadas.filter((c) => ativoPorId.get(c.cliente_id!) === false);
           const livres = todas.filter((c) => !c.cliente_id);
           const acessos = [...new Set(livres.map((c) => c.gerente_nome ?? "—"))].sort();
           const termo = (gbusca ?? "").trim().toLowerCase();
@@ -346,7 +367,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                           <input type="hidden" name="conta_id" value={conta.id} />
                           <select name="cliente_id" defaultValue={conta.cliente_id ?? ""} className={campo}>
                             <option value="">— sem cliente —</option>
-                            {listaClientes.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.ativo ? "" : " (encerrado)"}</option>)}
+                            {opcoesCliente(conta.cliente_id).map((x) => <option key={x.id} value={x.id}>{x.nome}{x.ativo ? "" : " (encerrado)"}</option>)}
                           </select>
                           <BotaoEnviar className={botao} aguardando="…">OK</BotaoEnviar>
                         </form>
@@ -368,10 +389,18 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
           );
           return (
             <>
-              <h3 className="text-sm font-medium">Suas contas (vinculadas a clientes) · {vinculadas.length}</h3>
-              {vinculadas.length
-                ? tabela(vinculadas, true)
+              <h3 className="text-sm font-medium">Suas contas (vinculadas a clientes ativos) · {vinculadasAtivas.length}</h3>
+              {vinculadasAtivas.length
+                ? tabela(vinculadasAtivas, true)
                 : <Aviso>Nenhuma conta vinculada ainda. Procure abaixo as contas dos seus clientes e escolha o cliente.</Aviso>}
+              {vinculadasEncerradas.length > 0 && (
+                <details className="rounded-2xl border border-borda bg-superficie">
+                  <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
+                    Contas de clientes encerrados <span className="font-normal text-texto-3">({vinculadasEncerradas.length}, não sincronizam)</span>
+                  </summary>
+                  <div className="border-t border-borda p-3">{tabela(vinculadasEncerradas, true)}</div>
+                </details>
+              )}
               <p className="text-xs text-texto-3">
                 Só as contas vinculadas a um cliente são sincronizadas. As outras ficam só nesta lista e não gastam cota do Google.
               </p>
@@ -394,7 +423,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
               </form>
               <ListaVincular
                 contas={mostradas.map((c) => ({ id: c.id, nome: c.nome, detalhe: `${formatarIdGoogle(c.id)} · ${c.gerente_nome ?? "—"}${c.status && c.status !== "ENABLED" ? " · cancelada/suspensa" : ""}` }))}
-                total={filtradas.length} clientes={listaClientes} acao={vincularContaGoogle}
+                total={filtradas.length} clientes={ativos} acao={vincularContaGoogle}
               />
               </div>
               </details>
