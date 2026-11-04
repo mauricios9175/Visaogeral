@@ -560,6 +560,8 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, pe
 
       <TabelaUtm crm={crm} dimensao={dimensao} base={base} qs={qs} periodo={periodo} gastos={gastos} />
 
+      <MotivosPerda m={crm.motivosPerda} />
+
       {crm.negocios.length > 0 && (
         <details className="rounded-2xl border border-borda bg-superficie">
           <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
@@ -802,6 +804,38 @@ function AnunciosQueVendem({ linhas, gastos }: { linhas: DetalheCrm["porUtm"]["u
               {a.gasto && a.funil.faturamento > 0 ? (
                 <span className="num text-[13px] font-bold text-bom">{(a.funil.faturamento / a.gasto).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}x</span>
               ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** Por que os leads foram perdidos no período (motivo de perda do CRM). */
+function MotivosPerda({ m }: { m: DetalheCrm["motivosPerda"] }) {
+  const max = Math.max(...m.lista.map((x) => x.total), 1);
+  return (
+    <section aria-labelledby="motivos" className="rounded-2xl border border-borda bg-superficie">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-borda px-4 py-3">
+        <h3 id="motivos" className="text-[15px] font-bold">Motivos de perda <span className="text-sm font-medium text-texto-3">· {inteiro(m.total)} perdido(s)</span></h3>
+        <span className="text-xs text-texto-3">perdidos no período · só leads de anúncio dos funis do relatório</span>
+      </div>
+      {!m.temColuna ? (
+        <p className="p-4 text-sm text-texto-3">Rode o SQL 0020 no Supabase e sincronize o CRM para ver os motivos de perda.</p>
+      ) : !m.total ? (
+        <p className="p-4 text-sm text-texto-3">Nenhum negócio perdido neste período.</p>
+      ) : (
+        <ul className="divide-y divide-borda">
+          {m.lista.map((x) => (
+            <li key={x.motivo} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 px-4 py-2.5 text-sm sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_auto]">
+              <span className={x.motivo === "(sem motivo)" ? "text-texto-3" : ""}>{x.motivo}</span>
+              <span className="order-3 col-span-2 h-2 overflow-hidden rounded-full bg-superficie-2 sm:order-none sm:col-span-1">
+                <span className="block h-full rounded-full bg-[var(--serie-2)]" style={{ width: `${(x.total / max) * 100}%` }} />
+              </span>
+              <span className="num text-right">
+                <b>{inteiro(x.total)}</b> <span className="text-texto-3">· {pct((x.total / m.total) * 100)}</span>
+              </span>
             </li>
           ))}
         </ul>

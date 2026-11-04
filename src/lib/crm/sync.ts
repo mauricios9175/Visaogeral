@@ -3,7 +3,7 @@ import { db } from "../db";
 import { diasAtras, hojeISO } from "../datas";
 import { camposDoNegocio, campanhaDoNegocio, idNegocio, listarFunis, listarNegocios, utmsDoNegocioRd, type FunilRd } from "./rd";
 import {
-  atribuicaoDoContato, atribuicoesDaOportunidade, camposDaOportunidade, listarFunisHL, listarOportunidades, nomesCamposHL, type CursorHL,
+  atribuicaoDoContato, atribuicoesDaOportunidade, camposDaOportunidade, listarFunisHL, listarOportunidades, motivosDePerdaHL, nomesCamposHL, type CursorHL,
   SemPermissaoContatos, utmsDe, type Atribuicao, type Utms,
 } from "./highlevel";
 
@@ -46,11 +46,22 @@ type NegocioNormalizado = {
   campanha: string | null;
   responsavel: string | null;
   campos: Record<string, string> | null;
+  motivoPerda: string | null;
   utms: Utms | null;
   // v: versão da leitura do contato (2 = já inclui os campos personalizados do contato)
   atribuicao: { primeiro: Atribuicao | null; ultimo: Atribuicao | null; v?: number } | null;
   contatoId: string | null;
 };
+
+/**
+ * Motivo de perda da oportunidade do Ávora: o motivo cadastrado (lostReasonId → nome) ou, se a subconta usa um
+ * campo personalizado para isso (ex.: "Motivo da perda"), o valor dele.
+ */
+function motivoDe(o: { lostReasonId?: string | null }, motivos: Map<string, string>, campos: Record<string, string> | null) {
+  if (o.lostReasonId) return motivos.get(o.lostReasonId) ?? null;
+  const campo = Object.entries(campos ?? {}).find(([k]) => /motivo.*perd|perd.*motivo/i.test(k));
+  return campo?.[1]?.trim() || null;
+}
 
 /** Funis e etapas do CRM da conexão (também serve para testar a conexão). */
 export function listarFunisCrm(c: Pick<ConexaoCrm, "tipo" | "token" | "location_id">): Promise<FunilRd[]> {
@@ -79,15 +90,17 @@ async function buscarNegocios(c: ConexaoCrm, dias: number, lote?: { cursor: Curs
       campanha: campanhaDoNegocio(d),
       responsavel: d.user?.name ?? null,
       campos: camposDoNegocio(d),
+      motivoPerda: d.win === false ? d.deal_lost_reason?.name?.trim() || null : null,
       utms: utmsDoNegocioRd(d),
       atribuicao: null,
       contatoId: null,
     })) };
   }
   if (c.tipo === "highlevel" && c.location_id) {
-    const [{ itens: ops, cursor }, nomes] = await Promise.all([
+    const [{ itens: ops, cursor }, nomes, motivos] = await Promise.all([
       listarOportunidades(c.token, c.location_id, diasAtras(dias), lote ?? {}),
       nomesCamposHL(c.token, c.location_id),
+      motivosDePerdaHL(c.token, c.location_id),
     ]);
     return { cursor, negocios: ops.map((o) => ({
       idExterno: o.id,
@@ -103,6 +116,7 @@ async function buscarNegocios(c: ConexaoCrm, dias: number, lote?: { cursor: Curs
       campanha: null,
       responsavel: null,
       campos: camposDaOportunidade(o, nomes),
+      motivoPerda: o.status === "lost" || o.status === "abandoned" ? motivoDe(o, motivos, camposDaOportunidade(o, nomes)) : null,
       ...(() => {
         const atrib = atribuicoesDaOportunidade(o);
         return { atribuicao: atrib, utms: utmsDe(atrib?.primeiro) ?? utmsDe(atrib?.ultimo) };
@@ -115,6 +129,16 @@ async function buscarNegocios(c: ConexaoCrm, dias: number, lote?: { cursor: Curs
 
 /** Avisos da última sincronização por cliente (ex.: token sem permissão de contatos). */
 export const avisosUtm = new Map<string, string>();
+
+/** A coluna do SQL 0020 existe? Sem ela, salva os negócios sem o motivo de perda. */
+let temColunaMotivo: boolean | null = null;
+async function colunaMotivo() {
+  if (temColunaMotivo === null) {
+    const { error } = await db().from("crm_negocios").select("motivo_perda").limit(1);
+    temColunaMotivo = !error;
+  }
+  return temColunaMotivo;
+}
 
 let temColunasUtm: boolean | null = null;
 async function colunasUtm() {
@@ -211,6 +235,7 @@ export async function sincronizarCrmLote(
     const agora = new Date().toISOString();
     // sem o SQL 0011 as colunas de UTM não existem: salva o resto normalmente
     const comUtm = await colunasUtm();
+    const comMotivo = await colunaMotivo();
     const linhas = negocios.map((n) => {
       const e = n.etapa_id ? etapas.get(n.etapa_id) : undefined;
       return {
@@ -230,6 +255,7 @@ export async function sincronizarCrmLote(
         campanha: n.campanha,
         responsavel: n.responsavel,
         campos: n.campos,
+        ...(comMotivo && { motivo_perda: n.motivoPerda }),
         ...(comUtm && {
           utm_source: n.utms?.source ?? null,
           utm_medium: n.utms?.medium ?? null,

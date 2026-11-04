@@ -45,6 +45,16 @@ export async function listarFunisHL(token: string, locationId: string): Promise<
   }));
 }
 
+/** Motivos de perda cadastrados na subconta ({id: nome}). Sem permissão ou sem a função, devolve vazio. */
+export async function motivosDePerdaHL(token: string, locationId: string) {
+  try {
+    const r = await get<{ lostReasons?: { id: string; name: string }[] }>("opportunities/lost-reason", token, { locationId, limit: "200" });
+    return new Map((r.lostReasons ?? []).map((m) => [m.id, m.name]));
+  } catch {
+    return new Map<string, string>();
+  }
+}
+
 type CampoValor = { id: string; fieldValue?: unknown; value?: unknown; fieldValueString?: string; fieldValueNumber?: number };
 
 export type OportunidadeApi = {
@@ -58,6 +68,7 @@ export type OportunidadeApi = {
   createdAt: string;
   updatedAt?: string;
   lastStatusChangeAt?: string | null;
+  lostReasonId?: string | null;
   contactId?: string;
   contact?: { id?: string; name?: string; source?: string | null } | null;
   customFields?: CampoValor[];

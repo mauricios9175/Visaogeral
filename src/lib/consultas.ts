@@ -427,6 +427,7 @@ export type NegocioCrm = {
   responsavel: string | null; campos: Record<string, string> | null;
   utm_source?: string | null; utm_medium?: string | null; utm_campaign?: string | null;
   utm_content?: string | null; utm_term?: string | null;
+  motivo_perda?: string | null;
 };
 
 /** Dimensões de UTM para o relatório de origem dos leads e vendas. */
@@ -586,8 +587,10 @@ export async function negociosDe(clienteIds: string[], desde: string) {
       .or(`criado_em.gte.${limite},fechado_em.gte.${limite}`)
       .range(de, ate),
   );
-  // sem o SQL 0011 as colunas de UTM não existem: segue sem elas
-  return buscar(`${COLUNAS_NEGOCIO}, ${COLUNAS_UTM}`).catch(() => buscar(COLUNAS_NEGOCIO));
+  // sem o SQL 0020 (motivo de perda) ou o 0011 (UTMs), segue sem essas colunas
+  return buscar(`${COLUNAS_NEGOCIO}, ${COLUNAS_UTM}, motivo_perda`)
+    .catch(() => buscar(`${COLUNAS_NEGOCIO}, ${COLUNAS_UTM}`))
+    .catch(() => buscar(COLUNAS_NEGOCIO));
 }
 
 const COLUNAS_CONEXAO = "cliente_id, pipeline_id, etapa_qualificado_ordem, fontes_anuncio, ultima_sync, ultimo_erro";
@@ -660,6 +663,7 @@ export async function detalheCrm(clienteId: string, atual: Periodo, anterior: Pe
 
   return {
     conexao: cx,
+    motivosPerda: motivosDePerda(negocios, cx, atual),
     // nomes do funil do relatório do cliente (Leads, Interessados…, Vendas)
     nomesFunil: (() => { const { leads, vendas, passos } = funilDaConexao(cx); return { leads, vendas, passos: passos.map((x) => x.nome) }; })(),
     porUtm,
@@ -670,6 +674,26 @@ export async function detalheCrm(clienteId: string, atual: Periodo, anterior: Pe
     porFonte,
     negocios: lista,
   };
+}
+
+/**
+ * Motivos de perda dos negócios perdidos no período (pela data em que foram perdidos), só os que entram no funil
+ * do relatório (fontes de anúncio e funis escolhidos). "(sem motivo)" = perdido sem motivo preenchido no CRM.
+ */
+export function motivosDePerda(negocios: NegocioCrm[], cx: ConexaoResumo, p: { desde: string; ate: string }) {
+  const f = funilDaConexao(cx);
+  const perdidos = negocios.filter((n) => n.ganho === false && noPeriodo(n.fechado_em, p) && entraNoFunil(n, f, cx));
+  const grupos = new Map<string, { motivo: string; total: number; valor: number }>();
+  for (const n of perdidos) {
+    const motivo = n.motivo_perda?.trim() || "(sem motivo)";
+    const k = motivo.toLowerCase();
+    const g = grupos.get(k) ?? { motivo, total: 0, valor: 0 };
+    g.total++;
+    g.valor += Number(n.valor);
+    grupos.set(k, g);
+  }
+  const lista = [...grupos.values()].sort((a, b) => Number(a.motivo === "(sem motivo)") - Number(b.motivo === "(sem motivo)") || b.total - a.total);
+  return { total: perdidos.length, lista, temColuna: negocios.some((n) => "motivo_perda" in n) };
 }
 
 /** Fontes distintas dos negócios do cliente (para escolher quais são de anúncio). */
