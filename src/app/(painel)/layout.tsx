@@ -1,10 +1,19 @@
 import { sair } from "../acoes";
-import { MenuCelular, MenuLateral } from "@/components/menu";
+import { MenuCelular, MenuLateral, type ClienteMenu } from "@/components/menu";
+import { connection } from "next/server";
+import { db, EMPRESA_PADRAO } from "@/lib/db";
 
-export default function PainelLayout({ children }: LayoutProps<"/">) {
+export default async function PainelLayout({ children }: LayoutProps<"/">) {
+  // clientes ativos para o menu lateral, agrupados por empresa (clientes próprios por último);
+  // lidos a cada acesso (nunca no build, que não tem banco)
+  await connection();
+  const { data } = await db().from("clientes").select("id, nome, empresa").eq("ativo", true).order("nome");
+  const clientes: ClienteMenu[] = ((data ?? []) as { id: string; nome: string; empresa: string | null }[])
+    .map((c) => ({ id: c.id, nome: c.nome, empresa: c.empresa || EMPRESA_PADRAO }))
+    .sort((a, b) => Number(a.empresa === EMPRESA_PADRAO) - Number(b.empresa === EMPRESA_PADRAO) || a.empresa.localeCompare(b.empresa));
   return (
     <div className="flex min-h-screen">
-      <MenuLateral sair={sair} />
+      <MenuLateral sair={sair} clientes={clientes} />
       <div className="flex min-w-0 flex-1 flex-col">
         <MenuCelular />
         {/* pb no celular: espaço para o menu de baixo */}

@@ -3,7 +3,7 @@ import { db } from "../db";
 import { diasAtras, hojeISO } from "../datas";
 import { camposDoNegocio, campanhaDoNegocio, idNegocio, listarFunis, listarNegocios, utmsDoNegocioRd, type FunilRd } from "./rd";
 import {
-  atribuicaoDoContato, atribuicoesDaOportunidade, camposDaOportunidade, listarFunisHL, listarOportunidades, motivosDePerdaHL, nomesCamposHL, type CursorHL,
+  atribuicaoDoContato, atribuicoesDaOportunidade, camposDaOportunidade, listarFunisHL, listarOportunidades, motivosDePerdaHL, nomesCamposHL, type CursorHL, type OportunidadeApi,
   SemPermissaoContatos, utmsDe, type Atribuicao, type Utms,
 } from "./highlevel";
 
@@ -57,9 +57,13 @@ type NegocioNormalizado = {
  * Motivo de perda da oportunidade do Ávora: o motivo cadastrado (lostReasonId → nome) ou, se a subconta usa um
  * campo personalizado para isso (ex.: "Motivo da perda"), o valor dele.
  */
-function motivoDe(o: { lostReasonId?: string | null }, motivos: Map<string, string>, campos: Record<string, string> | null) {
-  if (o.lostReasonId) return motivos.get(o.lostReasonId) ?? null;
-  const campo = Object.entries(campos ?? {}).find(([k]) => /motivo.*perd|perd.*motivo/i.test(k));
+function motivoDe(o: OportunidadeApi, motivos: Map<string, string>, campos: Record<string, string> | null) {
+  // o nome pode vir junto na oportunidade; senão, pelo id na lista de motivos da subconta
+  const direto = typeof o.lostReason === "string" ? o.lostReason : o.lostReason?.name;
+  if (direto?.trim()) return direto.trim();
+  const id = o.lostReasonId ?? (typeof o.lostReason === "object" ? o.lostReason?.id : null);
+  if (id && motivos.get(id)) return motivos.get(id)!;
+  const campo = Object.entries(campos ?? {}).find(([k]) => /motivo.*perd|perd.*motivo|lost.?reason/i.test(k));
   return campo?.[1]?.trim() || null;
 }
 
@@ -90,7 +94,10 @@ async function buscarNegocios(c: ConexaoCrm, dias: number, lote?: { cursor: Curs
       campanha: campanhaDoNegocio(d),
       responsavel: d.user?.name ?? null,
       campos: camposDoNegocio(d),
-      motivoPerda: d.win === false ? d.deal_lost_reason?.name?.trim() || null : null,
+      // RD: motivo de perda escolhido na lista; senão o campo antigo ou a anotação da perda
+      motivoPerda: d.win === false
+        ? d.deal_lost_reason?.name?.trim() || (typeof d.lost_reason === "string" ? d.lost_reason : d.lost_reason?.name)?.trim() || d.deal_lost_note?.trim() || null
+        : null,
       utms: utmsDoNegocioRd(d),
       atribuicao: null,
       contatoId: null,

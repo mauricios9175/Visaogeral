@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { quandoFoi } from "@/lib/formato";
 import type { FunilRd } from "@/lib/crm/rd";
 import { listarFunisCrm, NOME_CRM, type ConexaoCrm } from "@/lib/crm/sync";
+import { lerMotivosDePerdaHL } from "@/lib/crm/highlevel";
 import { Aviso, Voltar } from "@/components/ui";
 import { BotaoEnviar } from "@/components/botao";
 import { removerConexaoCrm, salvarConexaoCrm, salvarFontesCrm, salvarFunilCrm, salvarMapaUtm, sincronizarCrmAgora } from "../../../../acoes";
@@ -33,6 +34,8 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
     : [[], []];
   const mapaSalvo = ((c as { mapa_utm?: MapaUtm } | null)?.mapa_utm ?? {}) as MapaUtm;
   const mapaAuto = detectarMapa(camposCrm.map((x) => x.nome));
+  // Ávora: a lista de motivos de perda da subconta (para conferir se o painel consegue ler)
+  const motivosHL = c?.tipo === "highlevel" && c.location_id ? await lerMotivosDePerdaHL(c.token, c.location_id) : null;
   let funis: FunilRd[] = [];
   let erroFunis: string | null = null;
   if (c) {
@@ -176,6 +179,24 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
             e marque quais etapas do CRM contam em cada um. É esse funil que aparece no histórico mensal e no relatório.
           </p>
           <EditorFunil clienteId={id} funis={funis} inicial={funilInicial} />
+        </section>
+      )}
+
+      {motivosHL && (
+        <section className="space-y-2 rounded-2xl border border-borda bg-superficie p-4">
+          <h2 className="font-medium">Motivos de perda do Ávora</h2>
+          {motivosHL.mapa.size ? (
+            <p className="text-sm text-texto-2">
+              {motivosHL.mapa.size} motivo(s) cadastrados na subconta: {[...motivosHL.mapa.values()].join(", ")}. Os negócios perdidos
+              ganham o motivo na próxima sincronização (ou clique em “Sincronizar CRM agora”).
+            </p>
+          ) : (
+            <p className="text-sm text-texto-2">
+              Não consegui ler a lista de motivos de perda{motivosHL.erro ? ` (${motivosHL.erro})` : " (a subconta não tem motivos cadastrados)"}.
+              {" "}Confira se a Integração Privada tem a permissão <b>Ver oportunidades</b> (opportunities.readonly). Enquanto isso, o
+              painel usa um campo personalizado com “motivo” e “perda” no nome, se existir.
+            </p>
+          )}
         </section>
       )}
 

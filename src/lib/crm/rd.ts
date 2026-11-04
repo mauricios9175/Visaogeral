@@ -54,6 +54,8 @@ export type NegocioApi = Id & {
   amount_total?: number | string;
   win?: boolean | null;
   deal_lost_reason?: { name?: string } | null;
+  lost_reason?: { name?: string } | string | null;
+  deal_lost_note?: string | null;
   closed_at?: string | null;
   created_at: string;
   deal_stage?: Id & { name?: string };

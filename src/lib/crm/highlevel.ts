@@ -7,13 +7,13 @@ import type { FunilRd } from "./rd";
 const BASE = "https://services.leadconnectorhq.com";
 const VERSAO = "2021-07-28";
 
-async function get<T>(caminho: string, token: string, params: Record<string, string>): Promise<T> {
+async function get<T>(caminho: string, token: string, params: Record<string, string>, versao = VERSAO): Promise<T> {
   const u = new URL(`${BASE}/${caminho}`);
   for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
   for (let tentativa = 0; ; tentativa++) {
     const res = await fetch(u, {
       cache: "no-store",
-      headers: { Authorization: `Bearer ${token}`, Version: VERSAO, Accept: "application/json" },
+      headers: { Authorization: `Bearer ${token}`, Version: versao, Accept: "application/json" },
       signal: AbortSignal.timeout(25_000),
     }).catch((e: unknown) => {
       throw new Error(e instanceof Error && e.name === "TimeoutError" ? "Ávora/HighLevel não respondeu a tempo." : `Falha ao acessar o Ávora/HighLevel: ${e}`);
@@ -47,12 +47,27 @@ export async function listarFunisHL(token: string, locationId: string): Promise<
 
 /** Motivos de perda cadastrados na subconta ({id: nome}). Sem permissão ou sem a função, devolve vazio. */
 export async function motivosDePerdaHL(token: string, locationId: string) {
-  try {
-    const r = await get<{ lostReasons?: { id: string; name: string }[] }>("opportunities/lost-reason", token, { locationId, limit: "200" });
-    return new Map((r.lostReasons ?? []).map((m) => [m.id, m.name]));
-  } catch {
-    return new Map<string, string>();
+  return (await lerMotivosDePerdaHL(token, locationId)).mapa;
+}
+
+/**
+ * Lê a lista de motivos de perda da subconta. A documentação do HighLevel já mudou a versão e o formato
+ * dessa chamada, então tenta as versões conhecidas e aceita a lista em qualquer chave da resposta.
+ * Devolve também o erro (para aparecer na configuração do CRM).
+ */
+export async function lerMotivosDePerdaHL(token: string, locationId: string) {
+  let erro: string | null = null;
+  for (const versao of [VERSAO, "2021-04-15", "2023-02-21"]) {
+    try {
+      const r = await get<Record<string, unknown>>("opportunities/lost-reason", token, { locationId, limit: "200" }, versao);
+      const lista = (Object.values(r).find((v) => Array.isArray(v)) ?? []) as { id?: string; _id?: string; name?: string }[];
+      const mapa = new Map(lista.filter((m) => (m.id || m._id) && m.name).map((m) => [String(m.id ?? m._id), String(m.name)]));
+      return { mapa, erro: null };
+    } catch (e) {
+      erro = e instanceof Error ? e.message : String(e);
+    }
   }
+  return { mapa: new Map<string, string>(), erro };
 }
 
 type CampoValor = { id: string; fieldValue?: unknown; value?: unknown; fieldValueString?: string; fieldValueNumber?: number };
@@ -69,6 +84,7 @@ export type OportunidadeApi = {
   updatedAt?: string;
   lastStatusChangeAt?: string | null;
   lostReasonId?: string | null;
+  lostReason?: string | { id?: string; name?: string } | null;
   contactId?: string;
   contact?: { id?: string; name?: string; source?: string | null } | null;
   customFields?: CampoValor[];
