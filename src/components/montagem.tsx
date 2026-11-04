@@ -174,9 +174,9 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
     <div className="space-y-6">
       <EsbocoIA
         clienteId={clienteId} conta={conta} pedidoInicial={pedidoInicial}
-        onPronto={(obj, c) => {
-          setModeloId(`zero:${obj}`);
-          setConfig((atual) => normalizarConfig({ ...c, locais: atual.locais.length ? atual.locais : c.locais }));
+        onPronto={(e) => {
+          setModeloId(`zero:${e.objetivo}`);
+          setConfig((atual) => normalizarConfig({ ...e.config, locais: atual.locais.length ? atual.locais : e.config.locais }));
         }}
       />
       <section className="grid gap-3 rounded-2xl border border-borda bg-superficie p-4 md:grid-cols-2">

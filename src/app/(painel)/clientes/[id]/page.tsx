@@ -111,7 +111,10 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
             Gerar relatório
           </Link>
           <Link href={`${base}/montar`} className="inline-flex min-h-[42px] items-center rounded-[10px] bg-destaque px-4 text-sm font-semibold text-white">
-            + Montar campanha
+            + Campanha Meta
+          </Link>
+          <Link href={`${base}/montar-google`} className="inline-flex min-h-[42px] items-center rounded-[10px] border border-destaque px-4 text-sm font-semibold text-destaque hover:bg-destaque-bg">
+            + Campanha Google
           </Link>
         </div>
       </header>

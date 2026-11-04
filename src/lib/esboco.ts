@@ -3,6 +3,7 @@ import { db } from "./db";
 import { buscarInteresses } from "./meta-montar";
 import { tokenParaBusca } from "./token-busca";
 import { perguntarIA } from "./ia";
+import { CONFIG_GOOGLE_PADRAO, LIMITES, normalizarGoogle, type ConfigGoogle, type PalavraChave } from "./modelos-google";
 import { CONJUNTO_PADRAO, CTAS, configDoZero, OBJETIVOS, type ConfigMeta, type ConjuntoMeta, type Interesse, type ObjetivoMeta } from "./modelos";
 
 // Esboço de campanha com IA: a partir de uma frase ("formulário para loja de celulares"), a IA escolhe objetivo,
@@ -17,6 +18,7 @@ type RespostaIA = {
   descricao?: string;
   cta?: string;
   observacoes?: string;
+  nome?: string;
 };
 
 const SISTEMA = `Você é um gestor de tráfego sênior no Brasil e monta campanhas no Meta Ads (Facebook/Instagram) para negócios locais.
@@ -33,7 +35,8 @@ A partir do pedido, monte o esboço de UMA campanha e responda SÓ com um JSON n
   "titulos": ["4 variações de título"],
   "descricao": "descrição curta",
   "cta": "botão",
-  "observacoes": "1 a 2 frases com dicas para o gestor (ex.: criativo sugerido)"
+  "observacoes": "1 a 2 frases com dicas para o gestor (ex.: criativo sugerido)",
+  "nome": "nome curto para salvar como modelo (ex.: Celulares – WhatsApp)"
 }
 
 Regras:
@@ -69,20 +72,27 @@ async function emLotes<T, R>(itens: T[], n: number, f: (x: T) => Promise<R>) {
   return saida;
 }
 
-export type Esboco = { objetivo: ObjetivoMeta; config: ConfigMeta; naoEncontrados: string[]; observacoes: string };
+export type Esboco = { objetivo: ObjetivoMeta; config: ConfigMeta; naoEncontrados: string[]; observacoes: string; nome: string };
 
-/** Monta o esboço (nada é publicado: ele só preenche a tela de montagem). */
-export async function esbocarCampanha(clienteId: string, pedido: string, contaId?: string | null): Promise<Esboco> {
+/** Contexto do pedido: o cliente (quando há) e o pedido do gestor. */
+async function contextoDo(clienteId: string | null, pedido: string) {
+  if (!clienteId) return `Pedido do gestor (é um MODELO reutilizável, sem cliente específico): ${pedido}`;
   const { data: cliente } = await db().from("clientes").select("nome, nicho").eq("id", clienteId).maybeSingle();
   if (!cliente) throw new Error("Cliente não encontrado.");
-  const contexto = `Cliente: ${cliente.nome}${cliente.nicho ? ` (nicho cadastrado: ${cliente.nicho})` : ""}\nPedido do gestor: ${pedido}`;
-  const bruto = await perguntarIA(SISTEMA, contexto, { json: true, temperatura: 0.7 });
-  let r: RespostaIA;
+  return `Cliente: ${cliente.nome}${cliente.nicho ? ` (nicho cadastrado: ${cliente.nicho})` : ""}\nPedido do gestor: ${pedido}`;
+}
+
+const lerJson = <T>(bruto: string): T => {
   try {
-    r = JSON.parse(bruto.replace(/^```(?:json)?\s*|\s*```$/g, "")) as RespostaIA;
+    return JSON.parse(bruto.replace(/^```(?:json)?\s*|\s*```$/g, "")) as T;
   } catch {
     throw new Error("A IA respondeu num formato inesperado. Tente de novo.");
   }
+};
+
+/** Monta o esboço (nada é publicado: ele só preenche a tela de montagem). */
+export async function esbocarCampanha(clienteId: string | null, pedido: string, contaId?: string | null): Promise<Esboco> {
+  const r = lerJson<RespostaIA>(await perguntarIA(SISTEMA, await contextoDo(clienteId, pedido), { json: true, temperatura: 0.7 }));
 
   const objetivo: ObjetivoMeta = r.objetivo && r.objetivo in OBJETIVOS ? (r.objetivo as ObjetivoMeta) : "formulario";
   const base = configDoZero(objetivo);
@@ -120,6 +130,7 @@ export async function esbocarCampanha(clienteId: string, pedido: string, contaId
   return {
     objetivo,
     naoEncontrados,
+    nome: corta(r.nome, 80),
     observacoes: corta(r.observacoes, 400) + (!token ? " (Não deu para buscar os interesses no Meta: conecte o Facebook em Configurações.)" : ""),
     config: {
       ...base,
@@ -131,4 +142,66 @@ export async function esbocarCampanha(clienteId: string, pedido: string, contaId
       cta: r.cta && ctas.includes(r.cta) ? r.cta : ctas[0],
     },
   };
+}
+
+// ---------- Google Ads (Pesquisa) ----------
+
+const SISTEMA_GOOGLE = `Você é um gestor de tráfego sênior no Brasil e monta campanhas de PESQUISA no Google Ads para negócios locais.
+A partir do pedido, monte o esboço de UMA campanha e responda SÓ com um JSON neste formato:
+{
+  "nome": "nome curto para salvar como modelo (ex.: Celulares – Pesquisa)",
+  "orcamentoDiario": número em reais, ou null se o pedido não falar,
+  "lance": "maximizar_conversoes" | "maximizar_cliques",
+  "grupos": [ { "nome": "tema do grupo", "palavras": [ { "texto": "palavra-chave", "correspondencia": "FRASE" | "EXATA" | "AMPLA" } ] } ],
+  "negativas": ["termos negativos"],
+  "titulos": ["12 a 15 títulos"],
+  "descricoes": ["4 descrições"],
+  "caminho1": "palavra do link",
+  "caminho2": "palavra do link",
+  "observacoes": "1 a 2 frases com dicas para o gestor"
+}
+
+Regras:
+- 2 a 4 grupos por tema/intenção (ex.: produto, serviço, "perto de mim", marca/modelo). 6 a 15 palavras por grupo.
+- Palavras com intenção de compra/contratação, do jeito que as pessoas pesquisam no Brasil (ex.: "loja de celular", "iphone 13 usado", "conserto de celular perto de mim"). Use principalmente FRASE e EXATA; AMPLA só para termos bem específicos.
+- Negativas: 10 a 25 termos que trazem clique sem intenção de compra (grátis, vagas, emprego, curso, como fazer, pdf, download, mercado livre, olx, conserto se a loja só vende etc.), coerentes com o nicho.
+- Títulos com NO MÁXIMO 30 caracteres (conte os espaços); variados: produto + benefício, cidade/região, diferencial, chamada para ação, prova. Pelo menos 3 citando a palavra principal.
+- Descrições com NO MÁXIMO 90 caracteres, com benefício e chamada para ação.
+- Não invente preço, desconto ou dado que o pedido não trouxe; use [colchetes] para o gestor completar.
+- caminho1 e caminho2: até 15 caracteres, sem espaço (ex.: "celulares", "iphone").
+- Português do Brasil.`;
+
+type RespostaGoogle = {
+  nome?: string; orcamentoDiario?: number | null; lance?: string;
+  grupos?: { nome?: string; palavras?: ({ texto?: string; correspondencia?: string } | string)[] }[];
+  negativas?: string[]; titulos?: string[]; descricoes?: string[]; caminho1?: string; caminho2?: string; observacoes?: string;
+};
+
+export type EsbocoGoogle = { config: ConfigGoogle; nome: string; observacoes: string; cortados: number };
+
+/** Esboço de campanha de Pesquisa: grupos, palavras-chave, negativas e anúncio responsivo. Nada é publicado. */
+export async function esbocarGoogle(clienteId: string | null, pedido: string): Promise<EsbocoGoogle> {
+  const r = lerJson<RespostaGoogle>(await perguntarIA(SISTEMA_GOOGLE, await contextoDo(clienteId, pedido), { json: true, temperatura: 0.7 }));
+  const textos = (v: unknown, limite: number, max: number) => {
+    const todos = (Array.isArray(v) ? v : []).map((t) => String(t ?? "").replace(/\s+/g, " ").trim()).filter(Boolean);
+    const ok = [...new Set(todos.filter((t) => t.length <= limite))].slice(0, max);
+    return { ok, cortados: todos.length - ok.length };
+  };
+  const t = textos(r.titulos, LIMITES.titulo, LIMITES.titulos);
+  const d = textos(r.descricoes, LIMITES.descricao, LIMITES.descricoes);
+  const caminho = (x: unknown) => String(x ?? "").replace(/\s+/g, "-").slice(0, LIMITES.caminho);
+  const config = normalizarGoogle({
+    ...CONFIG_GOOGLE_PADRAO,
+    orcamentoDiario: Number(r.orcamentoDiario) > 0 ? Math.round(Number(r.orcamentoDiario)) : CONFIG_GOOGLE_PADRAO.orcamentoDiario,
+    lance: r.lance === "maximizar_cliques" ? "maximizar_cliques" : "maximizar_conversoes",
+    grupos: (r.grupos ?? []).slice(0, 6).map((g) => ({
+      nome: corta(g.nome, 60) || "Grupo",
+      palavras: (g.palavras ?? []).slice(0, 25).map((p) => (typeof p === "string" ? { texto: p, correspondencia: "FRASE" } : p)) as PalavraChave[],
+    })),
+    negativas: (r.negativas ?? []).slice(0, 40).map((x) => ({ texto: String(x), correspondencia: "AMPLA" as const })),
+    titulos: t.ok.length >= 3 ? t.ok : [...t.ok, "", "", ""].slice(0, 3),
+    descricoes: d.ok.length >= 2 ? d.ok : [...d.ok, "", ""].slice(0, 2),
+    caminho1: caminho(r.caminho1), caminho2: caminho(r.caminho2),
+  });
+  return { config, nome: corta(r.nome, 80), observacoes: corta(r.observacoes, 400), cortados: t.cortados + d.cortados };
 }

@@ -8,12 +8,25 @@ import { EditorFormulario } from "@/components/editor-formulario";
 import { Aviso } from "@/components/ui";
 import { BotaoEnviar } from "@/components/botao";
 import { EditorModelo } from "@/components/editor-modelo";
+import { EditorModeloGoogle } from "@/components/editor-modelo-google";
+import { normalizarGoogle, type ConfigGoogle } from "@/lib/modelos-google";
 import { criarModelosPadrao, excluirModelo } from "../../acoes-modelos";
 
 const botao = "rounded-lg border border-borda bg-superficie px-3 py-1.5 text-sm hover:border-destaque";
 
 export default async function Modelos({ searchParams }: PageProps<"/modelos">) {
-  const { msg, editar, editarForm } = (await searchParams) as { msg?: string; editar?: string; editarForm?: string };
+  const { msg, editar, editarForm, plataforma } = (await searchParams) as { msg?: string; editar?: string; editarForm?: string; plataforma?: string };
+  const abas = (
+    <nav aria-label="Plataforma" className="flex gap-1 border-b border-borda text-sm">
+      {[["meta", "Meta Ads"], ["google", "Google Ads"]].map(([k, r]) => (
+        <Link key={k} href={k === "google" ? "/modelos?plataforma=google" : "/modelos"} aria-current={(plataforma === "google") === (k === "google") ? "page" : undefined}
+          className={`px-3.5 py-2.5 ${(plataforma === "google") === (k === "google") ? "border-b-2 border-destaque font-bold" : "text-texto-2 hover:text-texto"}`}>
+          {r}
+        </Link>
+      ))}
+    </nav>
+  );
+  if (plataforma === "google") return <ModelosGoogle msg={msg} editar={editar} abas={abas} />;
   const { data, error } = await db().from("modelos").select("*").eq("plataforma", "meta").order("nome");
   const todos = (data ?? []) as (Modelo | ModeloFormulario & { objetivo: string })[];
   const modelos = (todos.filter((m) => m.objetivo !== OBJETIVO_FORMULARIO) as Modelo[]).map((m) => ({ ...m, config: normalizarConfig(m.config) }));
@@ -31,6 +44,7 @@ export default async function Modelos({ searchParams }: PageProps<"/modelos">) {
           revisar no Gerenciador. Para usar, abra o cliente e clique em “Montar campanha”.
         </p>
       </div>
+      {abas}
       {msg && <Aviso>{msg}</Aviso>}
       {error && <Aviso>Rode o SQL 0013 no Supabase para usar os modelos ({error.message}).</Aviso>}
 
@@ -111,6 +125,55 @@ export default async function Modelos({ searchParams }: PageProps<"/modelos">) {
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+/** Aba do Google Ads: modelos de campanha de Pesquisa. */
+async function ModelosGoogle({ msg, editar, abas }: { msg?: string; editar?: string; abas: React.ReactNode }) {
+  const { data, error } = await db().from("modelos").select("*").eq("plataforma", "google").order("nome");
+  const modelos = ((data ?? []) as { id: string; nome: string; config: Partial<ConfigGoogle> }[]).map((m) => ({ ...m, config: normalizarGoogle(m.config) }));
+  const emEdicao = modelos.find((m) => m.id === editar);
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold">Modelos de campanha</h1>
+        <p className="text-sm text-texto-2">
+          Campanhas de <b>Pesquisa</b> do Google: grupos, palavras-chave, negativas e anúncio responsivo. Tudo é criado
+          <b> pausado</b>. Para usar, abra o cliente e clique em “Montar campanha” → Google.
+        </p>
+      </div>
+      {abas}
+      {msg && <Aviso>{msg}</Aviso>}
+      {error && <Aviso>Erro ao ler os modelos: {error.message}</Aviso>}
+      {modelos.length > 0 && (
+        <ul className="divide-y divide-borda rounded-2xl border border-borda bg-superficie text-sm">
+          {modelos.map((m) => (
+            <li key={m.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">{m.nome}</div>
+                <div className="text-xs text-texto-3">
+                  {m.config.grupos.length} grupo(s) · {m.config.grupos.reduce((t, g) => t + g.palavras.length, 0)} palavra(s)-chave ·{" "}
+                  {m.config.negativas.length} negativa(s) · {m.config.titulos.filter(Boolean).length} títulos
+                </div>
+              </div>
+              <Link href={`/modelos?plataforma=google&editar=${m.id}#editor`} className={botao}>Editar</Link>
+              <form action={excluirModelo}>
+                <input type="hidden" name="id" value={m.id} />
+                <input type="hidden" name="plataforma" value="google" />
+                <BotaoEnviar className={`${botao} text-critico`} aguardando="…">Excluir</BotaoEnviar>
+              </form>
+            </li>
+          ))}
+        </ul>
+      )}
+      <section id="editor" className="space-y-2">
+        <div className="flex items-center gap-2">
+          <h2 className="font-medium">{emEdicao ? `Editar: ${emEdicao.nome}` : "Novo modelo"}</h2>
+          {emEdicao && <Link href="/modelos?plataforma=google#editor" className="text-sm text-destaque underline">criar um novo</Link>}
+        </div>
+        <EditorModeloGoogle key={emEdicao?.id ?? "novo"} modelo={emEdicao} />
+      </section>
     </div>
   );
 }

@@ -15,7 +15,9 @@ export async function POST(request: NextRequest) {
     // "monta uma campanha de formulário para a Loja X": vai para a montagem, que faz o esboço com a IA
     if (pedido && ehPedidoDeCampanha(pedido)) {
       const id = clienteId ?? (await clienteDoPedido(pedido)).id;
-      return NextResponse.json({ ir: `/clientes/${id}/montar?pedido=${encodeURIComponent(pedido)}` });
+      // Google: "pesquisa", "palavras-chave", "google"; senão, Meta
+      const google = /google|pesquisa|palavras?[- ]chave|adwords/i.test(pedido);
+      return NextResponse.json({ ir: `/clientes/${id}/${google ? "montar-google" : "montar"}?pedido=${encodeURIComponent(pedido)}` });
     }
     if (pedido) return NextResponse.json(await analisarPedido(pedido, clienteId));
     if (!clienteId) return NextResponse.json({ erro: "Escreva o pedido (ex.: “últimos 14 dias da Loja X”)." }, { status: 400 });

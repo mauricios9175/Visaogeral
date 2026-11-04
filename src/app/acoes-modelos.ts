@@ -3,10 +3,31 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { normalizarGoogle, OBJETIVO_GOOGLE } from "@/lib/modelos-google";
 import { MODELOS_PADRAO, normalizarConfig, normalizarFormulario, OBJETIVO_FORMULARIO, OBJETIVOS, type ObjetivoMeta } from "@/lib/modelos";
 
-function aviso(msg: string): never {
-  redirect(`/modelos?msg=${encodeURIComponent(msg)}`);
+function aviso(msg: string, extra = ""): never {
+  redirect(`/modelos?msg=${encodeURIComponent(msg)}${extra}`);
+}
+
+/** Salva um modelo de campanha de Pesquisa do Google. */
+export async function salvarModeloGoogle(form: FormData) {
+  const id = String(form.get("id") ?? "");
+  const nome = String(form.get("nome") ?? "").trim();
+  const volta = "&plataforma=google";
+  if (!nome) aviso("Dê um nome ao modelo.", volta);
+  let config;
+  try {
+    config = normalizarGoogle(JSON.parse(String(form.get("config") ?? "{}")));
+  } catch {
+    aviso("Não foi possível ler o modelo.", volta);
+  }
+  const dados = { nome, objetivo: OBJETIVO_GOOGLE, plataforma: "google", config, atualizado_em: new Date().toISOString() };
+  const { error } = id
+    ? await db().from("modelos").update(dados).eq("id", id)
+    : await db().from("modelos").insert(dados);
+  revalidatePath("/modelos");
+  aviso(error ? `Erro: ${error.message}` : "Modelo do Google salvo.", volta);
 }
 
 export async function salvarModelo(form: FormData) {
@@ -32,7 +53,7 @@ export async function salvarModelo(form: FormData) {
 export async function excluirModelo(form: FormData) {
   await db().from("modelos").delete().eq("id", String(form.get("id")));
   revalidatePath("/modelos");
-  aviso("Modelo excluído.");
+  aviso("Modelo excluído.", form.get("plataforma") === "google" ? "&plataforma=google" : "");
 }
 
 /** Cria os três modelos prontos (formulário, WhatsApp e site) para começar. */

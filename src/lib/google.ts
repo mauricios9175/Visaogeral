@@ -336,3 +336,130 @@ export async function orcamentoDaConta(acesso: string, customerId: string, login
     return null; // conta sem faturamento configurado ou usuário sem acesso ao faturamento
   }
 }
+
+// ---------- Montagem de campanha de Pesquisa ----------
+
+export type LocalSugerido = { id: string; nome: string; tipo: string };
+
+const TIPO_LOCAL: Record<string, string> = {
+  City: "Cidade", State: "Estado", Region: "Região", Country: "País", Municipality: "Município",
+  Neighborhood: "Bairro", "Postal Code": "CEP", "Metro area": "Região metropolitana", District: "Distrito",
+};
+
+/** Busca de locais do Google (cidades, estados…), no Brasil primeiro. */
+export async function buscarLocaisGoogle(acesso: string, loginCustomerId: string | null, q: string): Promise<LocalSugerido[]> {
+  const pedir = async (countryCode?: string) => {
+    const res = await fetch(`${BASE}/geoTargetConstants:suggest`, {
+      method: "POST", headers: cabecalhos(acesso, loginCustomerId), cache: "no-store",
+      body: JSON.stringify({ locale: "pt", ...(countryCode && { countryCode }), locationNames: { names: [q] } }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw erroGoogle(json, res.status);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return ((json.geoTargetConstantSuggestions ?? []) as any[]).map((s) => s.geoTargetConstant).filter((g) => g?.status !== "REMOVAL_PLANNED");
+  };
+  const [br, mundo] = await Promise.all([pedir("BR"), pedir().catch(() => [])]);
+  const vistos = new Set<string>();
+  return [...br, ...mundo]
+    .filter((g) => g?.id && !vistos.has(String(g.id)) && !!vistos.add(String(g.id)))
+    .slice(0, 20)
+    .map((g) => ({ id: String(g.id), nome: String(g.canonicalName ?? g.name), tipo: TIPO_LOCAL[g.targetType] ?? g.targetType ?? "" }));
+}
+
+export type CampanhaPesquisa = {
+  nome: string;
+  orcamentoDiario: number;
+  lance: "maximizar_conversoes" | "cpa_desejado" | "maximizar_cliques";
+  cpaDesejado: number;
+  parceiros: boolean;
+  locais: string[];          // ids de geoTargetConstant
+  negativas: { texto: string; tipo: "BROAD" | "PHRASE" | "EXACT" }[];
+  grupos: {
+    nome: string;
+    palavras: { texto: string; tipo: "BROAD" | "PHRASE" | "EXACT" }[];
+    sufixoUrl: string;
+    titulos: string[];
+    descricoes: string[];
+  }[];
+  url: string;
+  caminho1: string;
+  caminho2: string;
+};
+
+const IDIOMA_PORTUGUES = "languageConstants/1014";
+const micros = (reais: number) => String(Math.round(reais * 100) * 10_000);
+
+/**
+ * Cria a campanha de Pesquisa inteira numa chamada só (orçamento, campanha PAUSADA, locais, idioma, negativas,
+ * grupos, palavras-chave e um anúncio responsivo por grupo). É tudo ou nada: se algo falhar, nada fica criado.
+ */
+export async function criarCampanhaPesquisa(acesso: string, customerId: string, loginCustomerId: string | null, c: CampanhaPesquisa) {
+  const cid = `customers/${customerId}`;
+  const orc = `${cid}/campaignBudgets/-1`;
+  const camp = `${cid}/campaigns/-2`;
+  const lance = c.lance === "maximizar_cliques" ? { targetSpend: {} }
+    : c.lance === "cpa_desejado" && c.cpaDesejado > 0 ? { maximizeConversions: { targetCpaMicros: micros(c.cpaDesejado) } }
+    : { maximizeConversions: {} };
+  const ops: object[] = [
+    { campaignBudgetOperation: { create: { resourceName: orc, name: `${c.nome} (${Date.now()})`, amountMicros: micros(c.orcamentoDiario), deliveryMethod: "STANDARD", explicitlyShared: false } } },
+    {
+      campaignOperation: {
+        create: {
+          resourceName: camp, name: c.nome, status: "PAUSED", advertisingChannelType: "SEARCH", campaignBudget: orc,
+          networkSettings: { targetGoogleSearch: true, targetSearchNetwork: c.parceiros, targetContentNetwork: false, targetPartnerSearchNetwork: false },
+          // só quem está (ou costuma estar) no local, não quem "se interessa" por ele
+          geoTargetTypeSetting: { positiveGeoTargetType: "PRESENCE", negativeGeoTargetType: "PRESENCE" },
+          containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
+          ...lance,
+        },
+      },
+    },
+    { campaignCriterionOperation: { create: { campaign: camp, language: { languageConstant: IDIOMA_PORTUGUES } } } },
+    ...c.locais.map((id) => ({ campaignCriterionOperation: { create: { campaign: camp, location: { geoTargetConstant: `geoTargetConstants/${id}` } } } })),
+    ...c.negativas.map((n) => ({ campaignCriterionOperation: { create: { campaign: camp, negative: true, keyword: { text: n.texto, matchType: n.tipo } } } })),
+  ];
+  c.grupos.forEach((g, i) => {
+    const grupo = `${cid}/adGroups/-${10 + i}`;
+    ops.push({ adGroupOperation: { create: { resourceName: grupo, name: g.nome, campaign: camp, status: "ENABLED", type: "SEARCH_STANDARD", ...(g.sufixoUrl && { finalUrlSuffix: g.sufixoUrl }) } } });
+    for (const p of g.palavras) ops.push({ adGroupCriterionOperation: { create: { adGroup: grupo, status: "ENABLED", keyword: { text: p.texto, matchType: p.tipo } } } });
+    ops.push({
+      adGroupAdOperation: {
+        create: {
+          adGroup: grupo, status: "ENABLED",
+          ad: {
+            finalUrls: [c.url],
+            responsiveSearchAd: {
+              headlines: g.titulos.map((text) => ({ text })),
+              descriptions: g.descricoes.map((text) => ({ text })),
+              ...(c.caminho1 && { path1: c.caminho1 }), ...(c.caminho1 && c.caminho2 && { path2: c.caminho2 }),
+            },
+          },
+        },
+      },
+    });
+  });
+
+  const res = await fetch(`${BASE}/${cid}/googleAds:mutate`, {
+    method: "POST", headers: cabecalhos(acesso, loginCustomerId), cache: "no-store",
+    body: JSON.stringify({ mutateOperations: ops }), signal: AbortSignal.timeout(90_000),
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    // erro com o texto que o Google recusou (ex.: política de anúncios, palavra-chave inválida)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const erros = ((Array.isArray(json) ? json[0] : json)?.error?.details?.[0]?.errors ?? []) as any[];
+    const lista = erros.slice(0, 4).map((e) => {
+      const valor = e.trigger?.stringValue ? ` (“${e.trigger.stringValue}”)` : "";
+      const pol = e.details?.policyViolationDetails?.externalPolicyName ?? e.details?.policyFindingDetails?.policyTopicEntries?.[0]?.topic;
+      return `${e.message}${valor}${pol ? ` — política: ${pol}` : ""}`;
+    });
+    const e = lista.length ? new Error(lista.join(" · ")) : erroGoogle(json, res.status);
+    if (/DEVELOPER_TOKEN_NOT_APPROVED|ACCESS_LEVEL|USER_PERMISSION_DENIED/i.test(e.message)) {
+      throw new Error(`O Google recusou a criação: ${e.message}. Pode ser o nível de acesso da API (Explorer só lê; peça o Basic) ou o seu usuário nessa conta ser só leitura.`);
+    }
+    throw e;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const criada = ((json.mutateOperationResponses ?? []) as any[]).find((r) => r.campaignResult)?.campaignResult?.resourceName as string | undefined;
+  return { campanhaId: criada?.split("/").pop() ?? null };
+}
