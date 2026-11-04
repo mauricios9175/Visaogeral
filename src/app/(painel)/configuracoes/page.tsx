@@ -1,4 +1,7 @@
 import { db, EMPRESA_PADRAO, type Cliente, type ContaAnuncio, type TokenMeta } from "@/lib/db";
+import { salvarManualIA } from "@/app/acoes-ia";
+import { lerManual } from "@/lib/sugestoes";
+import { MANUAL_PADRAO } from "@/lib/manual-ia";
 import { diasAte, dinheiro, quandoFoi } from "@/lib/formato";
 import { AvisosCelular } from "@/components/avisos-celular";
 import { Aviso } from "@/components/ui";
@@ -22,6 +25,7 @@ const botao = "rounded-lg border border-borda bg-superficie px-3 py-1.5 text-sm 
 const botaoPrimario = "rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium text-white";
 
 export default async function Configuracoes({ searchParams }: PageProps<"/configuracoes">) {
+  const manualIA = await lerManual().catch(() => MANUAL_PADRAO);
   const { msg, mbusca, gbusca, gacesso, gcanceladas: canceladasParam } =
     (await searchParams) as { msg?: string; mbusca?: string; gbusca?: string; gacesso?: string; gcanceladas?: string };
   const gcanceladas = canceladasParam === "1";
@@ -122,6 +126,24 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
     <div className="space-y-8">
       <h1 className="text-[26px] font-extrabold tracking-tight">Configurações</h1>
       {msg && <Aviso>{msg}</Aviso>}
+
+      <section id="manual-ia" className="space-y-3 rounded-2xl border border-borda bg-superficie p-4 lg:p-5">
+        <div>
+          <h2 className="font-bold">✦ Manual da IA (sugestões de otimização)</h2>
+          <p className="text-sm text-texto-2">
+            As regras que a IA segue para sugerir mudanças nas campanhas, com as suas palavras. Vale para todos os clientes;
+            os números de cada cliente (tolerância, qualificação mínima, observações) ficam na tela do cliente.
+          </p>
+        </div>
+        <form action={salvarManualIA} className="space-y-2">
+          <textarea name="texto" rows={16} defaultValue={manualIA}
+            className="w-full rounded-xl border border-borda bg-fundo p-3 font-mono text-[13px] leading-relaxed" />
+          <div className="flex flex-wrap gap-2">
+            <button className="min-h-10 rounded-[10px] bg-destaque px-4 text-sm font-semibold text-white">Salvar manual</button>
+            <button name="restaurar" value="1" className="min-h-10 rounded-[10px] border border-borda px-4 text-sm text-texto-2 hover:text-texto">Voltar ao padrão</button>
+          </div>
+        </form>
+      </section>
 
       <section id="avisos" className="space-y-3 rounded-2xl border border-borda bg-superficie p-4 lg:p-5">
         <div>

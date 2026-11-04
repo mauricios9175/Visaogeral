@@ -8,6 +8,9 @@ import { decimal, dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
 import { Aviso, Kpi, SeletorPeriodo, SeloStatus, TiposResultado, Variacao, Voltar } from "@/components/ui";
 import { BarrasDiarias } from "@/components/graficos";
 import { AnaliseIA } from "@/components/analise-ia";
+import { SugestoesIA } from "@/components/sugestoes-ia";
+import { lerParams } from "@/lib/sugestoes";
+import { PARAMS_PADRAO } from "@/lib/manual-ia";
 import { AcoesRapidas, type DestinosDuplicar } from "@/components/acoes-rapidas";
 import { db } from "@/lib/db";
 import { chaveDe, gastoPorNome, NIVEL_DA_UTM } from "@/lib/agrupar";
@@ -44,6 +47,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
     detalheGoogle(id, atual, anterior).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })),
     db().from("acoes_log").select("*").eq("cliente_id", id).order("criado_em", { ascending: false }).limit(30),
   ]);
+  const paramsIA = await lerParams(id).catch(() => PARAMS_PADRAO);
   if (!d) notFound();
   // Em produção o Next esconde a mensagem do erro; mostramos aqui para facilitar o diagnóstico.
   if ("erroGeral" in d) {
@@ -118,6 +122,10 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
       {busca.msg && <Aviso>{busca.msg}</Aviso>}
 
       <AnaliseIA clienteId={id} periodo={{ p: atual.chave, ...(atual.chave === "livre" ? { de: atual.desde, ate: atual.ate } : {}) }} rotuloPeriodo={atual.rotulo} />
+      <SugestoesIA
+        clienteId={id} params={paramsIA} cplMeta={c.cpl_meta} voltar={voltar} rotuloPeriodo={atual.rotulo}
+        periodo={{ p: atual.chave, ...(atual.chave === "livre" ? { de: atual.desde, ate: atual.ate } : {}) }}
+      />
 
       {g && <ResumoGeral meta={a} metaAnt={b} g={g} metaCpl={c.cpl_meta} />}
 
