@@ -4,6 +4,7 @@ import { alertasContas, resumoClientes, resumoCrm, type AlertaConta, type Numero
 import { db, EMPRESA_PADRAO } from "@/lib/db";
 import type { NumerosGoogle } from "@/lib/consultas-google";
 import { dataCurta, dinheiro, inteiro, quandoFoi } from "@/lib/formato";
+import { AnaliseIA } from "@/components/analise-ia";
 import { Aviso, Kpi, SeletorPeriodo, SeloSaude, Tendencia, TiposResultado, Variacao } from "@/components/ui";
 
 
@@ -119,6 +120,8 @@ export default async function VisaoGeral({ searchParams }: PageProps<"/">) {
           <Link href="/configuracoes" className="text-destaque underline">Configurações</Link>.
         </Aviso>
       )}
+
+      <AnaliseIA />
 
       <PainelAlertas alertas={alertas} linkTodos={empresa ? `/alertas?empresa=${encodeURIComponent(empresa)}` : "/alertas"} />
 

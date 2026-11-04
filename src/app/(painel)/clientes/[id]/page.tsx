@@ -7,6 +7,7 @@ import { formatarIdGoogle } from "@/lib/google";
 import { decimal, dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
 import { Aviso, Kpi, SeletorPeriodo, SeloStatus, TiposResultado, Variacao, Voltar } from "@/components/ui";
 import { BarrasDiarias } from "@/components/graficos";
+import { AnaliseIA } from "@/components/analise-ia";
 import { AcoesRapidas, type DestinosDuplicar } from "@/components/acoes-rapidas";
 import { db } from "@/lib/db";
 import { chaveDe, gastoPorNome, NIVEL_DA_UTM } from "@/lib/agrupar";
@@ -115,6 +116,8 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
         <SeletorPeriodo atual={atual} base={base} />
       </div>
       {busca.msg && <Aviso>{busca.msg}</Aviso>}
+
+      <AnaliseIA clienteId={id} periodo={{ p: atual.chave, ...(atual.chave === "livre" ? { de: atual.desde, ate: atual.ate } : {}) }} rotuloPeriodo={atual.rotulo} />
 
       {g && <ResumoGeral meta={a} metaAnt={b} g={g} metaCpl={c.cpl_meta} />}
 

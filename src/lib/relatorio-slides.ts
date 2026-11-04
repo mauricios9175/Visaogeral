@@ -455,7 +455,7 @@ function mudancaDeOrcamento(extra?: string) {
  * Ações do período para o slide "Ações realizadas": o histórico de atividades do Meta (o que foi feito pelo
  * Gerenciador ou pelo painel) e as ações do painel no Google. Repetições do mesmo item no mesmo dia viram uma linha.
  */
-async function acoesDoPeriodo(clienteId: string, desde: string, ate: string) {
+export async function acoesDoPeriodo(clienteId: string, desde: string, ate: string) {
   const banco = db();
   const [{ data: log }, { data: contas }] = await Promise.all([
     banco.from("acoes_log").select("criado_em, acao, nivel, objeto_nome, depois, plataforma")
