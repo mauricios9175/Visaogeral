@@ -1,4 +1,5 @@
 import { Voltar } from "@/components/ui";
+import { Ordenavel } from "@/components/ordenavel";
 import { notFound } from "next/navigation";
 import { db, type ContaAnuncio } from "@/lib/db";
 import { diasAtras } from "@/lib/datas";
@@ -57,7 +58,7 @@ export default async function Diagnostico({ params }: PageProps<"/clientes/[id]/
           )}
           {!erro && !linhas.length && <p className="px-4 py-2 text-sm text-texto-3">Sem veiculação no período.</p>}
           {!!linhas.length && (
-            <table className="w-full min-w-[1000px] text-sm">
+            <Ordenavel><table className="w-full min-w-[1000px] text-sm">
               <thead className="text-left text-xs text-texto-3">
                 <tr>
                   <th className="px-4 py-2 font-normal">Campanha / conjunto</th>
@@ -106,7 +107,7 @@ export default async function Diagnostico({ params }: PageProps<"/clientes/[id]/
                   );
                 })}
               </tbody>
-            </table>
+            </table></Ordenavel>
           )}
         </section>
       ))}

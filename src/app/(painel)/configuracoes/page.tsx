@@ -1,4 +1,5 @@
 import { db, EMPRESA_PADRAO, type Cliente, type ContaAnuncio, type TokenMeta } from "@/lib/db";
+import { Ordenavel } from "@/components/ordenavel";
 import { salvarManualIA } from "@/app/acoes-ia";
 import { lerManual } from "@/lib/sugestoes";
 import { MANUAL_GOOGLE_PADRAO, MANUAL_PADRAO } from "@/lib/manual-ia";
@@ -66,7 +67,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
   const opcoesCliente = (atual: string | null) => listaClientes.filter((c) => c.ativo || c.id === atual);
   const tabelaMeta = (lista: ContaAnuncio[]) => (
           <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
-            <table className="w-full min-w-[900px] text-sm">
+            <Ordenavel><table className="w-full min-w-[900px] text-sm">
               <thead className="text-left text-xs text-texto-3">
                 <tr>
                   <th className="px-4 py-2 font-normal">Conta</th>
@@ -119,7 +120,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></Ordenavel>
           </div>
   );
   const temTokenBm = Boolean(process.env.META_SYSTEM_USER_TOKEN);
@@ -382,7 +383,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
           const mostradas = filtradas.slice(0, 30);
           const tabela = (lista: ContaGoogle[], comSync: boolean) => (
             <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
-              <table className="w-full min-w-[900px] text-sm">
+              <Ordenavel><table className="w-full min-w-[900px] text-sm">
                 <thead className="text-left text-xs text-texto-3">
                   <tr>
                     <th className="px-4 py-2 font-normal">Conta</th>
@@ -428,7 +429,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></Ordenavel>
             </div>
           );
           return (

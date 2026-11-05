@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Ordenavel } from "@/components/ordenavel";
 import { notFound } from "next/navigation";
 import { resolverPeriodo } from "@/lib/datas";
 import { detalheCliente, detalheCrm, DIMENSOES_UTM, somarGeral, type DimensaoUtm, type LinhaTabela } from "@/lib/consultas";
@@ -468,7 +469,7 @@ function Tabela({ linhas, meta, nivel, voltar, abrir, destinos }: {
   })();
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <Ordenavel><table className="w-full text-sm">
         <thead className="text-left text-xs text-texto-3">
           <tr>
             <th className="px-4 py-2 font-normal">Nome</th>
@@ -476,7 +477,7 @@ function Tabela({ linhas, meta, nivel, voltar, abrir, destinos }: {
               <th key={h} className="px-3 py-2 text-right font-normal">{h}</th>
             ))}
             {nivel !== "anuncios" && <th className="px-3 py-2 text-right font-normal">Orçamento</th>}
-            <th className="px-3 py-2 text-right font-normal">Ações</th>
+            <th data-sem-ordem className="px-3 py-2 text-right font-normal">Ações</th>
           </tr>
         </thead>
         <tbody className="num">
@@ -529,7 +530,7 @@ function Tabela({ linhas, meta, nivel, voltar, abrir, destinos }: {
             );
           })}
         </tbody>
-      </table>
+      </table></Ordenavel>
       <p className="px-4 py-2 text-xs text-texto-3">
         Em vermelho: custo por resultado 30% acima {meta ? "da meta" : "da média do cliente"}, ou gasto sem resultado.
       </p>
@@ -607,7 +608,7 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, pe
 
       {crm.porFonte.length > 0 && (
         <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
-          <table className="w-full text-sm">
+          <Ordenavel><table className="w-full text-sm">
             <thead className="text-left text-xs text-texto-3">
               <tr>
                 <th className="px-4 py-2 font-normal">Fonte no CRM</th>
@@ -631,7 +632,7 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, pe
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></Ordenavel>
         </div>
       )}
 
@@ -645,7 +646,7 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, pe
             Negócios do período ({crm.negocios.length})
           </summary>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1080px] text-sm">
+            <Ordenavel><table className="w-full min-w-[1080px] text-sm">
               <thead className="text-left text-xs text-texto-3">
                 <tr>
                   {["Negócio", "Criado", "Fonte", "UTM", "Funil · etapa", "Status", "Valor", "Orçamento / campos"].map((h) => (
@@ -683,7 +684,7 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, pe
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></Ordenavel>
           </div>
         </details>
       )}
@@ -732,7 +733,7 @@ function TabelaUtm({ crm, dimensao, base, qs, periodo, gastos }: {
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <Ordenavel><table className="w-full text-sm">
             <thead className="text-left text-xs text-texto-3">
               <tr>
                 <th className="px-4 py-2 font-normal">{DIMENSOES_UTM.find((d) => d.chave === dimensao)!.rotulo}</th>
@@ -763,7 +764,7 @@ function TabelaUtm({ crm, dimensao, base, qs, periodo, gastos }: {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></Ordenavel>
           <p className="px-4 py-2 text-xs text-texto-3">
             UTMs do primeiro acesso do lead. Leads: criados no período. Vendas: ganhas no período (o lead pode ter entrado antes).
             {nivel && <> Investido: gasto no período do {nivel === "anuncio" ? "anúncio" : nivel} com o mesmo nome da UTM (— quando nenhum nome bate).</>}

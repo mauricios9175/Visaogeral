@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Ordenavel } from "@/components/ordenavel";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
@@ -178,7 +179,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
           </div>
 
           <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
-            <table className="w-full min-w-[1100px] text-sm">
+            <Ordenavel><table className="w-full min-w-[1100px] text-sm">
               <thead className="text-left text-xs text-texto-3">
                 <tr className="border-b border-borda">
                   <th className="px-3 py-2 font-normal">Mês</th>
@@ -203,7 +204,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
                   <LinhaMes m={{ ...total, mes: anoSel ? `Total ${anoSel}` : visiveis.length < 12 ? `Total (${visiveis.length} meses)` : "Total 12 meses" }} passos={passos} temValorPropostas={temValorPropostas} temGoogle={temGoogle} total />
                 </tfoot>
               )}
-            </table>
+            </table></Ordenavel>
           </div>
 
           <Conferir clienteId={id} meses={visiveis.map((m) => m.mes)} mes={conferir && /^\d{4}-\d{2}-01$/.test(conferir) ? conferir : null} />
@@ -230,7 +231,7 @@ function LinhaMes({ m, passos, temValorPropostas, temGoogle, total }: { m: MesCo
   const marca = (c: string) => (m.ajustado.includes(c) ? <span className="text-destaque" title="corrigido à mão">*</span> : null);
   return (
     <tr className={total ? "" : "border-b border-borda/60 last:border-0"}>
-      <td className="px-3 py-2 capitalize">
+      <td className="px-3 py-2 capitalize" data-valor={total ? undefined : m.mes}>
         {total ? m.mes : nomeMes(m.mes)}
         {m.observacao && <span className="block text-xs normal-case text-texto-3">{m.observacao}</span>}
       </td>
@@ -329,7 +330,7 @@ async function Conferir({ clienteId, meses, mes }: { clienteId: string; meses: s
             </h3>
             <p className="text-xs text-texto-3">Venda = oportunidade com status <b>ganho</b>, no mês em que foi marcada como ganha.</p>
             <div className="mt-1 overflow-x-auto">
-              <table className={tabela}>
+              <Ordenavel><table className={tabela}>
                 <thead><tr><th className={th}>Nome</th><th className={th}>Funil · etapa</th><th className={th}>Fonte</th><th className={`${th} text-right`}>Valor</th><th className={th}>Entrou</th><th className={th}>Ganha em</th><th className={th}>Na conta?</th></tr></thead>
                 <tbody>
                   {c.vendas.map((v, i) => (
@@ -345,14 +346,14 @@ async function Conferir({ clienteId, meses, mes }: { clienteId: string; meses: s
                   ))}
                   {!c.vendas.length && <tr><td className={td} colSpan={7}>Nenhuma oportunidade marcada como ganha neste mês.</td></tr>}
                 </tbody>
-              </table>
+              </table></Ordenavel>
             </div>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             {([["Leads que entraram, por funil", c.leadsPorFunil], ["Leads que entraram, por fonte", c.leadsPorFonte], ["Vendas do mês, por funil", c.vendasPorFunil]] as const).map(([titulo, linhas]) => (
               <div key={titulo}>
                 <h3 className="text-sm font-medium">{titulo} <span className="font-normal text-texto-3">({linhas.reduce((t, l) => t + l.total, 0)} no total)</span></h3>
-                <table className={tabela}>
+                <Ordenavel><table className={tabela}>
                   <thead><tr><th className={th}></th><th className={`${th} text-right`}>Criados</th><th className={`${th} text-right`}>Na conta</th></tr></thead>
                   <tbody>
                     {linhas.slice(0, 15).map((l) => (
@@ -363,7 +364,7 @@ async function Conferir({ clienteId, meses, mes }: { clienteId: string; meses: s
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></Ordenavel>
               </div>
             ))}
           </div>

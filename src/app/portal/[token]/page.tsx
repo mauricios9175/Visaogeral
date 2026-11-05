@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Ordenavel } from "@/components/ordenavel";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { resolverPeriodo } from "@/lib/datas";
@@ -24,7 +25,7 @@ function TabelaCampanhas({ titulo, linhas }: { titulo: string; linhas: { nome: s
     <section className="overflow-hidden rounded-2xl border border-borda bg-superficie">
       <h2 className="px-4 pt-4 text-[15px] font-bold lg:px-5">{titulo}</h2>
       <div className="overflow-x-auto">
-        <table className="mt-3 w-full min-w-[520px] text-sm">
+        <Ordenavel><table className="mt-3 w-full min-w-[520px] text-sm">
           <thead className="text-left text-xs text-texto-3">
             <tr className="border-b border-borda">
               <th className="px-4 py-2 font-medium lg:px-5">Campanha</th>
@@ -46,7 +47,7 @@ function TabelaCampanhas({ titulo, linhas }: { titulo: string; linhas: { nome: s
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></Ordenavel>
       </div>
     </section>
   );
