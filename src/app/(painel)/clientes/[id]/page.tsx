@@ -10,7 +10,8 @@ import { BarrasDiarias } from "@/components/graficos";
 import { AnaliseIA } from "@/components/analise-ia";
 import { SugestoesIA, type AcaoPainel } from "@/components/sugestoes-ia";
 import { LinkCliente } from "@/components/link-cliente";
-import { NIVEIS_GOOGLE, TabelaNivelGoogle } from "@/components/google-niveis";
+import { TabelaGoogle, type LinhaTabelaGoogle } from "@/components/google-niveis";
+import { NIVEIS_GOOGLE } from "@/lib/niveis-google";
 import { AdicionarPalavras, NovoAnuncioGoogle } from "@/components/criar-google";
 import { nivelGoogle, type LinhaNivelGoogle } from "@/lib/google";
 import { acessoGoogle } from "@/lib/acesso-google";
@@ -300,7 +301,6 @@ const CANAL: Record<string, string> = {
   MULTI_CHANNEL: "App",
 };
 
-const STATUS_GOOGLE: Record<string, string> = { ENABLED: "ACTIVE", PAUSED: "PAUSED", REMOVED: "DELETED" };
 
 type NavGoogle = { clienteId: string; base: string; qs: string; desde: string; ate: string; nivel?: string; campanha?: string; grupo?: string };
 
@@ -330,6 +330,18 @@ async function SecaoGoogle({ g, nav }: { g: NonNullable<Awaited<ReturnType<typeo
   }
   const contaDaCampanha = new Map(g.campanhas.map((c) => [c.id, c.contaId]));
   const nomeGrupo = grupoSel ? linhas.find((l) => l.grupoId === grupoSel)?.grupo ?? null : null;
+  // linhas prontas para a tabela (link para descer um nível e a conta de cada uma, para as ações)
+  const linhasTabela: LinhaTabelaGoogle[] = nivel === "campanhas"
+    ? g.campanhas.map((c) => ({
+        id: c.id, nome: c.nome, status: c.status ?? "", campanhaId: c.id, campanha: c.nome, grupoId: null, grupo: null,
+        gasto: c.gasto, cliques: c.cliques, impressoes: c.impressoes, conversoes: c.conversoes, valor: c.valor,
+        href: url("grupos", c.id), conta: c.contaId, orcamento: c.orcamento, compartilhado: c.compartilhado,
+        info: [c.canal ? CANAL[c.canal] ?? c.canal : null, g.contas.length > 1 ? c.conta : null].filter(Boolean).join(" · "),
+      }))
+    : linhas.map((l) => ({
+        ...l, conta: contaDaCampanha.get(l.campanhaId),
+        href: nivel === "grupos" && l.grupoId ? url("anuncios", l.campanhaId, l.grupoId) : null,
+      }));
   // grupo aberto: conta e campanha dele (para criar palavras-chave e anúncios)
   const campanhaDoGrupo = grupoSel ? linhas.find((l) => l.grupoId === grupoSel)?.campanhaId ?? campSel?.id ?? null : null;
   const contaDoGrupo = campanhaDoGrupo ? contaDaCampanha.get(campanhaDoGrupo) ?? null : null;
@@ -414,67 +426,14 @@ async function SecaoGoogle({ g, nav }: { g: NonNullable<Awaited<ReturnType<typeo
       )}
       {errosNivel.map((e, i) => <Aviso key={i}>Erro ao ler o Google Ads: {e}</Aviso>)}
 
-      <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
-        {nivel !== "campanhas" ? (
-          <TabelaNivelGoogle
-            nivel={nivel} linhas={linhas} voltar={aqui} cpaMedio={x.cpa}
-            contaDe={(c) => contaDaCampanha.get(c)}
-            link={(l) => nivel === "grupos" && l.grupoId ? url("anuncios", l.campanhaId, l.grupoId) : null}
-          />
-        ) : g.campanhas.length === 0 ? (
-          <p className="p-4 text-sm text-texto-3">Sem dados do Google no período.</p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="text-left text-xs text-texto-3">
-              <tr>
-                <th className="px-4 py-2 font-normal">Campanha</th>
-                {["Investido", "Conversões", "Custo/conv.", "Cliques", "CTR", "CPC", "Orçamento", "Ações"].map((h) => (
-                  <th key={h} className="px-3 py-2 text-right font-normal">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="num">
-              {g.campanhas.map((l) => {
-                const semConv = l.gasto > 0 && l.conversoes === 0;
-                const caro = x.cpa != null && l.cpa != null && l.cpa > x.cpa * 1.3;
-                return (
-                  <tr key={l.id} className="border-t border-borda">
-                    <td className="max-w-80 px-4 py-2">
-                      <div className="flex items-center gap-2">
-                        <SeloStatus status={l.status ? STATUS_GOOGLE[l.status] ?? l.status : null} />
-                        <Link href={url("grupos", l.id)} className="truncate hover:text-destaque hover:underline" title={`${l.nome} (ver grupos)`}>{l.nome}</Link>
-                      </div>
-                      <div className="truncate text-xs text-texto-3">
-                        {[l.canal ? CANAL[l.canal] ?? l.canal : null, g.contas.length > 1 ? l.conta : null].filter(Boolean).join(" · ")}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-right">{dinheiro(l.gasto)}</td>
-                    <td className="px-3 py-2 text-right">{decimal(l.conversoes).replace(/,00$/, "")}</td>
-                    <td className={`px-3 py-2 text-right ${semConv || caro ? "text-critico" : ""}`}>
-                      {semConv ? "sem conversão" : dinheiro(l.cpa)}
-                    </td>
-                    <td className="px-3 py-2 text-right">{inteiro(l.cliques)}</td>
-                    <td className="px-3 py-2 text-right">{pct(l.ctr)}</td>
-                    <td className="px-3 py-2 text-right">{dinheiro(l.cpc)}</td>
-                    <td className="px-3 py-2 text-right text-texto-2">
-                      {l.orcamento != null ? `${dinheiro(l.orcamento)}/dia` : "—"}
-                      {l.compartilhado && <div className="text-[11px] text-texto-3">compartilhado</div>}
-                    </td>
-                    <td className="px-3 py-2">
-                      <AcoesRapidas
-                        plataforma="google" contaId={l.contaId} objetoId={l.id} nivel="campanha" nome={l.nome}
-                        ativo={l.status === "ENABLED" ? true : l.status === "PAUSED" ? false : null}
-                        orcamento={l.orcamento != null ? { valor: l.orcamento, tipo: "dia" } : null}
-                        mostrarOrcamento={l.status !== "REMOVED"} voltar={aqui}
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+      <div className="rounded-2xl border border-borda bg-superficie">
+        <TabelaGoogle nivel={nivel} voltar={aqui} cpaMedio={x.cpa} linhas={linhasTabela} />
       </div>
+      <p className="text-xs text-texto-3">
+        Conversões = coluna “Conversões” do Google Ads (só as ações marcadas como principais). Em vermelho: custo por
+        conversão 30% acima da média do cliente no Google, ou gasto sem conversão. Clique na campanha para ver os grupos e no
+        grupo para ver anúncios, palavras-chave e termos (lidos na hora no Google).
+      </p>
       {nivel === "palavras" && grupoSel && contaDoGrupo && (
         <AdicionarPalavras tipo="palavras" contaId={contaDoGrupo} objetoId={grupoSel} nome={nomeGrupo ?? grupoSel} voltar={aqui} />
       )}
@@ -490,11 +449,6 @@ async function SecaoGoogle({ g, nav }: { g: NonNullable<Awaited<ReturnType<typeo
       {(nivel === "palavras" || nivel === "anuncios") && !grupoSel && (
         <p className="text-xs text-texto-3">Para adicionar palavras-chave ou criar um anúncio, abra um grupo (aba Grupos de anúncios → clique no grupo).</p>
       )}
-      <p className="text-xs text-texto-3">
-        Conversões = coluna “Conversões” do Google Ads (só as ações marcadas como principais). Em vermelho: custo por
-        conversão 30% acima da média do cliente no Google, ou gasto sem conversão. Clique na campanha para ver os grupos e no
-        grupo para ver anúncios, palavras-chave e termos (lidos na hora no Google).
-      </p>
     </section>
   );
 }

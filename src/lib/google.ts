@@ -729,7 +729,7 @@ export async function nivelGoogle(
     const ls = await q(`SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, ad_group_criterion.criterion_id, ad_group_criterion.status,
         ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.quality_info.quality_score, ${METRICAS}
       FROM keyword_view WHERE ${onde}${porGrupo} AND ad_group_criterion.status != 'REMOVED' AND metrics.impressions > 0
-      ORDER BY metrics.cost_micros DESC LIMIT 300`);
+      ORDER BY metrics.cost_micros DESC LIMIT 2000`);
     const CORR: Record<string, string> = { EXACT: "Exata", PHRASE: "Frase", BROAD: "Ampla" };
     return ls.map((l: any) => ({
       id: `${l.adGroup?.id}~${l.adGroupCriterion?.criterionId}`, nome: l.adGroupCriterion?.keyword?.text ?? "", status: l.adGroupCriterion?.status ?? "",
@@ -740,7 +740,7 @@ export async function nivelGoogle(
   }
   const ls = await q(`SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, search_term_view.search_term, search_term_view.status, ${METRICAS}
     FROM search_term_view WHERE ${onde}${porGrupo} AND metrics.impressions > 0
-    ORDER BY metrics.cost_micros DESC LIMIT 300`);
+    ORDER BY metrics.cost_micros DESC LIMIT 2000`);
   const SIT: Record<string, string> = { ADDED: "já é palavra-chave", EXCLUDED: "negativado", ADDED_EXCLUDED: "adicionado e negativado", NONE: "" };
   return ls.map((l: any, i: number) => ({
     id: `t${i}`, nome: l.searchTermView?.searchTerm ?? "", status: "", campanhaId: String(l.campaign?.id), campanha: l.campaign?.name ?? "",
