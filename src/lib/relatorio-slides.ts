@@ -343,6 +343,7 @@ export type PedidoRelatorio = {
   qualificacoes: DimensaoUtm[]; // um slide de qualificação por UTM escolhida; vazio = sem qualificação
   agrupar: boolean; // junta públicos e anúncios de mesmo nome (duplicados para teste)
   motivosPerda?: boolean; // slide com os motivos de perda do CRM (opcional)
+  vendas?: boolean;       // slide com o gráfico de vendas realizadas e valor das vendas (padrão: sim, se houver CRM)
 };
 
 /** Rótulo do período: "Outubro/2026" para mês fechado, senão "01/10 a 15/10/2026". */
@@ -711,6 +712,28 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
           ]),
           { larguraPrimeira: nomesPassos.length > 2 ? 0.27 : 0.34 }));
       });
+    }
+  }
+  // Vendas realizadas: o marcador {{grafico:vendas}} do modelo; nos modelos sem ele, uma cópia do slide de
+  // oportunidades (fica logo depois dele). Dois gráficos lado a lado: número de vendas e valor das vendas.
+  const graficoVendas = (pg: string, c: Caixa): Req[] => {
+    const metade = { ...c, w: c.w * 0.49 };
+    return [
+      ...grafico(pg, metade, "Vendas realizadas", categorias, [{ nome: `Nº ${funil.vendas}`, valores: valoresDe((m) => m.vendas, vendas) }], (v) => inteiro(v)),
+      ...grafico(pg, { ...metade, x: c.x + c.w * 0.51 }, "Valor das vendas", categorias, [{ nome: "Valor", valores: valoresDe((m) => m.faturamento, faturamento) }], moedaCurta),
+    ];
+  };
+  const querVendas = (p.vendas ?? true) && temCrm;
+  if (marcadores.has("grafico:vendas")) preencher("grafico:vendas", querVendas ? graficoVendas : null);
+  else if (querVendas) {
+    const mo = marcadores.get("grafico:oportunidades");
+    if (mo) {
+      const slide = novoId("vd"), elemento = novoId("vde");
+      // antes de preencher o original (que apaga o marcador copiado)
+      reqs.push({ duplicateObject: { objectId: mo.slide, objectIds: { [mo.slide]: slide, [mo.elemento]: elemento } } });
+      reqs.push({ replaceAllText: { containsText: { text: "oportunidades", matchCase: false }, replaceText: "vendas", pageObjectIds: [slide] } });
+      reqs.push({ deleteObject: { objectId: elemento } });
+      reqs.push(...graficoVendas(slide, mo.caixa));
     }
   }
   preencher("grafico:oportunidades", (pg, c) => grafico(pg, c, "Evolução das oportunidades", categorias, [

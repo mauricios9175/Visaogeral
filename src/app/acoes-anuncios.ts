@@ -7,11 +7,12 @@ import {
   duplicarAnuncio, duplicarCampanha, duplicarConjunto, linkGerenciador, mudarOrcamento, mudarStatus, orcamentoDe,
 } from "@/lib/meta";
 import {
-  adicionarPalavraGoogle, mudarOrcamentoGoogle, mudarStatusAnuncioGoogle, mudarStatusCampanhaGoogle, mudarStatusGrupoGoogle,
+  adicionarNegativasGoogle, adicionarPalavraGoogle, adicionarPalavrasGoogle, criarAnuncioGoogle, mudarOrcamentoGoogle, mudarStatusAnuncioGoogle, mudarStatusCampanhaGoogle, mudarStatusGrupoGoogle,
   mudarStatusGrupoRecursosGoogle, mudarStatusPalavraGoogle,
   negativarNaCampanhaGoogle, orcamentoCampanhaGoogle, tokenDeAcesso,
 } from "@/lib/google";
 import { tokenDaConta } from "@/lib/sync";
+import { CORRESPONDENCIAS, lerPalavras, LIMITES } from "@/lib/modelos-google";
 import { dinheiro } from "@/lib/formato";
 
 // Ações rápidas: pausar, ativar e mudar orçamento no Meta e no Google, sem abrir o Gerenciador.
@@ -205,6 +206,60 @@ export async function acaoGoogleDetalhe(form: FormData) {
   } catch (e) {
     await registrar({ ...base, acao }, e);
     msg = `Não foi possível concluir no Google: ${e instanceof Error ? e.message : e}`;
+  }
+  revalidatePath("/", "layout");
+  voltar(form, msg);
+}
+
+/**
+ * Google, criação em grupo/campanha que já existe: palavras-chave (várias), negativas (várias) ou um anúncio responsivo.
+ *   tipo=palavras  → objeto_id = grupo, texto = uma por linha (sem nada = ampla, "frase", [exata])
+ *   tipo=negativas → objeto_id = campanha, texto = idem
+ *   tipo=anuncio   → objeto_id = grupo, anuncio = JSON { titulos, descricoes, url, caminho1, caminho2, ativo }
+ */
+export async function criarNoGoogle(form: FormData) {
+  const contaId = String(form.get("conta_id"));
+  const tipo = String(form.get("tipo"));
+  const objetoId = String(form.get("objeto_id"));
+  const nome = String(form.get("nome") ?? "") || null;
+  const banco = db();
+  const { data: conta } = await banco.from("contas_google").select("id, cliente_id, login_customer_id, token_id").eq("id", contaId).maybeSingle();
+  if (!conta) voltar(form, "Conta do Google não encontrada.");
+  const base = { plataforma: "google" as const, cliente_id: conta.cliente_id, conta_id: contaId, objeto_id: objetoId, objeto_nome: nome };
+  let msg: string;
+  try {
+    const { data: t } = await banco.from("tokens_google").select("refresh_token").eq("id", conta.token_id ?? "").maybeSingle();
+    if (!t) throw new Error("Sem login do Google para esta conta (reconecte em Configurações).");
+    const acesso = await tokenDeAcesso(t.refresh_token);
+    const lc = conta.login_customer_id;
+    if (tipo === "palavras" || tipo === "negativas") {
+      const palavras = lerPalavras(String(form.get("texto") ?? "")).slice(0, 200)
+        .map((p) => ({ texto: p.texto, tipo: CORRESPONDENCIAS[p.correspondencia].api }));
+      if (!palavras.length) throw new Error("Escreva pelo menos uma palavra.");
+      if (tipo === "palavras") await adicionarPalavrasGoogle(acesso, contaId, lc, objetoId, palavras);
+      else await adicionarNegativasGoogle(acesso, contaId, lc, objetoId, palavras);
+      const lista = palavras.map((p) => (p.tipo === "EXACT" ? `[${p.texto}]` : p.tipo === "PHRASE" ? `"${p.texto}"` : p.texto)).join(", ");
+      await registrar({ ...base, nivel: tipo === "palavras" ? "grupo" : "campanha", acao: tipo === "palavras" ? "adicionar" : "negativar", depois: lista.slice(0, 500) });
+      msg = `${palavras.length} ${tipo === "palavras" ? "palavra(s)-chave adicionada(s) no grupo" : "negativa(s) adicionada(s) na campanha"} “${nome ?? objetoId}”.`;
+    } else if (tipo === "anuncio") {
+      const a = JSON.parse(String(form.get("anuncio") ?? "{}")) as { titulos?: string[]; descricoes?: string[]; url?: string; caminho1?: string; caminho2?: string; ativo?: boolean };
+      const titulos = (a.titulos ?? []).map((x) => x.trim()).filter(Boolean).slice(0, LIMITES.titulos);
+      const descricoes = (a.descricoes ?? []).map((x) => x.trim()).filter(Boolean).slice(0, LIMITES.descricoes);
+      if (titulos.length < 3 || descricoes.length < 2) throw new Error("O anúncio precisa de pelo menos 3 títulos e 2 descrições.");
+      const longo = titulos.find((x) => x.length > LIMITES.titulo) ?? descricoes.find((x) => x.length > LIMITES.descricao);
+      if (longo) throw new Error(`Texto acima do limite: “${longo}”.`);
+      if (!/^https?:\/\/\S+\.\S+/.test(a.url ?? "")) throw new Error("Informe o link do site (https://…).");
+      await criarAnuncioGoogle(acesso, contaId, lc, objetoId, {
+        titulos, descricoes, url: a.url!.trim(), caminho1: (a.caminho1 ?? "").trim().slice(0, 15), caminho2: (a.caminho2 ?? "").trim().slice(0, 15), ativo: !!a.ativo,
+      });
+      await registrar({ ...base, nivel: "grupo", acao: "montar", depois: `anúncio novo ${a.ativo ? "ativo" : "pausado"}` });
+      msg = `Anúncio novo criado ${a.ativo ? "e ATIVO" : "PAUSADO"} no grupo “${nome ?? objetoId}”${a.ativo ? "" : " (ative quando quiser)"}.`;
+    } else {
+      throw new Error("Tipo desconhecido.");
+    }
+  } catch (e) {
+    await registrar({ ...base, nivel: "grupo", acao: tipo }, e);
+    msg = `Não foi possível criar no Google: ${e instanceof Error ? e.message : e}`;
   }
   revalidatePath("/", "layout");
   voltar(form, msg);

@@ -136,6 +136,10 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
                 Juntar públicos e anúncios de mesmo nome
               </label>
               <label className="flex items-center gap-2 self-center text-sm">
+                <input type="checkbox" name="vendas" defaultChecked />
+                Slide de vendas realizadas <span className="text-xs text-texto-3">(número e valor, mês a mês)</span>
+              </label>
+              <label className="flex items-center gap-2 self-center text-sm">
                 <input type="checkbox" name="motivos_perda" />
                 Slide de motivos de perda <span className="text-xs text-texto-3">(do CRM)</span>
               </label>

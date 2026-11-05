@@ -668,7 +668,7 @@ export type LinhaNivelGoogle = Metr & {
   id: string; nome: string; status: string; campanhaId: string; campanha: string; grupoId: string | null; grupo: string | null;
   tipo?: string;                       // grupo: "Pesquisa" | "Performance Max"; anúncio: tipo do anúncio
   detalhe?: string;                    // anúncio: títulos; palavra: correspondência; termo: situação
-  extra?: { qualidade?: number | null; forca?: string | null; aprovacao?: string | null; correspondencia?: string; termoStatus?: string };
+  extra?: { qualidade?: number | null; forca?: string | null; aprovacao?: string | null; correspondencia?: string; termoStatus?: string; url?: string };
 };
 
 const metr = (l: { metrics?: Record<string, unknown> }): Metr => ({
@@ -721,7 +721,7 @@ export async function nivelGoogle(
         campanhaId: String(l.campaign?.id), campanha: l.campaign?.name ?? "", grupoId: String(l.adGroup?.id), grupo: l.adGroup?.name ?? "",
         tipo: ad.type === "RESPONSIVE_SEARCH_AD" ? "Responsivo de pesquisa" : String(ad.type ?? "").toLowerCase().replace(/_/g, " "),
         detalhe: [titulos.length ? `${titulos.length} títulos` : "", (ad.finalUrls ?? [])[0] ?? ""].filter(Boolean).join(" · "),
-        extra: { forca: l.adGroupAd?.adStrength ?? null, aprovacao: l.adGroupAd?.policySummary?.approvalStatus ?? null }, ...metr(l),
+        extra: { forca: l.adGroupAd?.adStrength ?? null, aprovacao: l.adGroupAd?.policySummary?.approvalStatus ?? null, url: (ad.finalUrls ?? [])[0] ?? "" }, ...metr(l),
       };
     }).sort((a: LinhaNivelGoogle, b: LinhaNivelGoogle) => b.gasto - a.gasto);
   }
@@ -762,4 +762,56 @@ export async function mudarStatusGrupoRecursosGoogle(acesso: string, customerId:
   await mutar(acesso, customerId, loginCustomerId, "assetGroups", {
     update: { resourceName: `customers/${customerId}/assetGroups/${id}`, status: ativo ? "ENABLED" : "PAUSED" }, updateMask: "status",
   });
+}
+
+// ---------- Criar palavras-chave, negativas e anúncios em grupos que já existem ----------
+
+/** Várias operações do mesmo recurso numa chamada só (tudo ou nada). */
+async function mutarVarios(acesso: string, customerId: string, loginCustomerId: string | null, recurso: string, operacoes: object[]) {
+  if (!operacoes.length) return;
+  const res = await fetch(`${BASE}/customers/${customerId}/${recurso}:mutate`, {
+    method: "POST", headers: cabecalhos(acesso, loginCustomerId), cache: "no-store",
+    body: JSON.stringify({ operations: operacoes }),
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const erros = ((Array.isArray(json) ? json[0] : json)?.error?.details?.[0]?.errors ?? []) as any[];
+    const lista = erros.slice(0, 4).map((e) => `${e.message}${e.trigger?.stringValue ? ` (“${e.trigger.stringValue}”)` : ""}`);
+    throw lista.length ? new Error(lista.join(" · ")) : erroGoogle(json, res.status);
+  }
+}
+
+type Tipo = "EXACT" | "PHRASE" | "BROAD";
+
+/** Palavras-chave novas num grupo. */
+export async function adicionarPalavrasGoogle(acesso: string, customerId: string, loginCustomerId: string | null, grupoId: string, palavras: { texto: string; tipo: Tipo }[]) {
+  await mutarVarios(acesso, customerId, loginCustomerId, "adGroupCriteria", palavras.map((p) => ({
+    create: { adGroup: `customers/${customerId}/adGroups/${grupoId}`, status: "ENABLED", keyword: { text: p.texto, matchType: p.tipo } },
+  })));
+}
+
+/** Palavras negativas novas na campanha. */
+export async function adicionarNegativasGoogle(acesso: string, customerId: string, loginCustomerId: string | null, campanhaId: string, palavras: { texto: string; tipo: Tipo }[]) {
+  await mutarVarios(acesso, customerId, loginCustomerId, "campaignCriteria", palavras.map((p) => ({
+    create: { campaign: `customers/${customerId}/campaigns/${campanhaId}`, negative: true, keyword: { text: p.texto, matchType: p.tipo } },
+  })));
+}
+
+/** Anúncio responsivo de pesquisa novo num grupo (ativo ou pausado). */
+export async function criarAnuncioGoogle(acesso: string, customerId: string, loginCustomerId: string | null, grupoId: string, a: {
+  titulos: string[]; descricoes: string[]; url: string; caminho1: string; caminho2: string; ativo: boolean;
+}) {
+  await mutarVarios(acesso, customerId, loginCustomerId, "adGroupAds", [{
+    create: {
+      adGroup: `customers/${customerId}/adGroups/${grupoId}`, status: a.ativo ? "ENABLED" : "PAUSED",
+      ad: {
+        finalUrls: [a.url],
+        responsiveSearchAd: {
+          headlines: a.titulos.map((text) => ({ text })), descriptions: a.descricoes.map((text) => ({ text })),
+          ...(a.caminho1 && { path1: a.caminho1 }), ...(a.caminho1 && a.caminho2 && { path2: a.caminho2 }),
+        },
+      },
+    },
+  }]);
 }

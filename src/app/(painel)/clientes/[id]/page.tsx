@@ -11,6 +11,7 @@ import { AnaliseIA } from "@/components/analise-ia";
 import { SugestoesIA, type AcaoPainel } from "@/components/sugestoes-ia";
 import { LinkCliente } from "@/components/link-cliente";
 import { NIVEIS_GOOGLE, TabelaNivelGoogle } from "@/components/google-niveis";
+import { AdicionarPalavras, NovoAnuncioGoogle } from "@/components/criar-google";
 import { nivelGoogle, type LinhaNivelGoogle } from "@/lib/google";
 import { acessoGoogle } from "@/lib/acesso-google";
 import { linkDoCliente } from "@/lib/portal";
@@ -243,7 +244,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
       </div>
 
       {google && ("erro" in google ? <Aviso>Erro ao carregar o Google Ads: {google.erro}</Aviso> : <SecaoGoogle g={google} nav={{
-        base, qs: atual.qs, desde: atual.desde, ate: atual.ate, nivel: busca.gnivel, campanha: busca.gcampanha, grupo: busca.ggrupo,
+        clienteId: id, base, qs: atual.qs, desde: atual.desde, ate: atual.ate, nivel: busca.gnivel, campanha: busca.gcampanha, grupo: busca.ggrupo,
       }} />)}
 
       <SecaoCrm crm={crm} gasto={gastoTotal} gastoAnterior={gastoTotalAnterior} base={base} comGoogle={!!g}
@@ -301,7 +302,7 @@ const CANAL: Record<string, string> = {
 
 const STATUS_GOOGLE: Record<string, string> = { ENABLED: "ACTIVE", PAUSED: "PAUSED", REMOVED: "DELETED" };
 
-type NavGoogle = { base: string; qs: string; desde: string; ate: string; nivel?: string; campanha?: string; grupo?: string };
+type NavGoogle = { clienteId: string; base: string; qs: string; desde: string; ate: string; nivel?: string; campanha?: string; grupo?: string };
 
 async function SecaoGoogle({ g, nav }: { g: NonNullable<Awaited<ReturnType<typeof detalheGoogle>>>; nav: NavGoogle }) {
   const { atual: x, anterior: y } = g;
@@ -329,6 +330,18 @@ async function SecaoGoogle({ g, nav }: { g: NonNullable<Awaited<ReturnType<typeo
   }
   const contaDaCampanha = new Map(g.campanhas.map((c) => [c.id, c.contaId]));
   const nomeGrupo = grupoSel ? linhas.find((l) => l.grupoId === grupoSel)?.grupo ?? null : null;
+  // grupo aberto: conta e campanha dele (para criar palavras-chave e anúncios)
+  const campanhaDoGrupo = grupoSel ? linhas.find((l) => l.grupoId === grupoSel)?.campanhaId ?? campSel?.id ?? null : null;
+  const contaDoGrupo = campanhaDoGrupo ? contaDaCampanha.get(campanhaDoGrupo) ?? null : null;
+  // anúncio novo: as palavras-chave do grupo vão para a IA
+  let palavrasDoGrupo: string[] = [];
+  if (nivel === "anuncios" && grupoSel && contaDoGrupo) {
+    try {
+      const { acesso, conta } = await acessoGoogle(contaDoGrupo);
+      palavrasDoGrupo = (await nivelGoogle(acesso, contaDoGrupo, conta?.login_customer_id ?? null, "palavras", nav.desde, nav.ate, { grupoId: grupoSel }))
+        .map((l) => l.nome).filter(Boolean);
+    } catch { /* sem as palavras, a IA escreve pelo nome do grupo */ }
+  }
   const erros = g.contas.filter((c) => c.ultimo_erro);
   return (
     <section id="google" className="space-y-3">
@@ -462,6 +475,21 @@ async function SecaoGoogle({ g, nav }: { g: NonNullable<Awaited<ReturnType<typeo
           </table>
         )}
       </div>
+      {nivel === "palavras" && grupoSel && contaDoGrupo && (
+        <AdicionarPalavras tipo="palavras" contaId={contaDoGrupo} objetoId={grupoSel} nome={nomeGrupo ?? grupoSel} voltar={aqui} />
+      )}
+      {(nivel === "palavras" || nivel === "termos") && campSel && (
+        <AdicionarPalavras tipo="negativas" contaId={campSel.contaId} objetoId={campSel.id} nome={campSel.nome} voltar={aqui} />
+      )}
+      {nivel === "anuncios" && grupoSel && contaDoGrupo && (
+        <NovoAnuncioGoogle
+          clienteId={nav.clienteId} contaId={contaDoGrupo} grupoId={grupoSel} grupo={nomeGrupo ?? grupoSel} voltar={aqui}
+          palavras={palavrasDoGrupo} atuais={linhas.flatMap((l) => l.nome.split(" | "))} urlPadrao={linhas.find((l) => l.extra?.url)?.extra?.url ?? ""}
+        />
+      )}
+      {(nivel === "palavras" || nivel === "anuncios") && !grupoSel && (
+        <p className="text-xs text-texto-3">Para adicionar palavras-chave ou criar um anúncio, abra um grupo (aba Grupos de anúncios → clique no grupo).</p>
+      )}
       <p className="text-xs text-texto-3">
         Conversões = coluna “Conversões” do Google Ads (só as ações marcadas como principais). Em vermelho: custo por
         conversão 30% acima da média do cliente no Google, ou gasto sem conversão. Clique na campanha para ver os grupos e no

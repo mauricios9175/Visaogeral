@@ -242,3 +242,24 @@ export async function esbocarGoogle(clienteId: string | null, pedido: string): P
   });
   return { config, nome: corta(r.nome, 80), observacoes: corta(r.observacoes, 400), cortados };
 }
+
+// ---------- Anúncio novo para um grupo que já existe (Google) ----------
+
+const SISTEMA_ANUNCIO = `Você é um gestor de tráfego sênior no Brasil e escreve anúncios responsivos de pesquisa no Google Ads.
+Responda SÓ com um JSON: { "titulos": ["15 títulos"], "descricoes": ["4 descrições"], "caminho1": "palavra", "caminho2": "palavra" }
+Regras:
+- Títulos com NO MÁXIMO 30 caracteres (conte os espaços); descrições com NO MÁXIMO 90. Texto acima do limite é descartado.
+- Os títulos conversam com as palavras-chave do grupo: pelo menos 4 repetem a palavra principal; os outros variam (benefício, diferencial, região, chamada para ação, prova).
+- Se houver anúncios atuais, traga ângulos NOVOS (é para testar contra eles), sem repetir os mesmos títulos.
+- Não invente preço, desconto ou dado que não foi dado; use [colchetes] para o gestor completar. Português do Brasil.
+- caminho1/caminho2: até 15 caracteres, sem espaço.`;
+
+/** Títulos, descrições e caminhos de um anúncio novo para o grupo, a partir das palavras-chave dele. */
+export async function esbocarAnuncioGoogle(clienteId: string | null, grupo: string, palavras: string[], atuais: string[], pedido: string) {
+  const contexto = `${await contextoDo(clienteId, pedido || "anúncio novo para testar no grupo")}\nGrupo: ${grupo}\nPalavras-chave do grupo: ${palavras.slice(0, 40).join(", ") || "(não informadas)"}` +
+    (atuais.length ? `\nTítulos dos anúncios atuais: ${atuais.slice(0, 20).join(" | ")}` : "");
+  const r = lerJson<{ titulos?: string[]; descricoes?: string[]; caminho1?: string; caminho2?: string }>(await perguntarIA(SISTEMA_ANUNCIO, contexto, { json: true, temperatura: 0.8 }));
+  const ok = (v: unknown, lim: number, max: number) => [...new Set((Array.isArray(v) ? v : []).map((t) => String(t ?? "").replace(/\s+/g, " ").trim()).filter((t) => t && t.length <= lim))].slice(0, max);
+  const caminho = (x: unknown) => String(x ?? "").replace(/\s+/g, "-").slice(0, LIMITES.caminho);
+  return { titulos: ok(r.titulos, LIMITES.titulo, LIMITES.titulos), descricoes: ok(r.descricoes, LIMITES.descricao, LIMITES.descricoes), caminho1: caminho(r.caminho1), caminho2: caminho(r.caminho2) };
+}

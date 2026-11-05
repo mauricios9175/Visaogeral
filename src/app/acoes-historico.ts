@@ -75,7 +75,7 @@ export async function gerarRelatorioSlides(form: FormData) {
   const qualificacoes = ORDEM_QUALIFICACAO.filter((d) => escolhidas.includes(d));
   let msg: string;
   try {
-    const r = await gerarRelatorio({ clienteId, desde, ate, qualificacoes, agrupar: form.get("agrupar") === "on", motivosPerda: form.get("motivos_perda") === "on" });
+    const r = await gerarRelatorio({ clienteId, desde, ate, qualificacoes, agrupar: form.get("agrupar") === "on", motivosPerda: form.get("motivos_perda") === "on", vendas: form.get("vendas") === "on" });
     msg = `Relatório de ${r.periodo} pronto: ${r.link}`;
   } catch (e) {
     msg = `Erro ao gerar o relatório: ${e instanceof Error ? e.message : e}`;
