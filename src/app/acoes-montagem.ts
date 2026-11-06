@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db, type ContaAnuncio } from "@/lib/db";
 import { normalizarConfig, normalizarFormulario, OBJETIVO_FORMULARIO, type ConfigFormulario, type ConfigMeta, type ObjetivoMeta } from "@/lib/modelos";
-import { montarNoMeta } from "@/lib/meta-montar";
+import { lerDestinoMeta, montarNoMeta, type DestinoMeta } from "@/lib/meta-montar";
 import { linkGerenciador } from "@/lib/meta";
 import { tokenDaConta } from "@/lib/sync";
 import { apagar } from "@/lib/armazenamento";
@@ -18,6 +18,7 @@ type Payload = {
   formularioNovo?: Partial<ConfigFormulario>; // formulário criado na própria montagem (formulario = "novo")
   salvarComoModelo?: string;                  // nome para salvar esse formulário também como modelo
   salvarModeloComo?: string;                  // nome para salvar a campanha (config da montagem) como modelo
+  destino?: { campanha?: string; conjunto?: string } | null; // criar dentro de uma campanha ou de um conjunto que já existem
 };
 
 /** Cria campanha, conjunto e anúncios (tudo pausado) a partir do modelo. Se algo falhar no meio, desfaz o que criou. */
@@ -38,6 +39,20 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
   if (!token) return { ok: false, mensagem: "Sem token para esta conta (reconecte o Facebook em Configurações).", detalhes: [], link: null };
 
   const config = normalizarConfig(p.config);
+  // criar dentro do que já existe: confere no Meta que é desta conta e com o mesmo objetivo
+  let destino: DestinoMeta | null = null;
+  if (p.destino?.campanha || p.destino?.conjunto) {
+    try {
+      destino = await lerDestinoMeta(token, p.destino);
+    } catch (e) {
+      return { ok: false, mensagem: `Não consegui ler ${p.destino.conjunto ? "o conjunto" : "a campanha"} no Meta: ${e instanceof Error ? e.message : e}`, detalhes: [], link: null };
+    }
+    if (destino.contaId !== conta.id) return { ok: false, mensagem: "A campanha escolhida é de outra conta de anúncio.", detalhes: [], link: null };
+    if (destino.objetivo && destino.objetivo !== p.objetivo) {
+      return { ok: false, mensagem: `Essa ${destino.conjunto ? "campanha/conjunto" : "campanha"} é de ${destino.objetivo === "mensagens" ? "mensagens" : destino.objetivo === "site" ? "site" : "formulário"}: escolha o mesmo objetivo.`, detalhes: [], link: null };
+    }
+    if (!destino.objetivo && p.objetivo === "mensagens") return { ok: false, mensagem: "Essa campanha não é de mensagens (WhatsApp).", detalhes: [], link: null };
+  }
   // "modelo:<id>" = criar um formulário novo na página a partir do modelo de formulário
   let modeloFormulario: ConfigFormulario | null = null;
   if (p.objetivo === "formulario" && p.formulario === "novo") {
@@ -57,13 +72,14 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
     await banco.from("modelos").insert({ nome: p.salvarModeloComo, objetivo: p.objetivo, plataforma: "meta", config: { ...config, locais: [] } })
       .then(() => null, () => null);
   }
-  const registro = { plataforma: "meta", cliente_id: cliente.id, conta_id: conta.id, nivel: "campanha", acao: "montar" };
+  const registro = { plataforma: "meta", cliente_id: cliente.id, conta_id: conta.id, nivel: destino?.conjunto ? "conjunto" : "campanha", acao: "montar" };
   try {
     const r = await montarNoMeta({
       contaId: conta.id, token, clienteNome: cliente.nome, objetivo: p.objetivo, config,
       paginaId: p.pagina, instagramId: p.instagram || null,
       formularioId: modeloFormulario ? null : p.formulario || null, pixelId: p.pixel || null,
-      criativos: p.criativos, modeloFormulario, manterSemAnuncios: p.manterSemAnuncios !== false,
+      criativos: p.criativos, modeloFormulario, manterSemAnuncios: !destino?.conjunto && p.manterSemAnuncios !== false,
+      destino: destino && { campanhaId: destino.campanhaId, campanhaNome: destino.campanhaNome, orcamentoNaCampanha: destino.orcamentoNaCampanha, conjunto: destino.conjunto },
     });
     // lembra as escolhas deste cliente para a próxima montagem
     await banco.from("clientes").update({
@@ -76,6 +92,20 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
     }).then(() => null, () => null);
     await apagar(p.criativos.map((c) => c.caminho).filter(Boolean));
     revalidatePath(`/clientes/${cliente.id}`);
+    if (destino) {
+      const onde = destino.conjunto ? `no conjunto “${destino.conjunto.nome}”` : `na campanha “${destino.campanhaNome}”`;
+      return {
+        ok: r.anuncios > 0 || (!destino.conjunto && !p.criativos.length),
+        mensagem: destino.conjunto
+          ? `${r.anuncios} anúncio(s) novo(s) criado(s) PAUSADO(S) ${onde}.`
+          : `${r.conjuntos} conjunto(s) novo(s) criado(s) PAUSADO(S) ${onde}${r.anuncios ? `, com ${r.anuncios} anúncio(s)` : p.criativos.length ? ", mas o Meta não deixou criar os anúncios (motivo abaixo)" : ", sem anúncios"}.`,
+        detalhes: [
+          ...(r.formularioCriado ? [`Formulário novo criado na página (id ${r.formularioCriado}).`] : []),
+          ...r.falhas.map((f) => `⚠ ${f}`),
+        ],
+        link: linkGerenciador(conta.id, destino.conjunto ? "conjunto" : "campanha", destino.conjunto?.id ?? destino.campanhaId),
+      };
+    }
     return {
       ok: r.anuncios > 0 || !p.criativos.length,
       mensagem: r.anuncios
@@ -94,6 +124,9 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
     const msg = e instanceof Error ? e.message : String(e);
     await banco.from("acoes_log").insert({ ...registro, objeto_id: "-", objeto_nome: config.nomeCampanha, ok: false, erro: msg })
       .then(() => null, () => null);
-    return { ok: false, mensagem: "Não foi possível montar a campanha. Nada ficou criado no Meta.", detalhes: [msg], link: null };
+    return {
+      ok: false, link: null, detalhes: [msg],
+      mensagem: destino?.conjunto ? "Não foi possível criar os anúncios." : destino ? "Não foi possível criar os conjuntos. Nada novo ficou na campanha." : "Não foi possível montar a campanha. Nada ficou criado no Meta.",
+    };
   }
 }

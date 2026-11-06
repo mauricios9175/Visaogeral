@@ -211,6 +211,18 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
                 <span className="font-medium">{conjuntoSel.nome}</span>
               </>
             )}
+            <span className="ml-auto flex flex-wrap gap-1.5">
+              {campanhaSel && !conjuntoSel && (
+                <Link href={`${base}/montar?campanha=${campanhaSel.id}`} className="rounded-lg border border-destaque px-2.5 py-1 text-xs font-semibold text-destaque hover:bg-destaque-bg">
+                  + Novo conjunto nesta campanha
+                </Link>
+              )}
+              {conjuntoSel && (
+                <Link href={`${base}/montar?conjunto=${conjuntoSel.id}`} className="rounded-lg border border-destaque px-2.5 py-1 text-xs font-semibold text-destaque hover:bg-destaque-bg">
+                  + Novo anúncio neste conjunto
+                </Link>
+              )}
+            </span>
           </div>
         )}
         <div className="flex flex-wrap items-center gap-1 border-b border-borda p-2 text-sm">

@@ -137,18 +137,23 @@ const RAIOS = [0, 10, 15, 25, 40, 80];
  * Campos de campanha, público e anúncio do Meta. Usado no editor de modelos e na montagem.
  * `conta` (opcional) é usada nas buscas; sem ela, a busca usa qualquer login conectado.
  */
-export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = false }: {
+export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = false, parte = "tudo", orcamentoNaCampanha }: {
   objetivo: ObjetivoMeta;
   valor: ConfigMeta;
   onChange: (v: ConfigMeta) => void;
   conta?: string;
   naMontagem?: boolean;
+  /** "conjuntos" = numa campanha que já existe (sem a parte da campanha); "anuncio" = só o anúncio (num conjunto que já existe) */
+  parte?: "tudo" | "conjuntos" | "anuncio";
+  /** campanha existente com orçamento próprio: conjuntos sem orçamento */
+  orcamentoNaCampanha?: boolean;
 }) {
   const set = <K extends keyof ConfigMeta>(k: K, v: ConfigMeta[K]) => onChange({ ...valor, [k]: v });
   const ctas = CTAS[objetivo];
+  const comOrcamentoNoConjunto = parte === "tudo" ? valor.orcamentoEm === "conjunto" : !orcamentoNaCampanha;
   return (
     <div className="space-y-5">
-      <fieldset className="grid gap-3 md:grid-cols-3">
+      {parte === "tudo" && <fieldset className="grid gap-3 md:grid-cols-3">
         <legend className="mb-2 text-sm font-medium">Campanha</legend>
         <label className={rotulo}>Nome da campanha<input value={valor.nomeCampanha} onChange={(e) => set("nomeCampanha", e.target.value)} className={campo} /></label>
         <label className={rotulo}>Onde fica o orçamento
@@ -165,8 +170,9 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
         <p className={`${dica} md:col-span-3`}>
           Nos nomes, use {"{cliente}"}, {"{objetivo}"}, {"{data}"} e {"{cidade}"}; no anúncio também {"{conjunto}"}, {"{n}"} (número) e {"{arquivo}"} (nome do arquivo).
         </p>
-      </fieldset>
+      </fieldset>}
 
+      {parte !== "anuncio" && <>
       <fieldset className="space-y-3">
         <legend className="mb-2 text-sm font-medium">Localização <span className="font-normal text-texto-3">(vale para todos os conjuntos)</span></legend>
         <div className="space-y-1">
@@ -200,7 +206,7 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
         <legend className="mb-2 text-sm font-medium">Conjuntos de anúncios <span className="font-normal text-texto-3">({valor.conjuntos.length}) · cada um com o seu público</span></legend>
         {valor.conjuntos.map((cj, i) => (
           <CartaoConjunto
-            key={i} indice={i} conjunto={cj} conta={conta} comOrcamento={valor.orcamentoEm === "conjunto"} podeRemover={valor.conjuntos.length > 1}
+            key={i} indice={i} conjunto={cj} conta={conta} comOrcamento={comOrcamentoNoConjunto} podeRemover={valor.conjuntos.length > 1}
             onChange={(novo) => set("conjuntos", valor.conjuntos.map((x, j) => (j === i ? novo : x)))}
             onDuplicar={() => set("conjuntos", [...valor.conjuntos.slice(0, i + 1), { ...cj, nome: `${cj.nome} (cópia)` }, ...valor.conjuntos.slice(i + 1)])}
             onRemover={() => set("conjuntos", valor.conjuntos.filter((_, j) => j !== i))}
@@ -214,6 +220,7 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
         )}
         <p className={dica}>Posicionamentos: automáticos (Advantage+), como o Meta recomenda.</p>
       </fieldset>
+      </>}
 
       <fieldset className="space-y-3">
         <legend className="mb-2 text-sm font-medium">Anúncio <span className="font-normal text-texto-3">(o mesmo em todos os conjuntos)</span></legend>

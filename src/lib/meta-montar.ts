@@ -501,6 +501,11 @@ export type DadosMontagem = {
   modeloFormulario?: ConfigFormulario | null;
   /** se nenhum anúncio puder ser criado, manter campanha, conjuntos e formulário (pausados) em vez de desfazer */
   manterSemAnuncios?: boolean;
+  /**
+   * Onde criar: sem nada = campanha nova. { campanhaId } = conjuntos novos numa campanha que já existe.
+   * { campanhaId, conjunto } = só anúncios novos num conjunto que já existe.
+   */
+  destino?: { campanhaId: string; campanhaNome: string; orcamentoNaCampanha: boolean; conjunto?: { id: string; nome: string } } | null;
 };
 
 /**
@@ -510,8 +515,10 @@ export type DadosMontagem = {
  */
 export async function montarNoMeta(d: DadosMontagem) {
   const c = d.config;
-  if (!d.criativos.length) throw new Error("Nenhum criativo.");
-  if (!c.conjuntos.length) throw new Error("O modelo não tem conjuntos.");
+  const dest = d.destino ?? null;
+  // sem criativo só faz sentido criando campanha/conjuntos (o anúncio sobe depois pelo Gerenciador)
+  if (!d.criativos.length && (dest?.conjunto || !d.manterSemAnuncios)) throw new Error("Escolha pelo menos um criativo.");
+  if (!dest?.conjunto && !c.conjuntos.length) throw new Error("O modelo não tem conjuntos.");
   const cidade = c.locais.find((l) => l.tipo === "city")?.nome.replace(/\s*\(.*\)$/, "") ?? c.locais[0]?.nome ?? "";
   const data = hojeISO().split("-").reverse().slice(0, 2).join("/");
   const vars = { cliente: d.clienteNome, objetivo: ROTULO_CURTO[d.objetivo], data, cidade };
@@ -541,23 +548,32 @@ export async function montarNoMeta(d: DadosMontagem) {
   const avisoFormulario = (e: unknown) =>
     formularioCriado ? new Error(`${msgErro(e)} (o formulário novo foi criado e ficou na página: dá para escolher ele na próxima tentativa)`) : e;
 
-  // 1. campanha
+  // 1. campanha (ou a que já existe)
   const objetivoMeta = d.objetivo === "mensagens" ? "OUTCOME_ENGAGEMENT" : "OUTCOME_LEADS";
-  let campanha: { id: string };
-  try {
-    campanha = await postMeta(`${d.contaId}/campaigns`, d.token, {
-      name: campanhaNome,
-      objective: objetivoMeta,
-      status: "PAUSED",
-      special_ad_categories: "[]",
-      ...(c.orcamentoEm === "campanha"
-        ? { daily_budget: centavos(c.orcamentoDiario), bid_strategy: "LOWEST_COST_WITHOUT_CAP" }
-        : { is_adset_budget_sharing_enabled: "false" }),
-    });
-  } catch (e) {
-    throw avisoFormulario(e);
+  let campanhaId: string;
+  const campanhaNomeFinal = dest ? dest.campanhaNome : campanhaNome;
+  if (dest) {
+    campanhaId = dest.campanhaId;
+  } else {
+    try {
+      const campanha = await postMeta(`${d.contaId}/campaigns`, d.token, {
+        name: campanhaNome,
+        objective: objetivoMeta,
+        status: "PAUSED",
+        special_ad_categories: "[]",
+        ...(c.orcamentoEm === "campanha"
+          ? { daily_budget: centavos(c.orcamentoDiario), bid_strategy: "LOWEST_COST_WITHOUT_CAP" }
+          : { is_adset_budget_sharing_enabled: "false" }),
+      });
+      campanhaId = String(campanha.id);
+    } catch (e) {
+      throw avisoFormulario(e);
+    }
   }
-  const campanhaId = String(campanha.id);
+  // orçamento: na campanha (CBO) ou em cada conjunto; numa campanha existente, vale o que ela já usa
+  const orcamentoNaCampanha = dest ? dest.orcamentoNaCampanha : c.orcamentoEm === "campanha";
+  // o que foi criado aqui (para desfazer se der errado)
+  const criadosConjuntos: string[] = [];
 
   try {
     // 2. um conjunto por público
@@ -566,8 +582,8 @@ export async function montarNoMeta(d: DadosMontagem) {
       : d.objetivo === "mensagens" ? { optimization_goal: "CONVERSATIONS", destination_type: "WHATSAPP", promoted_object: { page_id: d.paginaId } }
       : { optimization_goal: "OFFSITE_CONVERSIONS", destination_type: "WEBSITE", promoted_object: { pixel_id: d.pixelId, custom_event_type: "LEAD" } };
     const inicio = new Date(Date.now() + 10 * 60_000).toISOString();
-    const conjuntos: { id: string; nome: string }[] = [];
-    for (const p of c.conjuntos) {
+    const conjuntos: { id: string; nome: string }[] = dest?.conjunto ? [dest.conjunto] : [];
+    for (const p of dest?.conjunto ? [] : c.conjuntos) {
       const nome = aplicarNome(p.nome, vars);
       try {
         const r = await postMeta(`${d.contaId}/adsets`, d.token, {
@@ -579,10 +595,11 @@ export async function montarNoMeta(d: DadosMontagem) {
           destination_type: destino.destination_type,
           promoted_object: JSON.stringify(destino.promoted_object),
           targeting: JSON.stringify(segmentacao(c, p)),
-          ...(c.orcamentoEm === "conjunto" && { daily_budget: centavos(p.orcamentoDiario), bid_strategy: "LOWEST_COST_WITHOUT_CAP" }),
+          ...(!orcamentoNaCampanha && { daily_budget: centavos(p.orcamentoDiario), bid_strategy: "LOWEST_COST_WITHOUT_CAP" }),
           start_time: inicio,
         });
         conjuntos.push({ id: String(r.id), nome });
+        criadosConjuntos.push(String(r.id));
       } catch (e) {
         throw new Error(`Conjunto “${nome}”: ${e instanceof Error ? e.message : e}`);
       }
@@ -649,10 +666,49 @@ export async function montarNoMeta(d: DadosMontagem) {
     const motivos = [...new Set(falhas.map((f) => f.replace(/^.*?: /, "")))];
     const resumo = motivos.length === 1 && falhas.length > 1 ? [`${falhas.length} anúncio(s): ${motivos[0]}`] : falhas;
     if (!anuncios && !d.manterSemAnuncios) throw new Error(`Nenhum anúncio foi criado. ${resumo.join(" | ")}`);
-    return { campanhaId, campanhaNome, conjuntos: conjuntos.length, anuncios, falhas: resumo, formularioCriado };
+    return { campanhaId, campanhaNome: campanhaNomeFinal, conjuntos: dest?.conjunto ? 0 : conjuntos.length, anuncios, falhas: resumo, formularioCriado };
   } catch (e) {
-    // desfaz: apaga a campanha (os conjuntos e os anúncios vão junto); o formulário fica para reaproveitar
-    await fetch(`${BASE_META}/${campanhaId}?access_token=${encodeURIComponent(d.token)}`, { method: "DELETE" }).catch(() => null);
+    // desfaz: campanha nova → apaga a campanha (conjuntos e anúncios vão junto); campanha que já existia → só os
+    // conjuntos criados agora. O formulário fica para reaproveitar.
+    const apagar = dest ? criadosConjuntos : [campanhaId];
+    for (const id of apagar) await fetch(`${BASE_META}/${id}?access_token=${encodeURIComponent(d.token)}`, { method: "DELETE" }).catch(() => null);
     throw avisoFormulario(e);
   }
+}
+
+// ---------- Criar dentro do que já existe (conjunto numa campanha, anúncio num conjunto) ----------
+
+export type DestinoMeta = {
+  contaId: string;              // "act_…"
+  campanhaId: string;
+  campanhaNome: string;
+  orcamentoNaCampanha: boolean; // campanha com orçamento (CBO): os conjuntos novos ficam sem orçamento próprio
+  objetivo: ObjetivoMeta | null; // null = a campanha aceita mais de um (formulário ou site): a pessoa escolhe
+  objetivoMeta: string;
+  conjunto?: { id: string; nome: string };
+};
+
+/** Lê a campanha (ou o conjunto) de destino no Meta para criar dentro dela. */
+export async function lerDestinoMeta(token: string, alvo: { campanha?: string | null; conjunto?: string | null }): Promise<DestinoMeta> {
+  type Camp = { id: string; name: string; account_id: string; objective: string; daily_budget?: string; lifetime_budget?: string };
+  const porObjetivo = (o: string): ObjetivoMeta | null => (o === "OUTCOME_ENGAGEMENT" ? "mensagens" : null);
+  if (alvo.conjunto) {
+    const a = await getMeta<{ id: string; name: string; account_id: string; destination_type?: string; campaign: Camp }>(montarUrl(alvo.conjunto, token, {
+      fields: "id,name,account_id,destination_type,campaign{id,name,account_id,objective,daily_budget,lifetime_budget}",
+    }));
+    const t = a.destination_type ?? "";
+    const objetivo: ObjetivoMeta | null = t === "ON_AD" ? "formulario" : /WHATSAPP|MESSENGER|INSTAGRAM_DIRECT|MESSAGING/.test(t) ? "mensagens"
+      : t === "WEBSITE" ? "site" : porObjetivo(a.campaign.objective);
+    return {
+      contaId: `act_${a.account_id}`, campanhaId: a.campaign.id, campanhaNome: a.campaign.name, objetivoMeta: a.campaign.objective,
+      orcamentoNaCampanha: Boolean(Number(a.campaign.daily_budget) || Number(a.campaign.lifetime_budget)), objetivo,
+      conjunto: { id: a.id, nome: a.name },
+    };
+  }
+  if (!alvo.campanha) throw new Error("Campanha não informada.");
+  const c = await getMeta<Camp>(montarUrl(alvo.campanha, token, { fields: "id,name,account_id,objective,daily_budget,lifetime_budget" }));
+  return {
+    contaId: `act_${c.account_id}`, campanhaId: c.id, campanhaNome: c.name, objetivoMeta: c.objective,
+    orcamentoNaCampanha: Boolean(Number(c.daily_budget) || Number(c.lifetime_budget)), objetivo: porObjetivo(c.objective),
+  };
 }

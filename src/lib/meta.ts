@@ -586,12 +586,52 @@ async function filhos(id: string, token: string, borda: "adsets" | "ads") {
   return (await todasPaginas<{ id: string }>(montarUrl(`${id}/${borda}`, token, { fields: "id", limit: "200" }))).map((x) => x.id);
 }
 
+// O Meta descontinuou o "pacote de aprimoramentos padrão" (standard_enhancements) dos criativos: a cópia do próprio
+// Meta tenta levar essa configuração antiga junto e é recusada. Nesse caso o anúncio é recriado à mão.
+const APRIMORAMENTO_DESCONTINUADO = /aprimoramentos? padr|standard.?enhancement|descontinuad|deprecated|individual features|recursos individuais/i;
+
+/** Cria o anúncio de novo no conjunto: com o mesmo criativo; se o Meta recusar, com uma cópia do criativo sem a configuração antiga. */
+async function recriarAnuncio(adId: string, token: string, conjuntoDestino: string, renomear: boolean) {
+  type Criativo = { id: string; name?: string; object_story_spec?: unknown; asset_feed_spec?: unknown; url_tags?: string; object_story_id?: string; degrees_of_freedom_spec?: unknown };
+  const ad = await get<{ name?: string; account_id: string; creative?: { id: string }; tracking_specs?: unknown; conversion_domain?: string }>(
+    montarUrl(adId, token, { fields: "name,account_id,creative{id},tracking_specs,conversion_domain" }),
+  );
+  if (!ad.creative?.id) throw new Error("Não achei o criativo do anúncio.");
+  const nome = `${ad.name ?? "Anúncio"}${renomear ? " - cópia" : ""}`;
+  const extras: Record<string, string> = {
+    ...(ad.tracking_specs ? { tracking_specs: JSON.stringify(ad.tracking_specs) } : {}),
+    ...(ad.conversion_domain ? { conversion_domain: ad.conversion_domain } : {}),
+  };
+  const criar = (creativeId: string) => post(`act_${ad.account_id}/ads`, token, {
+    name: nome, adset_id: conjuntoDestino, status: "PAUSED", creative: JSON.stringify({ creative_id: creativeId }), ...extras,
+  });
+  try {
+    return String((await criar(ad.creative.id)).id);
+  } catch (e) {
+    if (!APRIMORAMENTO_DESCONTINUADO.test(e instanceof Error ? e.message : String(e))) throw e;
+  }
+  // criativo novo, igual ao original, mas sem os aprimoramentos antigos
+  const c = await get<Criativo>(montarUrl(ad.creative.id, token, { fields: "name,object_story_spec,asset_feed_spec,url_tags,object_story_id,degrees_of_freedom_spec" }));
+  const novo = await post(`act_${ad.account_id}/adcreatives`, token, {
+    name: `${c.name ?? nome} - cópia`,
+    ...(c.object_story_spec ? { object_story_spec: JSON.stringify(c.object_story_spec) } : c.object_story_id ? { object_story_id: c.object_story_id } : {}),
+    ...(c.asset_feed_spec ? { asset_feed_spec: JSON.stringify(c.asset_feed_spec) } : {}),
+    ...(c.url_tags ? { url_tags: c.url_tags } : {}),
+  });
+  return String((await criar(String(novo.id))).id);
+}
+
 /** Duplica um anúncio para um conjunto (o mesmo ou outro da mesma conta). */
 export async function duplicarAnuncio(adId: string, token: string, conjuntoDestino: string, renomear = true) {
-  const r = await post(`${adId}/copies`, token, {
-    adset_id: conjuntoDestino, status_option: "PAUSED", rename_options: renomear ? COPIA : SEM_RENOMEAR,
-  });
-  return String(r.copied_ad_id ?? r.ad_object_ids?.[0]?.copied_id ?? "");
+  try {
+    const r = await post(`${adId}/copies`, token, {
+      adset_id: conjuntoDestino, status_option: "PAUSED", rename_options: renomear ? COPIA : SEM_RENOMEAR,
+    });
+    return String(r.copied_ad_id ?? r.ad_object_ids?.[0]?.copied_id ?? "");
+  } catch (e) {
+    if (!APRIMORAMENTO_DESCONTINUADO.test(e instanceof Error ? e.message : String(e))) throw e;
+    return recriarAnuncio(adId, token, conjuntoDestino, renomear);
+  }
 }
 
 /**

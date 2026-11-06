@@ -19,7 +19,14 @@ const rotulo = "block space-y-1 text-sm";
 const tamanho = (b: number) => (b > 1e6 ? `${(b / 1e6).toFixed(1).replace(".", ",")} MB` : `${Math.round(b / 1e3)} KB`);
 
 /** Tela de montagem: escolhe o modelo, a conta, a página e os criativos, e cria tudo pausado no Meta. */
-export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, modelosFormulario, pedidoInicial }: {
+/** Criar dentro do que já existe: conjuntos numa campanha, ou anúncios num conjunto. */
+export type DestinoMontagem = {
+  conta: string; campanhaId: string; campanhaNome: string; orcamentoNaCampanha: boolean;
+  objetivo: ObjetivoMeta | null; // null = formulário ou site (a pessoa escolhe)
+  conjunto?: { id: string; nome: string };
+};
+
+export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos, padroes, modelosFormulario, pedidoInicial, destino }: {
   clienteId: string;
   clienteNome: string;
   contas: Opcao[];
@@ -29,16 +36,22 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
   modelosFormulario: Opcao[];
   /** pedido vindo da caixa "Pergunte ao painel": já faz o esboço com IA */
   pedidoInicial?: string;
+  destino?: DestinoMontagem | null;
 }) {
+  // numa campanha que já existe, só os objetivos que ela aceita
+  const objetivosPossiveis = (Object.keys(OBJETIVOS) as ObjetivoMeta[])
+    .filter((o) => !destino || (destino.objetivo ? o === destino.objetivo : o !== "mensagens"));
+  const modelos = todosModelos.filter((m) => objetivosPossiveis.includes(m.objetivo));
   // "zero:<objetivo>" = campanha do zero, sem modelo
-  const [modeloId, setModeloId] = useState(modelos[0]?.id ?? "zero:formulario");
+  const [modeloId, setModeloId] = useState(modelos[0]?.id ?? `zero:${objetivosPossiveis[0] ?? "formulario"}`);
   const modelo = modelos.find((m) => m.id === modeloId);
   const objetivo: ObjetivoMeta = modelo?.objetivo ?? (modeloId.startsWith("zero:") ? (modeloId.slice(5) as ObjetivoMeta) : "formulario");
   const [config, setConfig] = useState<ConfigMeta>(() => normalizarConfig({
-    ...(modelos[0]?.config ?? configDoZero("formulario")), ...(padroes.locais?.length ? { locais: padroes.locais } : {}),
+    ...(modelos[0]?.config ?? configDoZero(objetivosPossiveis[0] ?? "formulario")), ...(padroes.locais?.length ? { locais: padroes.locais } : {}),
   }));
   const [salvarModeloComo, setSalvarModeloComo] = useState("");
-  const [conta, setConta] = useState(contas.some((c) => c.id === padroes.conta) ? padroes.conta! : contas[0]?.id ?? "");
+  const [conta, setConta] = useState(destino?.conta ?? (contas.some((c) => c.id === padroes.conta) ? padroes.conta! : contas[0]?.id ?? ""));
+  const soAnuncios = !!destino?.conjunto;
   const [ativos, setAtivos] = useState<Ativos | null>(null);
   const [pagina, setPagina] = useState(padroes.pagina ?? "");
   const [instagram, setInstagram] = useState(padroes.instagram ?? "");
@@ -156,9 +169,12 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
   // vídeo enviado ao Meta fica na conta para onde foi; se trocou de conta, ele não serve
   const criativosDaConta = criativos.filter((c) => !c.videoId || c.conta === conta);
   // sem criativo: cria só a campanha e os conjuntos (o anúncio é subido depois no Gerenciador)
-  const semCriativo = !criativosDaConta.length;
+  const semCriativo = !criativosDaConta.length && !soAnuncios;
   const payload = {
-    clienteId, conta, modeloId, objetivo, config, pagina, instagram, formulario, pixel, criativos: criativosDaConta,
+    clienteId, conta, modeloId, objetivo, pagina, instagram, formulario, pixel, criativos: criativosDaConta,
+    // numa campanha com orçamento (CBO), os conjuntos novos ficam sem orçamento próprio
+    config: destino ? { ...config, orcamentoEm: destino.orcamentoNaCampanha ? "campanha" : "conjunto" } : config,
+    destino: destino ? { campanha: destino.campanhaId, conjunto: destino.conjunto?.id } : null,
     ...(formulario === "novo" && { formularioNovo: formNovo, salvarComoModelo: salvarComoModelo.trim() }),
     salvarModeloComo: salvarModeloComo.trim(),
     manterSemAnuncios: semCriativo || manterSemAnuncios,
@@ -167,11 +183,22 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
     !pagina ? "Escolha a página do Facebook." :
     objetivo === "formulario" && !formulario ? "Escolha o formulário." :
     objetivo === "site" && !config.url ? "Informe o link do site." :
-    !config.locais.length ? "Escolha pelo menos uma localização." :
+    !soAnuncios && !config.locais.length ? "Escolha pelo menos uma localização." :
+    soAnuncios && !criativosDaConta.length ? "Escolha pelo menos um criativo." :
     !semCriativo && !config.textos.some((t) => t.trim()) ? "Escreva o texto principal." : null;
 
   return (
     <div className="space-y-6">
+      {destino && (
+        <div className="rounded-2xl border border-destaque/50 bg-destaque-bg/40 p-4 text-sm">
+          <b>{soAnuncios ? "Anúncios novos" : "Conjuntos novos"}</b> {soAnuncios ? <>no conjunto <b>“{destino.conjunto!.nome}”</b>, da campanha “{destino.campanhaNome}”.</> : <>na campanha <b>“{destino.campanhaNome}”</b>.</>}
+          <span className="block text-xs text-texto-3">
+            {soAnuncios
+              ? "Use só a parte de anúncio e os criativos (o público é o do conjunto). Tudo nasce pausado."
+              : `Cada público vira um conjunto novo nessa campanha${destino.orcamentoNaCampanha ? " (a campanha tem orçamento próprio: os conjuntos ficam sem orçamento)" : ""}. Tudo nasce pausado.`}
+          </span>
+        </div>
+      )}
       <EsbocoIA
         clienteId={clienteId} conta={conta} pedidoInicial={pedidoInicial}
         onPronto={(e) => {
@@ -183,7 +210,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
         <label className={rotulo}>Modelo
           <select value={modeloId} onChange={(e) => trocarModelo(e.target.value)} className={campo}>
             <optgroup label="Começar do zero">
-              {(Object.keys(OBJETIVOS) as ObjetivoMeta[]).map((o) => <option key={o} value={`zero:${o}`}>✚ Do zero · {OBJETIVOS[o].rotulo}</option>)}
+              {objetivosPossiveis.map((o) => <option key={o} value={`zero:${o}`}>✚ Do zero · {OBJETIVOS[o].rotulo}</option>)}
             </optgroup>
             {modelos.length > 0 && (
               <optgroup label="Modelos">
@@ -193,7 +220,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
           </select>
         </label>
         <label className={rotulo}>Conta de anúncio
-          <select value={conta} onChange={(e) => setConta(e.target.value)} className={campo}>
+          <select value={conta} onChange={(e) => setConta(e.target.value)} disabled={!!destino} className={campo}>
             {contas.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
         </label>
@@ -303,7 +330,8 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
       </section>
 
       <section className="rounded-2xl border border-borda bg-superficie p-4">
-        <CamposMeta objetivo={objetivo} valor={config} onChange={setConfig} conta={conta} naMontagem />
+        <CamposMeta objetivo={objetivo} valor={config} onChange={setConfig} conta={conta} naMontagem
+          parte={soAnuncios ? "anuncio" : destino ? "conjuntos" : "tudo"} orcamentoNaCampanha={destino?.orcamentoNaCampanha} />
       </section>
 
       <form action={enviar} className="space-y-3">
@@ -315,10 +343,10 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
             O anúncio você sobe depois no Gerenciador.
           </p>
         )}
-        <label className="flex flex-col gap-1 text-sm md:max-w-md">
+        {!destino && <label className="flex flex-col gap-1 text-sm md:max-w-md">
           Salvar esta campanha como modelo <span className="text-xs text-texto-3">(opcional: dê um nome e ela vira modelo junto com a montagem)</span>
           <input value={salvarModeloComo} onChange={(e) => setSalvarModeloComo(e.target.value)} placeholder="Ex.: Planejados – formulário 3 públicos" className={campo} />
-        </label>
+        </label>}
         {!semCriativo && <label className="flex items-center gap-2 text-sm text-texto-2">
           <input type="checkbox" checked={manterSemAnuncios} onChange={(e) => setManterSemAnuncios(e.target.checked)} />
           Se o Meta barrar os anúncios, manter a campanha, os conjuntos e o formulário criados (pausados) para eu subir o anúncio no Gerenciador
@@ -326,12 +354,16 @@ export function Montagem({ clienteId, clienteNome, contas, modelos, padroes, mod
         <button
           disabled={!!faltando || montando || !!enviando}
           onClick={(e) => {
-            const oque = semCriativo ? "a campanha e os conjuntos (sem anúncios)" : "a campanha";
+            const oque = soAnuncios ? `os anúncios no conjunto “${destino!.conjunto!.nome}”`
+              : destino ? `os conjuntos na campanha “${destino.campanhaNome}”${semCriativo ? " (sem anúncios)" : ""}`
+              : semCriativo ? "a campanha e os conjuntos (sem anúncios)" : "a campanha";
             if (!confirm(`Criar ${oque} de ${clienteNome} no Meta? Tudo vai ser criado PAUSADO.`)) e.preventDefault();
           }}
           className="rounded-lg bg-destaque px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {montando ? "Montando no Meta… (vídeos podem levar alguns minutos)"
+            : soAnuncios ? "Criar anúncios pausados neste conjunto"
+            : destino ? (semCriativo ? "Criar conjuntos pausados (sem anúncios)" : "Criar conjuntos pausados nesta campanha")
             : semCriativo ? "Criar campanha e conjuntos pausados (sem anúncios)" : "Montar campanha pausada no Meta"}
         </button>
       </form>
