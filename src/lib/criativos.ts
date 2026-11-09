@@ -48,6 +48,7 @@ export type Criativo = {
   selos: Selo[];
   ctrRecente: number | null;
   ctrAntes: number | null;
+  nota?: number | null;   // nota da análise com IA (quando já foi feita)
 };
 
 const div = (a: number, b: number) => (b > 0 ? a / b : null);

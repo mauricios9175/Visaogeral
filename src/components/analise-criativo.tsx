@@ -66,6 +66,12 @@ function Resultado({ a }: { a: AnaliseCriativo }) {
       </div>
       <Lista titulo="→ Sugestões para a próxima versão" itens={a.sugestoes} cor="text-destaque" />
 
+      {a.nicho && (
+        <div className="space-y-1 rounded-xl border border-destaque/40 bg-destaque-bg/30 p-3">
+          <h3 className="text-sm font-semibold">No nicho</h3>
+          <p className="text-sm text-texto-2">{a.nicho}</p>
+        </div>
+      )}
       {a.numeros && (
         <div className="space-y-1 rounded-xl border border-borda p-3">
           <h3 className="text-sm font-semibold">O que os números dizem</h3>
@@ -73,14 +79,14 @@ function Resultado({ a }: { a: AnaliseCriativo }) {
         </div>
       )}
       <p className="text-[11px] text-texto-3">
-        Análise feita por IA em {new Date(a.criadoEm).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}, com os números de {a.periodo.toLowerCase()}. Confira antes de decidir.
+        {a.automatica ? "Análise automática (madrugada), feita por IA em " : "Análise feita por IA em "}{new Date(a.criadoEm).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}, com os números de {a.periodo.toLowerCase()}. Confira antes de decidir.
       </p>
     </div>
   );
 }
 
 /** Botão "✦ Analisar com IA" de um criativo: mostra a análise salva ou faz uma nova. */
-export function AnalisarCriativo({ adId, clienteId, nome, formato, classe }: { adId: string; clienteId: string; nome: string; formato: string; classe?: string }) {
+export function AnalisarCriativo({ adId, clienteId, nome, formato, classe, rotulo }: { adId: string; clienteId: string; nome: string; formato: string; classe?: string; rotulo?: string }) {
   const [aberto, setAberto] = useState(false);
   const [analise, setAnalise] = useState<AnaliseCriativo | null | undefined>(undefined);
   const [ocupado, setOcupado] = useState(false);
@@ -110,7 +116,7 @@ export function AnalisarCriativo({ adId, clienteId, nome, formato, classe }: { a
 
   return (
     <>
-      <button type="button" onClick={() => setAberto(true)} className={classe ?? "text-xs font-semibold text-destaque underline"}>✦ Analisar com IA</button>
+      <button type="button" onClick={() => setAberto(true)} className={classe ?? "text-xs font-semibold text-destaque underline"}>{rotulo ?? "✦ Analisar com IA"}</button>
       {aberto && (
         <Janela titulo={`Análise do criativo: ${nome}`} onFechar={() => setAberto(false)} largura="max-w-3xl">
           {analise === undefined ? (

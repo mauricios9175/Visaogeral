@@ -137,3 +137,37 @@ export async function perguntarIA(sistema: string, pedido: string | ParteIA[], o
   if (sobrecarga) throw new Error("Os modelos gratuitos do Gemini estão sobrecarregados agora (isso costuma passar em alguns minutos). Tente de novo daqui a pouco.");
   throw new Error(`Nenhum modelo do Gemini respondeu (${ultimoErro}). Confira GEMINI_MODELO na Vercel.`);
 }
+
+/**
+ * Pergunta com pesquisa no Google (a IA busca na internet e responde com as fontes).
+ * Sem formato JSON (o Google não deixa juntar as duas coisas).
+ */
+export async function pesquisarNaWeb(sistema: string, pedido: string): Promise<{ texto: string; fontes: { titulo: string; url: string }[] }> {
+  const chave = chaveIA();
+  if (!chave) throw new Error(semChave());
+  const modelos = [...new Set([process.env.GEMINI_MODELO?.trim(), "gemini-flash-latest", "gemini-2.5-flash"].filter(Boolean) as string[])];
+  let ultimo = "";
+  for (const modelo of modelos) {
+    const r = await fetch(`${URL_BASE}/${encodeURIComponent(modelo)}:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": chave },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: sistema }] },
+        contents: [{ role: "user", parts: [{ text: pedido }] }],
+        tools: [{ google_search: {} }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+      }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const j = (await r.json().catch(() => ({}))) as any;
+    if (!r.ok) { ultimo = `${r.status} ${j?.error?.message ?? ""}`; continue; }
+    const c = j.candidates?.[0];
+    const texto = ((c?.content?.parts ?? []) as { text?: string; thought?: boolean }[]).filter((p) => !p.thought).map((p) => p.text ?? "").join("").trim();
+    const fontes = ((c?.groundingMetadata?.groundingChunks ?? []) as { web?: { uri?: string; title?: string } }[])
+      .map((x) => ({ titulo: x.web?.title ?? "", url: x.web?.uri ?? "" })).filter((x) => x.url).slice(0, 8);
+    if (texto) return { texto, fontes };
+    ultimo = "sem texto";
+  }
+  throw new Error(`A pesquisa na internet não respondeu (${ultimo}).`);
+}

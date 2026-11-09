@@ -4,7 +4,7 @@ import { detalheCrm, type NumerosCrm } from "./consultas";
 import { listarCriativos, type Criativo } from "./criativos";
 import { resolverPeriodo } from "./datas";
 import { decimal, dinheiro, inteiro, pct } from "./formato";
-import { apagarArquivoIA, enviarArquivoIA, perguntarIA, type ParteIA } from "./ia";
+import { apagarArquivoIA, enviarArquivoIA, perguntarIA, pesquisarNaWeb, type ParteIA } from "./ia";
 import { fonteDoVideo } from "./meta-montar";
 import { chaveDe, nomeDoAnuncio } from "./agrupar";
 import { tokenDaConta } from "./sync";
@@ -27,14 +27,76 @@ export type AnaliseCriativo = {
   pontosFracos: string[];
   sugestoes: string[];
   numeros: string;                    // como os números confirmam (ou não) a leitura
+  nicho?: string;                     // o que funciona no nicho (pesquisa + melhores criativos do segmento) e como este se compara
+  automatica?: boolean;               // feita pela rodada da madrugada
 };
+
+// ---------- Pesquisa do nicho na internet (uma vez a cada 14 dias por nicho) ----------
+
+export type PesquisaNicho = { nicho: string; texto: string; fontes: { titulo: string; url: string }[]; criadoEm: string };
+const DIAS_PESQUISA = 14;
+const chaveNicho = (nicho: string) => `nicho_pesquisa:${chaveDe(nicho)}`;
+
+export async function pesquisaDoNicho(nicho: string | null | undefined): Promise<PesquisaNicho | null> {
+  const n = nicho?.trim();
+  if (!n) return null;
+  const { data } = await db().from("configuracoes").select("valor").eq("chave", chaveNicho(n)).maybeSingle();
+  const salva = data?.valor as PesquisaNicho | null;
+  if (salva && Date.now() - Date.parse(salva.criadoEm) < DIAS_PESQUISA * 86_400_000) return salva;
+  try {
+    const r = await pesquisarNaWeb(
+      "Você é um estrategista de anúncios no Brasil. Pesquise na internet e responda em português, em tópicos curtos e práticos.",
+      `Pesquise o que está funcionando agora em anúncios de Facebook/Instagram (Meta Ads) para o nicho "${n}" no Brasil, para negócios locais.
+Traga: 1) ganchos e ângulos que prendem atenção; 2) formatos (vídeo de bastidor, antes e depois, depoimento, UGC…); 3) dores, desejos e objeções do público; 4) ofertas e chamadas comuns; 5) erros comuns. No máximo 25 linhas.`,
+    );
+    const nova: PesquisaNicho = { nicho: n, texto: r.texto.slice(0, 6000), fontes: r.fontes, criadoEm: new Date().toISOString() };
+    await db().from("configuracoes").upsert({ chave: chaveNicho(n), valor: nova, atualizado_em: nova.criadoEm });
+    return nova;
+  } catch {
+    return salva; // sem pesquisa nova: usa a anterior (ou nenhuma)
+  }
+}
+
+/** Os melhores criativos dos clientes do mesmo nicho (para o "casamento" com o que funciona no segmento). */
+async function referenciasDoNicho(nicho: string | null | undefined, adId: string, todos?: Criativo[]) {
+  const n = nicho?.trim();
+  if (!n) return "";
+  const { data } = await db().from("clientes").select("id, nicho").eq("ativo", true);
+  const mesmos = new Set(((data ?? []) as { id: string; nicho: string | null }[]).filter((c) => c.nicho && chaveDe(c.nicho) === chaveDe(n)).map((c) => c.id));
+  const { atual } = resolverPeriodo({ p: "30" });
+  const base = todos ?? (await Promise.all([...mesmos].map((id) => listarCriativos(atual, { clienteId: id })))).flat();
+  const doNicho = base.filter((c) => mesmos.has(c.cliente.id) && c.id !== adId && c.resultados >= 3);
+  // melhores: menor custo por resultado com volume
+  const melhores = doNicho.sort((a, b) => (a.cpr ?? Infinity) - (b.cpr ?? Infinity)).slice(0, 4);
+  if (!melhores.length) return "";
+  const { data: an } = await db().from("configuracoes").select("chave, valor").in("chave", melhores.map((c) => chave(c.id)));
+  const resumo = new Map(((an ?? []) as { chave: string; valor: AnaliseCriativo }[]).map((x) => [x.chave.split(":")[1], x.valor]));
+  return melhores.map((c) => {
+    const a = resumo.get(c.id);
+    return `- ${c.nome} (${c.cliente.nome}, ${c.formato}): custo por resultado ${dinheiro(c.cpr)}, CTR ${pct(c.ctr)}${c.video ? `, gancho ${pct(c.video.gancho)}` : ""}` +
+      (a ? ` — gancho: ${a.gancho.oQueAcontece.slice(0, 160)}` : "");
+  }).join("\n");
+}
 
 const chave = (adId: string) => `analise_criativo:${adId}`;
 const LIMITE_VIDEO = 200 * 1024 * 1024; // acima disso, pede uma versão menor
 
 export async function lerAnaliseCriativo(adId: string): Promise<AnaliseCriativo | null> {
   const { data } = await db().from("configuracoes").select("valor").eq("chave", chave(adId)).maybeSingle();
-  return (data?.valor as AnaliseCriativo | null) ?? null;
+  const v = data?.valor as (AnaliseCriativo & { erro?: string }) | null;
+  return v && !v.erro ? v : null; // tentativa automática que falhou: conta como sem análise
+}
+
+/** Notas das análises já feitas (para os cards e para ordenar pela nota). */
+export async function notasDosCriativos(adIds: string[]) {
+  const notas = new Map<string, number>();
+  for (let i = 0; i < adIds.length; i += 200) {
+    const { data } = await db().from("configuracoes").select("chave, valor").in("chave", adIds.slice(i, i + 200).map(chave));
+    for (const x of (data ?? []) as { chave: string; valor: AnaliseCriativo & { erro?: string } }[]) {
+      if (!x.valor.erro && typeof x.valor.nota === "number") notas.set(x.chave.split(":")[1], x.valor.nota);
+    }
+  }
+  return notas;
 }
 
 const SISTEMA = `Você é um estrategista de criativos de anúncios (Meta Ads) no Brasil, especialista em vídeos curtos e peças de imagem para negócios locais.
@@ -53,7 +115,8 @@ Responda SÓ com um JSON neste formato:
   "pontosFortes": ["…"],
   "pontosFracos": ["…"],
   "sugestoes": ["3 a 5 mudanças concretas para a próxima versão (ex.: novo gancho com a frase X; mostrar o produto antes dos 2 s)"],
-  "numeros": "como os números do anúncio confirmam ou contradizem a sua leitura (cite gancho, retenção, CTR, custo e CRM quando houver, comparando com a média do cliente)"
+  "numeros": "como os números do anúncio confirmam ou contradizem a sua leitura (cite gancho, retenção, CTR, custo e CRM quando houver, comparando com a média do cliente)",
+  "nicho": "como este criativo se compara com o que funciona no nicho (a pesquisa e os melhores criativos do segmento, quando vierem): o que ele já faz e o que poderia copiar (2 a 4 frases; vazio se não vier nada do nicho)"
 }
 Regras: português do Brasil, direto, sem enrolação. Baseie-se no que você realmente vê e ouve. Se o volume de dados for pequeno, diga isso em "numeros".`;
 
@@ -85,12 +148,18 @@ function linhaNumeros(c: Criativo, todos: Criativo[], crm: NumerosCrm | null) {
 }
 
 /** Analisa o criativo com a IA e guarda o resultado. */
-export async function analisarCriativo(adId: string, clienteId: string): Promise<AnaliseCriativo> {
+export async function analisarCriativo(adId: string, clienteId: string, ctx: { todos?: Criativo[]; automatica?: boolean } = {}): Promise<AnaliseCriativo> {
   const { atual, anterior } = resolverPeriodo({ p: "30" });
-  const [todos, crmDet, { data: cri }] = await Promise.all([
-    listarCriativos(atual, { clienteId }),
+  const [todos, crmDet, { data: cri }, { data: cli }] = await Promise.all([
+    ctx.todos ? Promise.resolve(ctx.todos.filter((x) => x.cliente.id === clienteId)) : listarCriativos(atual, { clienteId }),
     detalheCrm(clienteId, atual, anterior).catch(() => null),
     db().from("criativos_meta").select("conta_id, tipo, video_id, imagem_url, thumbnail_url, texto, link").eq("ad_id", adId).maybeSingle(),
+    db().from("clientes").select("nicho").eq("id", clienteId).maybeSingle(),
+  ]);
+  const nicho = (cli as { nicho: string | null } | null)?.nicho ?? null;
+  const [pesquisa, referencias] = await Promise.all([
+    pesquisaDoNicho(nicho).catch(() => null),
+    referenciasDoNicho(nicho, adId, ctx.todos).catch(() => ""),
   ]);
   const c = todos.find((x) => x.id === adId);
   if (!c) throw new Error("Este anúncio não veiculou nos últimos 30 dias (a análise usa os números do período).");
@@ -125,7 +194,13 @@ export async function analisarCriativo(adId: string, clienteId: string): Promise
       partes.push({ imagem: { mime, base64: Buffer.from(await r.arrayBuffer()).toString("base64") } });
       if (c.formato === "outro") partes.push({ texto: "Obs.: é um anúncio com várias mídias (carrossel ou dinâmico); você está vendo só a primeira imagem." });
     }
-    partes.push({ texto: `Texto do anúncio:\n${criativo?.texto?.trim() || "(sem texto)"}\n\nNúmeros:\n${linhaNumeros(c, todos, crm)}` });
+    partes.push({ texto: [
+      `Nicho do cliente: ${nicho || "(não cadastrado)"}`,
+      `Texto do anúncio:\n${criativo?.texto?.trim() || "(sem texto)"}`,
+      `Números:\n${linhaNumeros(c, todos, crm)}`,
+      referencias ? `Melhores criativos do mesmo nicho (outros clientes, últimos 30 dias):\n${referencias}` : "",
+      pesquisa ? `O que está funcionando no nicho (pesquisa na internet de ${new Date(pesquisa.criadoEm).toLocaleDateString("pt-BR")}):\n${pesquisa.texto}` : "",
+    ].filter(Boolean).join("\n\n") });
 
     const bruto = await perguntarIA(SISTEMA, partes, { json: true, temperatura: 0.4, tempoMs: 150_000 });
     let r: Partial<AnaliseCriativo> & { gancho?: Partial<AnaliseCriativo["gancho"]> };
@@ -148,10 +223,57 @@ export async function analisarCriativo(adId: string, clienteId: string): Promise
       falas: String(r.falas ?? ""),
       pontosFortes: lista(r.pontosFortes), pontosFracos: lista(r.pontosFracos), sugestoes: lista(r.sugestoes),
       numeros: String(r.numeros ?? ""),
+      nicho: String(r.nicho ?? ""),
+      ...(ctx.automatica && { automatica: true }),
     };
     await db().from("configuracoes").upsert({ chave: chave(adId), valor: analise, atualizado_em: analise.criadoEm });
     return analise;
   } finally {
     if (arquivoIA) await apagarArquivoIA(arquivoIA);
   }
+}
+
+// ---------- Rodada automática (de madrugada): analisa o que ainda não tem análise ----------
+
+const MINIMO = { gasto: 20, impressoes: 1000 };
+const REANALISAR_DIAS = 21;
+const TEMPO_MAX_MS = 220_000;
+
+/** Analisa os criativos sem análise (ou com análise velha e ainda rodando), maiores gastos primeiro. Repetir enquanto restantes > 0. */
+export async function analisarCriativosPendentes() {
+  const inicio = Date.now();
+  const { atual } = resolverPeriodo({ p: "30" });
+  const todos = await listarCriativos(atual, {});
+  const candidatos = todos.filter((c) => c.gasto >= MINIMO.gasto && c.impressoes >= MINIMO.impressoes);
+  const feitas = new Map<string, { em: string; erro: boolean }>();
+  for (let i = 0; i < candidatos.length; i += 200) {
+    const { data } = await db().from("configuracoes").select("chave, valor").in("chave", candidatos.slice(i, i + 200).map((c) => chave(c.id)));
+    for (const x of (data ?? []) as { chave: string; valor: AnaliseCriativo & { erro?: string } }[]) feitas.set(x.chave.split(":")[1], { em: x.valor.criadoEm, erro: !!x.valor.erro });
+  }
+  const dias = (iso: string) => (Date.now() - Date.parse(iso)) / 86_400_000;
+  const pendentes = candidatos
+    .filter((c) => {
+      const f = feitas.get(c.id);
+      if (!f) return true;
+      if (f.erro) return dias(f.em) > 3;                      // falhou: tenta de novo depois de 3 dias
+      return dias(f.em) > REANALISAR_DIAS && c.status === "ACTIVE"; // análise velha de criativo que segue rodando
+    })
+    .sort((a, b) => b.gasto - a.gasto);
+
+  let analisados = 0;
+  const erros: string[] = [];
+  for (const c of pendentes) {
+    if (Date.now() - inicio > TEMPO_MAX_MS) break;
+    try {
+      await analisarCriativo(c.id, c.cliente.id, { todos, automatica: true });
+      analisados++;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      erros.push(`${c.nome}: ${msg}`);
+      if (/limite|sobrecarregad/i.test(msg)) break; // cota da IA: para por hoje
+      // não deu para analisar (ex.: vídeo grande): marca para não tentar de novo toda noite
+      await db().from("configuracoes").upsert({ chave: chave(c.id), valor: { adId: c.id, nome: c.nome, formato: c.formato, criadoEm: new Date().toISOString(), erro: msg }, atualizado_em: new Date().toISOString() }).then(() => null, () => null);
+    }
+  }
+  return { analisados, restantes: Math.max(0, pendentes.length - analisados - erros.length), erros: erros.slice(0, 10) };
 }

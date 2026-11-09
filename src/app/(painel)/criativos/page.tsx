@@ -5,6 +5,7 @@ import { listarCriativos, type Criativo, type Selo } from "@/lib/criativos";
 import { decimal, dinheiro, inteiro, pct } from "@/lib/formato";
 import { AssistirVideo } from "@/components/midia-meta";
 import { AnalisarCriativo } from "@/components/analise-criativo";
+import { notasDosCriativos } from "@/lib/analise-criativo";
 import { Aviso, SeletorPeriodo, SeloStatus, Voltar } from "@/components/ui";
 import { Miniatura } from "@/components/miniatura";
 
@@ -17,6 +18,7 @@ const ORDENS = [
   { chave: "cpr", rotulo: "Menor custo/result.", f: (c: Criativo) => c.cpr ?? Infinity },
   { chave: "ctr", rotulo: "Maior CTR", f: (c: Criativo) => -(c.ctr ?? 0) },
   { chave: "gancho", rotulo: "Melhor gancho (vídeo)", f: (c: Criativo) => -(c.video?.gancho ?? -1) },
+  { chave: "nota", rotulo: "Melhor nota da IA", f: (c: Criativo) => -(c.nota ?? -1) },
 ] as const;
 
 const SELOS: Record<Selo, { rotulo: string; icone: string; classe: string; dica: string }> = {
@@ -43,6 +45,9 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
   let erro: string | null = null;
   try {
     todos = await listarCriativos(atual, { clienteId: cliente?.id, empresa });
+    // notas das análises com IA já feitas (a rodada da madrugada analisa sozinha)
+    const notas = await notasDosCriativos(todos.map((c) => c.id)).catch(() => new Map<string, number>());
+    for (const c of todos) c.nota = notas.get(c.id) ?? null;
   } catch (e) {
     erro = e instanceof Error ? e.message : String(e);
   }
@@ -173,6 +178,11 @@ function CardCriativo({ c, mostrarCliente }: { c: Criativo; mostrarCliente: bool
         <div>
           <div className="flex items-center gap-2">
             <SeloStatus status={c.status} />
+            {c.nota != null && (
+              <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-bold ${c.nota >= 8 ? "bg-bom-bg text-bom" : c.nota >= 5 ? "bg-atencao-bg text-atencao" : "bg-critico-bg text-critico"}`} title="Nota da análise com IA">
+                IA {c.nota}/10
+              </span>
+            )}
             <span className="truncate text-sm font-medium" title={c.nome}>{c.nome}</span>
           </div>
           <div className="truncate text-xs text-texto-3" title={`${c.campanha ?? ""} · ${c.conjunto ?? ""}`}>
@@ -192,7 +202,7 @@ function CardCriativo({ c, mostrarCliente }: { c: Criativo; mostrarCliente: bool
         )}
         {c.video && <BlocoVideo v={c.video} />}
         <div className="flex flex-wrap gap-3 text-xs">
-          <AnalisarCriativo adId={c.id} clienteId={c.cliente.id} nome={c.nome} formato={c.formato} />
+          <AnalisarCriativo adId={c.id} clienteId={c.cliente.id} nome={c.nome} formato={c.formato} rotulo={c.nota != null ? "✦ Ver análise da IA" : undefined} />
           <Link href={`/clientes/${c.cliente.id}/editar?nivel=anuncio&id=${c.id}`} className="text-destaque underline">Editar / prévia</Link>
           {c.link && <a href={c.link} target="_blank" rel="noreferrer" className="text-destaque underline">Ver o anúncio ↗</a>}
         </div>
