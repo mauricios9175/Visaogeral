@@ -58,7 +58,49 @@ export type ConfigMeta = {
   url: string;            // site (objetivo site)
   utm: boolean;           // (antigo) acrescentava UTMs fixas no link do site; hoje vale parametrosUrl
   parametrosUrl: string;  // "Parâmetros de URL" do anúncio, com os dinâmicos do Meta ({{ad.name}}…)
+  whatsapp: MensagemWhatsApp; // objetivo mensagens: o modelo de mensagem do WhatsApp
 };
+
+/**
+ * Modelo de mensagem do anúncio de WhatsApp (como no Gerenciador): a saudação que a pessoa recebe e, embaixo,
+ * uma mensagem pré-preenchida OU perguntas rápidas para ela tocar.
+ */
+export type MensagemWhatsApp = { saudacao: string; tipo: "preenchida" | "perguntas"; preenchida: string; perguntas: string[] };
+
+export const WHATSAPP_PADRAO: MensagemWhatsApp = {
+  saudacao: "Olá! Como podemos ajudar?", tipo: "preenchida", preenchida: "Olá! Gostaria de mais informações.", perguntas: [],
+};
+
+/** Mensagem do painel → page_welcome_message do Meta (JSON em texto). `base` mantém o resto do que já existia. */
+export function mensagemParaMeta(m: MensagemWhatsApp, base?: Record<string, unknown> | null): string {
+  const perguntas = m.perguntas.map((p) => p.trim()).filter(Boolean).slice(0, 4);
+  const perguntasOk = m.tipo === "perguntas" && perguntas.length > 0;
+  return JSON.stringify({
+    type: "VISUAL_EDITOR", version: 2, landing_screen_type: "welcome_message", media_type: "text", user_edit: false, surface: "visual_editor_new",
+    ...(base ?? {}),
+    text_format: perguntasOk
+      ? { customer_action_type: "ice_breakers", message: { ice_breakers: perguntas.map((title) => ({ title, response: "" })), quick_replies: [], text: m.saudacao.trim() } }
+      : { customer_action_type: "autofill_message", message: { autofill_message: { content: m.preenchida.trim() || WHATSAPP_PADRAO.preenchida }, text: m.saudacao.trim() } },
+  });
+}
+
+/** page_welcome_message do Meta → mensagem do painel (null se o anúncio não tem). */
+export function mensagemDoMeta(bruto: unknown): MensagemWhatsApp | null {
+  if (!bruto) return null;
+  let j: { text_format?: { customer_action_type?: string; message?: { text?: string; autofill_message?: { content?: string }; ice_breakers?: { title?: string }[] } } };
+  try {
+    j = typeof bruto === "string" ? JSON.parse(bruto) : (bruto as typeof j);
+  } catch {
+    return null;
+  }
+  const m = j.text_format?.message;
+  if (!m) return null;
+  const perguntas = (m.ice_breakers ?? []).map((x) => x.title ?? "").filter(Boolean);
+  return {
+    saudacao: m.text ?? "", tipo: j.text_format?.customer_action_type === "ice_breakers" || perguntas.length ? "perguntas" : "preenchida",
+    preenchida: m.autofill_message?.content ?? "", perguntas,
+  };
+}
 
 /** Parâmetros de URL padrão: o Meta troca {{…}} pelos nomes reais da campanha, do conjunto e do anúncio. */
 export const PARAMETROS_URL_PADRAO =
@@ -116,6 +158,7 @@ const BASE: ConfigMeta = {
   url: "",
   utm: true,
   parametrosUrl: PARAMETROS_URL_PADRAO,
+  whatsapp: WHATSAPP_PADRAO,
 };
 
 /** Campanha do zero: um conjunto aberto, sem textos nem interesses (o CTA segue o objetivo). */
@@ -181,7 +224,7 @@ export function normalizarConfig(c: (Partial<ConfigMeta> & Legado) | null | unde
         ...(generos && { generos }), ...(advantage != null && { advantage }), ...(interesses && { interesses }),
         orcamentoDiario: resto.orcamentoDiario ?? CONJUNTO_PADRAO.orcamentoDiario,
       }];
-  return { ...BASE, ...resto, conjuntos };
+  return { ...BASE, ...resto, conjuntos, whatsapp: { ...WHATSAPP_PADRAO, ...(resto.whatsapp ?? {}) } };
 }
 
 // ---------- Modelos de formulário instantâneo (criados na página do cliente na hora da montagem) ----------

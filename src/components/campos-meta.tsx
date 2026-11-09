@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  CONJUNTO_PADRAO, CTAS, PARAMETROS_URL_PADRAO, TIPOS_SEGMENTACAO, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type ObjetivoMeta,
+  CONJUNTO_PADRAO, CTAS, PARAMETROS_URL_PADRAO, TIPOS_SEGMENTACAO, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type MensagemWhatsApp, type ObjetivoMeta,
 } from "@/lib/modelos";
 
 const publico = (n?: number) =>
@@ -221,6 +221,7 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
         {objetivo === "site" && (
           <label className={rotulo}>Link do site<input value={valor.url} onChange={(e) => set("url", e.target.value)} placeholder="https://" className={campo} /></label>
         )}
+        {objetivo === "mensagens" && <CampoMensagemWhatsApp valor={valor.whatsapp} onChange={(v) => set("whatsapp", v)} />}
         {objetivo !== "mensagens" && (
           <label className={rotulo}>Parâmetros de URL do anúncio <span className="text-xs text-texto-3">(UTMs; o Meta troca {"{{campaign.name}}"}, {"{{adset.name}}"} e {"{{ad.name}}"} pelos nomes reais)</span>
             <input value={valor.parametrosUrl} onChange={(e) => set("parametrosUrl", e.target.value)} className={`${campo} font-mono text-xs`} />
@@ -332,5 +333,35 @@ export function CampoLocais({ valor, onChange, conta }: { valor: Local[]; onChan
             ))}
           </div>
     </>
+  );
+}
+
+/** Modelo de mensagem do WhatsApp (como no Gerenciador): saudação + mensagem pré-preenchida ou perguntas rápidas. */
+export function CampoMensagemWhatsApp({ valor, onChange }: { valor: MensagemWhatsApp; onChange: (v: MensagemWhatsApp) => void }) {
+  const set = <K extends keyof MensagemWhatsApp>(k: K, v: MensagemWhatsApp[K]) => onChange({ ...valor, [k]: v });
+  return (
+    <div className="space-y-3 rounded-lg border border-borda bg-fundo p-3">
+      <div className="text-sm font-medium">Mensagem do WhatsApp <span className={dica}>(o que a pessoa vê ao abrir a conversa)</span></div>
+      <label className={rotulo}>Saudação
+        <textarea rows={2} value={valor.saudacao} onChange={(e) => set("saudacao", e.target.value)} placeholder="Olá! Como podemos ajudar?" className={campo} />
+      </label>
+      <div className="flex flex-wrap gap-4 text-sm">
+        <label className="flex items-center gap-2"><input type="radio" checked={valor.tipo === "preenchida"} onChange={() => set("tipo", "preenchida")} /> Mensagem pré-preenchida</label>
+        <label className="flex items-center gap-2"><input type="radio" checked={valor.tipo === "perguntas"} onChange={() => set("tipo", "perguntas")} /> Perguntas rápidas</label>
+      </div>
+      {valor.tipo === "preenchida" ? (
+        <label className={rotulo}>Mensagem que já vem escrita para a pessoa enviar
+          <input value={valor.preenchida} onChange={(e) => set("preenchida", e.target.value)} placeholder="Olá! Gostaria de mais informações." className={campo} />
+        </label>
+      ) : (
+        <div className="space-y-1.5">
+          <span className="text-sm">Perguntas (até 4; a pessoa toca e a pergunta é enviada)</span>
+          {[0, 1, 2, 3].map((i) => (
+            <input key={i} value={valor.perguntas[i] ?? ""} placeholder={["Quanto custa?", "Vocês atendem na minha região?", "Qual o prazo?", ""][i]}
+              onChange={(e) => { const p = [...valor.perguntas]; p[i] = e.target.value; set("perguntas", p.slice(0, 4)); }} className={campo} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

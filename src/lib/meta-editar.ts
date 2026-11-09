@@ -2,7 +2,11 @@ import "server-only";
 import { getMeta, montarUrl, postMeta } from "./meta";
 import { esperarVideo, segmentacao, subirImagem } from "./meta-montar";
 import { apagar } from "./armazenamento";
-import { CONJUNTO_PADRAO, normalizarConfig, type ConjuntoMeta, type Interesse, type Local } from "./modelos";
+import {
+  CONJUNTO_PADRAO, mensagemDoMeta, mensagemParaMeta, normalizarConfig,
+  type ConfigFormulario, type ConjuntoMeta, type Interesse, type Local, type MensagemWhatsApp,
+} from "./modelos";
+import { criarFormulario } from "./meta-montar";
 
 // Edição de campanha, conjunto e anúncio do Meta pelo painel. Tudo é lido na hora no Meta e salvo direto lá.
 // O que o painel não sabe editar (públicos personalizados, exclusões, posicionamentos…) é mantido como está.
@@ -18,13 +22,20 @@ type Targeting = Record<string, unknown> & {
   targeting_automation?: { advantage_audience?: number };
 };
 
-export type EdicaoCampanha = { nivel: "campanha"; id: string; nome: string; status: string; orcamento: { tipo: "dia" | "total"; valor: number } | null };
+export type EdicaoCampanha = {
+  nivel: "campanha"; id: string; nome: string; status: string; orcamento: { tipo: "dia" | "total"; valor: number } | null;
+  limiteGastos: number | null; // limite de gastos da campanha (R$); null = sem limite
+};
 export type EdicaoConjunto = {
   nivel: "conjunto"; id: string; nome: string; status: string; campanha: string;
   orcamento: { tipo: "dia" | "total"; valor: number } | null; // null = orçamento na campanha (CBO)
   publico: ConjuntoMeta; locais: Local[];
   locaisEditaveis: boolean; interessesEditaveis: boolean; mantidos: string[]; // o que fica como está
+  agendamento: { inicio: string; fim: string }; // "AAAA-MM-DDTHH:mm" no horário de Brasília; fim vazio = sem data
+  posicionamentos: { modo: "auto" | "manual"; plataformas: string[]; detalhado: boolean }; // detalhado = já tem posições escolhidas uma a uma
 };
+
+export const PLATAFORMAS = { facebook: "Facebook", instagram: "Instagram", messenger: "Messenger", audience_network: "Audience Network" } as const;
 export type TextosCriativo = {
   tipo: "link" | "video" | "feed" | "post";
   textos: string[]; titulos: string[]; descricoes: string[]; link: string; cta: string; urlTags: string;
@@ -33,6 +44,9 @@ export type TextosCriativo = {
   destino: "formulario" | "whatsapp" | "site" | "outro";
   formularioId: string;
   midia: { tipo: "imagem" | "video" | "varias" | "nenhuma"; miniatura: string | null; videoId?: string | null };
+  whatsapp: MensagemWhatsApp | null;   // anúncio de WhatsApp: modelo de mensagem
+  linkExibicao: string;                // site: o link que aparece no anúncio (ex.: www.loja.com.br)
+  novoFormulario?: ConfigFormulario | null; // formulário: criar um novo na página e usar no anúncio
   /** mídia nova escolhida na edição: imagem já no Storage (caminho) ou vídeo já enviado ao Meta (videoId) */
   novaMidia?: { tipo: "imagem"; caminho?: string; hash?: string } | { tipo: "video"; videoId: string } | null;
 };
@@ -83,14 +97,23 @@ function lerPublico(t: Targeting) {
 /** Lê o item no Meta para a tela de edição. */
 export async function lerParaEditar(nivel: "campanha" | "conjunto" | "anuncio", id: string, token: string): Promise<Edicao> {
   if (nivel === "campanha") {
-    const c = await getMeta<{ id: string; name: string; effective_status: string; daily_budget?: string; lifetime_budget?: string }>(
-      montarUrl(id, token, { fields: "id,name,effective_status,daily_budget,lifetime_budget" }));
-    return { nivel, id: c.id, nome: c.name, status: c.effective_status, orcamento: orcamentoDe(c) };
+    const c = await getMeta<{ id: string; name: string; effective_status: string; daily_budget?: string; lifetime_budget?: string; spend_cap?: string }>(
+      montarUrl(id, token, { fields: "id,name,effective_status,daily_budget,lifetime_budget,spend_cap" }));
+    return { nivel, id: c.id, nome: c.name, status: c.effective_status, orcamento: orcamentoDe(c), limiteGastos: Number(c.spend_cap) ? Number(c.spend_cap) / 100 : null };
   }
   if (nivel === "conjunto") {
-    const a = await getMeta<{ id: string; name: string; effective_status: string; daily_budget?: string; lifetime_budget?: string; targeting: Targeting; campaign?: { name?: string } }>(
-      montarUrl(id, token, { fields: "id,name,effective_status,daily_budget,lifetime_budget,targeting,campaign{name}" }));
-    return { nivel, id: a.id, nome: a.name, status: a.effective_status, campanha: a.campaign?.name ?? "", orcamento: orcamentoDe(a), ...lerPublico(a.targeting ?? {}) };
+    const a = await getMeta<{ id: string; name: string; effective_status: string; daily_budget?: string; lifetime_budget?: string; targeting: Targeting; campaign?: { name?: string }; start_time?: string; end_time?: string }>(
+      montarUrl(id, token, { fields: "id,name,effective_status,daily_budget,lifetime_budget,targeting,campaign{name},start_time,end_time" }));
+    const t = a.targeting ?? {};
+    const plataformas = (t.publisher_platforms as string[] | undefined) ?? [];
+    const detalhado = ["facebook_positions", "instagram_positions", "messenger_positions", "audience_network_positions"].some((k) => k in t);
+    const publico = lerPublico(t);
+    return {
+      nivel, id: a.id, nome: a.name, status: a.effective_status, campanha: a.campaign?.name ?? "", orcamento: orcamentoDe(a), ...publico,
+      mantidos: publico.mantidos.filter((x) => x !== "posicionamentos manuais"),
+      agendamento: { inicio: horaSP(a.start_time), fim: horaSP(a.end_time) },
+      posicionamentos: { modo: plataformas.length ? "manual" : "auto", plataformas, detalhado },
+    };
   }
   type CTA = { type?: string; value?: { link?: string; lead_gen_form_id?: string; app_destination?: string } };
   type Spec = { page_id?: string; instagram_user_id?: string; instagram_actor_id?: string;
@@ -111,6 +134,8 @@ export async function lerParaEditar(nivel: "campanha" | "conjunto" | "anuncio", 
   const destino: TextosCriativo["destino"] = formularioId ? "formulario" : /WHATSAPP/.test(ctaTipo) || cta?.value?.app_destination === "WHATSAPP" ? "whatsapp"
     : link && !/fb\.me|api\.whatsapp/.test(link) ? "site" : "outro";
   const extras = {
+    whatsapp: mensagemDoMeta(ld?.page_welcome_message ?? vd?.page_welcome_message) ?? (destino === "whatsapp" ? null : null),
+    linkExibicao: String(ld?.caption ?? ""),
     paginaId: oss?.page_id ?? "", instagramId: oss?.instagram_user_id ?? c?.instagram_user_id ?? "", destino, formularioId,
     midia: {
       tipo: (af ? ((af.images?.length ?? 0) + (af.videos?.length ?? 0) > 1 ? "varias" : af.videos?.length ? "video" : af.images?.length ? "imagem" : "nenhuma")
@@ -130,6 +155,17 @@ export async function lerParaEditar(nivel: "campanha" | "conjunto" | "anuncio", 
 
 const centavos = (v: number) => String(Math.round(v * 100));
 
+/** Data do Meta (ISO com fuso) → "AAAA-MM-DDTHH:mm" no horário de Brasília (para o campo de data e hora). */
+function horaSP(iso?: string) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
+    .formatToParts(d).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}T${p.hour === "24" ? "00" : p.hour}:${p.minute}`;
+}
+const paraMeta = (local: string) => `${local}:00-0300`;
+
 /** Salva a edição no Meta. Devolve o que mudou (para o histórico). */
 export async function salvarEdicao(e: Edicao, contaId: string, token: string): Promise<string[]> {
   const atual = await lerParaEditar(e.nivel, e.id, token);
@@ -144,7 +180,19 @@ export async function salvarEdicao(e: Edicao, contaId: string, token: string): P
     }
   }
 
+  if (e.nivel === "campanha" && atual.nivel === "campanha" && (e.limiteGastos ?? null) !== (atual.limiteGastos ?? null)) {
+    // sem limite: o Meta pede este número enorme para tirar o limite
+    campos.spend_cap = e.limiteGastos && e.limiteGastos > 0 ? centavos(e.limiteGastos) : "922337203685478";
+    mudou.push(e.limiteGastos ? `limite de gastos → R$ ${e.limiteGastos.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "sem limite de gastos");
+  }
+
   if (e.nivel === "conjunto" && atual.nivel === "conjunto") {
+    if (e.agendamento.inicio && e.agendamento.inicio !== atual.agendamento.inicio) { campos.start_time = paraMeta(e.agendamento.inicio); mudou.push("início"); }
+    if (e.agendamento.fim !== atual.agendamento.fim) {
+      if (e.agendamento.fim) { campos.end_time = paraMeta(e.agendamento.fim); mudou.push("término"); }
+      else if (atual.orcamento?.tipo === "total") throw new Error("Conjunto com orçamento total precisa de data de término.");
+      else { campos.end_time = "0"; mudou.push("sem data de término"); }
+    }
     // público: começa do original e troca só o que o painel edita
     const bruto = await getMeta<{ targeting: Targeting }>(montarUrl(e.id, token, { fields: "targeting" }));
     const original = bruto.targeting ?? {};
@@ -160,20 +208,31 @@ export async function salvarEdicao(e: Edicao, contaId: string, token: string): P
     if (atual.interessesEditaveis) {
       if (novo.flexible_spec?.length) t.flexible_spec = novo.flexible_spec; else delete t.flexible_spec;
     }
-    if (JSON.stringify(t) !== JSON.stringify(original)) { campos.targeting = JSON.stringify(t); mudou.push("público"); }
+    // posicionamentos: automático (Advantage+) = sem plataformas na segmentação; manual = as plataformas escolhidas
+    const posAntes = JSON.stringify(atual.posicionamentos.modo === "auto" ? [] : [...atual.posicionamentos.plataformas].sort());
+    const posDepois = JSON.stringify(e.posicionamentos.modo === "auto" ? [] : [...e.posicionamentos.plataformas].sort());
+    if (posAntes !== posDepois) {
+      for (const k of ["publisher_platforms", "facebook_positions", "instagram_positions", "messenger_positions", "audience_network_positions", "device_platforms"]) delete t[k];
+      if (e.posicionamentos.modo === "manual") {
+        if (!e.posicionamentos.plataformas.length) throw new Error("Escolha pelo menos uma plataforma (ou deixe os posicionamentos automáticos).");
+        t.publisher_platforms = e.posicionamentos.plataformas;
+      }
+    }
+    if (JSON.stringify(t) !== JSON.stringify(original)) { campos.targeting = JSON.stringify(t); mudou.push(posAntes !== posDepois ? "público e posicionamentos" : "público"); }
   }
 
   if (e.nivel === "anuncio" && atual.nivel === "anuncio") {
     const a = e.criativo, o = atual.criativo;
-    const chave = (x: TextosCriativo) => JSON.stringify([x.textos, x.titulos, x.descricoes, x.link, x.cta, x.urlTags, x.paginaId, x.instagramId, x.formularioId]);
-    if (chave(a) !== chave(o) || a.novaMidia) {
+    const chave = (x: TextosCriativo) => JSON.stringify([x.textos, x.titulos, x.descricoes, x.link, x.cta, x.urlTags, x.paginaId, x.instagramId, x.formularioId, x.whatsapp, x.linkExibicao]);
+    if (chave(a) !== chave(o) || a.novaMidia || a.novoFormulario) {
       if (o.tipo === "post") throw new Error("Este anúncio usa uma publicação já existente: texto e mídia só mudam na própria publicação.");
       const novo = await novoCriativo(e.id, contaId, token, a, o, atual.nome);
       campos.creative = JSON.stringify({ creative_id: novo });
       const oque = [
-        chave({ ...a, paginaId: "", instagramId: "", formularioId: "" }) !== chave({ ...o, paginaId: "", instagramId: "", formularioId: "" }) && "textos",
+        chave({ ...a, paginaId: "", instagramId: "", formularioId: "", whatsapp: null }) !== chave({ ...o, paginaId: "", instagramId: "", formularioId: "", whatsapp: null }) && "textos",
         a.novaMidia && (a.novaMidia.tipo === "video" ? "vídeo" : "imagem"),
-        a.formularioId !== o.formularioId && "formulário",
+        (a.formularioId !== o.formularioId || a.novoFormulario) && "formulário",
+        JSON.stringify(a.whatsapp) !== JSON.stringify(o.whatsapp) && "mensagem do WhatsApp",
         (a.paginaId !== o.paginaId || a.instagramId !== o.instagramId) && "identidade",
       ].filter(Boolean);
       mudou.push(`anúncio (${oque.join(", ") || "criativo"})`);
@@ -190,6 +249,7 @@ export async function salvarEdicao(e: Edicao, contaId: string, token: string): P
  * O Meta não deixa alterar um criativo que já existe.
  */
 async function novoCriativo(adId: string, contaId: string, token: string, a: TextosCriativo, o: TextosCriativo, nomeAnuncio: string) {
+  // (a pode ganhar o id do formulário criado agora)
   const ad = await getMeta<{ creative: { id: string } }>(montarUrl(adId, token, { fields: "creative{id}" }));
   const c = await getMeta<{ name?: string; object_story_spec?: Record<string, unknown>; asset_feed_spec?: Record<string, unknown> }>(
     montarUrl(ad.creative.id, token, { fields: "name,object_story_spec,asset_feed_spec" }));
@@ -209,6 +269,11 @@ async function novoCriativo(adId: string, contaId: string, token: string, a: Tex
     video = await esperarVideo(a.novaMidia.videoId, token, "vídeo novo");
   }
 
+  // formulário novo, criado agora na página
+  if (a.destino === "formulario" && a.novoFormulario) {
+    const f = await criarFormulario(a.paginaId, token, a.novoFormulario, { cliente: "", objetivo: "CADASTRO", data: "", cidade: "" });
+    a = { ...a, formularioId: f.id };
+  }
   const novo: Record<string, string> = { name: `${c.name ?? nomeAnuncio} (editado)` };
   const spec = JSON.parse(JSON.stringify(c.object_story_spec ?? {})) as Record<string, unknown> & {
     page_id?: string; instagram_user_id?: string; instagram_actor_id?: string;
@@ -249,6 +314,10 @@ async function novoCriativo(adId: string, contaId: string, token: string, a: Tex
         ...(cta ? { call_to_action: cta } : {}),
       };
       delete (spec.video_data as Record<string, unknown>).image_hash;
+      if (a.destino === "whatsapp" && a.whatsapp) {
+        const atualMsg = (spec.link_data ?? spec.video_data)?.page_welcome_message;
+        (spec.video_data as Record<string, unknown>).page_welcome_message = mensagemParaMeta(a.whatsapp, baseMensagem(atualMsg));
+      }
       delete spec.link_data;
     } else {
       const l = spec.link_data ?? {};
@@ -258,6 +327,14 @@ async function novoCriativo(adId: string, contaId: string, token: string, a: Tex
         ...(cta ? { call_to_action: cta } : {}),
       };
       if (imagem) { delete (spec.link_data as Record<string, unknown>).picture; delete (spec.link_data as Record<string, unknown>).image_url; }
+      if (a.destino === "whatsapp" && a.whatsapp) {
+        const atualMsg = (l as Record<string, unknown>).page_welcome_message ?? spec.video_data?.page_welcome_message;
+        (spec.link_data as Record<string, unknown>).page_welcome_message = mensagemParaMeta(a.whatsapp, baseMensagem(atualMsg));
+      }
+      if (a.destino === "site") {
+        if (a.linkExibicao.trim()) (spec.link_data as Record<string, unknown>).caption = a.linkExibicao.trim();
+        else delete (spec.link_data as Record<string, unknown>).caption;
+      }
       delete spec.video_data;
     }
     novo.object_story_spec = JSON.stringify(spec);
@@ -265,4 +342,17 @@ async function novoCriativo(adId: string, contaId: string, token: string, a: Tex
   if (a.urlTags.trim() && a.destino !== "whatsapp") novo.url_tags = a.urlTags.trim().replace(/^[?&]+/, "");
   const criado = await postMeta(`${contaId}/adcreatives`, token, novo);
   return String(criado.id);
+}
+
+/** O que já existia na mensagem do WhatsApp (mantido), sem a parte do texto que o painel reescreve. */
+function baseMensagem(bruto: unknown): Record<string, unknown> | null {
+  try {
+    const j = (typeof bruto === "string" ? JSON.parse(bruto) : bruto) as Record<string, unknown> | null;
+    if (!j || typeof j !== "object") return null;
+    const { text_format: _ignorado, ...resto } = j;
+    void _ignorado;
+    return resto;
+  } catch {
+    return null;
+  }
 }

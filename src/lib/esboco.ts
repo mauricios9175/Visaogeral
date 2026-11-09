@@ -4,7 +4,7 @@ import { buscarInteresses } from "./meta-montar";
 import { tokenParaBusca } from "./token-busca";
 import { perguntarIA } from "./ia";
 import { CONFIG_GOOGLE_PADRAO, LIMITES, normalizarGoogle, type ConfigGoogle, type PalavraChave } from "./modelos-google";
-import { CONJUNTO_PADRAO, CTAS, configDoZero, OBJETIVOS, type ConfigMeta, type ConjuntoMeta, type Interesse, type ObjetivoMeta } from "./modelos";
+import { WHATSAPP_PADRAO, CONJUNTO_PADRAO, CTAS, configDoZero, OBJETIVOS, type ConfigMeta, type ConjuntoMeta, type Interesse, type ObjetivoMeta } from "./modelos";
 
 // Esboço de campanha com IA: a partir de uma frase ("formulário para loja de celulares"), a IA escolhe objetivo,
 // públicos e escreve os textos. Os interesses passam pela busca do Meta: só entram os que existem de verdade.
@@ -19,6 +19,7 @@ type RespostaIA = {
   cta?: string;
   observacoes?: string;
   nome?: string;
+  whatsapp?: { saudacao?: string; tipo?: string; preenchida?: string; perguntas?: string[] };
 };
 
 const SISTEMA = `Você é um gestor de tráfego sênior no Brasil e monta campanhas no Meta Ads (Facebook/Instagram) para negócios locais.
@@ -36,7 +37,8 @@ A partir do pedido, monte o esboço de UMA campanha e responda SÓ com um JSON n
   "descricao": "descrição curta",
   "cta": "botão",
   "observacoes": "1 a 2 frases com dicas para o gestor (ex.: criativo sugerido)",
-  "nome": "nome curto para salvar como modelo (ex.: Celulares – WhatsApp)"
+  "nome": "nome curto para salvar como modelo (ex.: Celulares – WhatsApp)",
+  "whatsapp": { "saudacao": "saudação curta que a pessoa recebe no WhatsApp", "tipo": "preenchida" | "perguntas", "preenchida": "mensagem que já vem escrita para a pessoa enviar", "perguntas": ["até 4 perguntas rápidas"] } (só no objetivo mensagens)
 }
 
 Regras:
@@ -140,6 +142,14 @@ export async function esbocarCampanha(clienteId: string | null, pedido: string, 
       titulos: lista(r.titulos, 60, base.titulos),
       descricao: corta(r.descricao, 60),
       cta: r.cta && ctas.includes(r.cta) ? r.cta : ctas[0],
+      ...(objetivo === "mensagens" && r.whatsapp ? {
+        whatsapp: {
+          saudacao: corta(r.whatsapp.saudacao, 300) || WHATSAPP_PADRAO.saudacao,
+          tipo: r.whatsapp.tipo === "perguntas" && r.whatsapp.perguntas?.length ? "perguntas" as const : "preenchida" as const,
+          preenchida: corta(r.whatsapp.preenchida, 300) || WHATSAPP_PADRAO.preenchida,
+          perguntas: (r.whatsapp.perguntas ?? []).map((x) => corta(x, 80)).filter(Boolean).slice(0, 4),
+        },
+      } : {}),
     },
   };
 }

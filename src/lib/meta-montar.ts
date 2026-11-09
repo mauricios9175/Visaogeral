@@ -1,6 +1,6 @@
 import "server-only";
 import { getMeta, montarUrl, postMeta, todasPaginas, BASE_META } from "./meta";
-import { aplicarNome, ROTULO_CURTO, type ConfigFormulario, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type ObjetivoMeta } from "./modelos";
+import { aplicarNome, mensagemParaMeta, ROTULO_CURTO, type ConfigFormulario, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type ObjetivoMeta } from "./modelos";
 import { baixar, linkTemporario } from "./armazenamento";
 import { hojeISO } from "./datas";
 
@@ -641,6 +641,8 @@ export async function montarNoMeta(d: DadosMontagem) {
               ...(c.descricao && { description: c.descricao }), call_to_action: cta,
             } };
         if (d.instagramId) Object.assign(story, { instagram_user_id: d.instagramId });
+        // WhatsApp: modelo de mensagem (saudação + mensagem pré-preenchida ou perguntas rápidas)
+        if (d.objetivo === "mensagens") Object.assign(ehVideo ? story.video_data! : story.link_data!, { page_welcome_message: mensagemParaMeta(c.whatsapp) });
         // "Parâmetros de URL" do anúncio (site e formulário): o Meta troca {{ad.name}} etc. pelos nomes reais
         const parametrosUrl = d.objetivo !== "mensagens" ? c.parametrosUrl.trim().replace(/^[?&]+/, "") : "";
         const criativo = await postMeta(`${d.contaId}/adcreatives`, d.token, {

@@ -3,11 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { salvarEdicaoMeta } from "@/app/acoes-editar";
 import type { Edicao, TextosCriativo } from "@/lib/meta-editar";
+import { FORMULARIO_PADRAO, WHATSAPP_PADRAO } from "@/lib/modelos";
+import { CamposFormulario } from "./editor-formulario";
 import { enviarImagem, enviarVideoAoMeta } from "./enviar-midia";
 import { BibliotecaMidia, PlayerVideo, PreviaAnuncio } from "./midia-meta";
 import { CTAS } from "@/lib/modelos";
 import { BotaoEnviar } from "./botao";
-import { CampoLocais, CartaoConjunto, campo } from "./campos-meta";
+import { CampoLocais, CampoMensagemWhatsApp, CartaoConjunto, campo } from "./campos-meta";
+
+const PLATAFORMAS: [string, string][] = [["facebook", "Facebook"], ["instagram", "Instagram"], ["messenger", "Messenger"], ["audience_network", "Audience Network"]];
 
 const rotulo = "block space-y-1 text-sm";
 const caixa = "space-y-4 rounded-2xl border border-borda bg-superficie p-4";
@@ -57,6 +61,12 @@ export function EditarMeta({ inicial, contaId, voltar }: { inicial: Edicao; cont
             <p className="text-xs text-texto-3">{e.nivel === "conjunto" ? "O orçamento fica na campanha (CBO): edite na campanha." : "O orçamento fica nos conjuntos: edite em cada conjunto."}</p>
           )
         )}
+        {e.nivel === "campanha" && (
+          <label className={`${rotulo} max-w-xs`}>Limite de gastos da campanha (R$) <span className="text-xs text-texto-3">(vazio = sem limite)</span>
+            <input type="number" min={0} step="0.01" value={e.limiteGastos ?? ""} placeholder="sem limite"
+              onChange={(x) => mudar({ limiteGastos: x.target.value ? Number(x.target.value) : null })} className={campo} />
+          </label>
+        )}
       </section>
 
       {e.nivel === "conjunto" && (
@@ -74,6 +84,51 @@ export function EditarMeta({ inicial, contaId, voltar }: { inicial: Edicao; cont
           />
           {!e.interessesEditaveis && <p className="text-xs text-atencao">A segmentação detalhada deste conjunto tem mais de um bloco (E/OU): o painel não mexe nela.</p>}
           {e.mantidos.length > 0 && <p className="text-xs text-texto-3">Ficam como estão (o painel não edita): {e.mantidos.join(", ")}.</p>}
+        </section>
+      )}
+
+      {e.nivel === "conjunto" && (
+        <section className={caixa}>
+          <h2 className="font-semibold">Posicionamentos</h2>
+          <div className="flex flex-wrap gap-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input type="radio" checked={e.posicionamentos.modo === "auto"} onChange={() => mudar({ posicionamentos: { ...e.posicionamentos, modo: "auto" } })} />
+              Automáticos (Advantage+) <span className="text-xs text-texto-3">recomendado pelo Meta</span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="radio" checked={e.posicionamentos.modo === "manual"}
+                onChange={() => mudar({ posicionamentos: { ...e.posicionamentos, modo: "manual", plataformas: e.posicionamentos.plataformas.length ? e.posicionamentos.plataformas : ["facebook", "instagram"] } })} />
+              Manuais
+            </label>
+          </div>
+          {e.posicionamentos.modo === "manual" && (
+            <div className="flex flex-wrap gap-4 text-sm">
+              {PLATAFORMAS.map(([k, r]) => (
+                <label key={k} className="flex items-center gap-2">
+                  <input type="checkbox" checked={e.posicionamentos.plataformas.includes(k)}
+                    onChange={(x) => mudar({ posicionamentos: { ...e.posicionamentos, plataformas: x.target.checked ? [...e.posicionamentos.plataformas, k] : e.posicionamentos.plataformas.filter((p) => p !== k) } })} />
+                  {r}
+                </label>
+              ))}
+            </div>
+          )}
+          {e.posicionamentos.detalhado && (
+            <p className="text-xs text-atencao">Este conjunto tem posições escolhidas uma a uma (ex.: só Stories). Se mudar aqui, vale a escolha por plataforma (todas as posições delas).</p>
+          )}
+        </section>
+      )}
+
+      {e.nivel === "conjunto" && (
+        <section className={caixa}>
+          <h2 className="font-semibold">Agendamento <span className="text-xs font-normal text-texto-3">(horário de Brasília)</span></h2>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className={rotulo}>Início
+              <input type="datetime-local" value={e.agendamento.inicio} onChange={(x) => mudar({ agendamento: { ...e.agendamento, inicio: x.target.value } })} className={campo} />
+            </label>
+            <label className={rotulo}>Término <span className="text-xs text-texto-3">(vazio = sem data)</span>
+              <input type="datetime-local" value={e.agendamento.fim} onChange={(x) => mudar({ agendamento: { ...e.agendamento, fim: x.target.value } })} className={campo} />
+            </label>
+          </div>
         </section>
       )}
 
@@ -230,20 +285,48 @@ function EditorAnuncio({ criativo: c, contaId, onChange }: { criativo: TextosCri
           <h2 className="font-semibold">Destino</h2>
           {c.destino === "formulario" && (
             <label className={rotulo}>Formulário instantâneo
-              <select value={c.formularioId} onChange={(x) => set({ formularioId: x.target.value })} className={campo}>
+              <select value={c.novoFormulario ? "novo" : c.formularioId}
+                onChange={(x) => (x.target.value === "novo" ? set({ novoFormulario: c.novoFormulario ?? FORMULARIO_PADRAO }) : set({ formularioId: x.target.value, novoFormulario: null }))} className={campo}>
                 {!formularios?.itens.some((f) => f.id === c.formularioId) && <option value={c.formularioId}>{formularios ? `Formulário ${c.formularioId}` : "Carregando…"}</option>}
+                {c.tipo !== "feed" && <option value="novo">＋ Criar formulário novo</option>}
                 {formularios?.itens.map((f) => <option key={f.id} value={f.id}>{f.nome}{f.arquivado ? " (arquivado)" : ""}</option>)}
               </select>
               {formularios?.erro && <span className="block text-xs text-critico">{formularios.erro}</span>}
               {c.tipo === "feed" && <span className="block text-xs text-atencao">Anúncio com várias variações: o formulário não muda por aqui (use o Gerenciador).</span>}
             </label>
           )}
-          {c.destino === "site" && (
-            <label className={rotulo}>Link do site
-              <input value={c.link} onChange={(x) => set({ link: x.target.value })} placeholder="https://" className={campo} />
-            </label>
+          {c.destino === "formulario" && c.novoFormulario && (
+            <div className="rounded-xl border border-borda bg-fundo p-3">
+              <div className="mb-2 text-sm font-semibold">Formulário novo <span className="text-xs font-normal text-texto-3">(criado na página ao salvar)</span></div>
+              <CamposFormulario valor={c.novoFormulario} onChange={(f) => set({ novoFormulario: f })} />
+            </div>
           )}
-          {c.destino === "whatsapp" && <p className="text-sm text-texto-2">Conversa no WhatsApp (o número é o da página).</p>}
+          {c.destino === "site" && (
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className={rotulo}>Link do site
+                <input value={c.link} onChange={(x) => set({ link: x.target.value })} placeholder="https://" className={campo} />
+              </label>
+              {c.tipo !== "feed" && (
+                <label className={rotulo}>Link de exibição <span className="text-xs text-texto-3">(opcional: o que aparece no anúncio)</span>
+                  <input value={c.linkExibicao} onChange={(x) => set({ linkExibicao: x.target.value })} placeholder="www.seusite.com.br" className={campo} />
+                </label>
+              )}
+            </div>
+          )}
+          {c.destino === "whatsapp" && (
+            <>
+              <p className="text-sm text-texto-2">Conversa no WhatsApp (o número é o da página).</p>
+              {c.tipo === "feed" ? (
+                <p className="text-xs text-atencao">Anúncio com várias variações: a mensagem do WhatsApp não muda por aqui (use o Gerenciador).</p>
+              ) : c.whatsapp ? (
+                <CampoMensagemWhatsApp valor={c.whatsapp} onChange={(w) => set({ whatsapp: w })} />
+              ) : (
+                <button type="button" onClick={() => set({ whatsapp: WHATSAPP_PADRAO })} className="rounded-lg border border-borda bg-superficie-2 px-3 py-2 text-sm font-semibold hover:border-destaque">
+                  + Criar modelo de mensagem do WhatsApp
+                </button>
+              )}
+            </>
+          )}
           {c.destino === "outro" && <p className="text-sm text-texto-2">Destino que o painel não edita (fica como está).</p>}
           <div className="grid gap-3 md:grid-cols-2">
             {c.cta && (
