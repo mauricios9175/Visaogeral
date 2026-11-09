@@ -26,6 +26,9 @@ import { db } from "@/lib/db";
 import { chaveDe, gastoPorNome, NIVEL_DA_UTM } from "@/lib/agrupar";
 
 
+// publicar rascunhos (com vídeo) pode levar alguns minutos
+export const maxDuration = 300;
+
 const NIVEIS = [
   { chave: "campanhas", rotulo: "Campanhas" },
   { chave: "conjuntos", rotulo: "Conjuntos" },

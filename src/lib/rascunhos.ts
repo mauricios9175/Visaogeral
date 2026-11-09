@@ -3,7 +3,7 @@ import { db } from "./db";
 import { getMeta, montarUrl } from "./meta";
 import { lerParaEditar, type EdicaoAnuncio, type EdicaoCampanha, type EdicaoConjunto } from "./meta-editar";
 import { lerDestinoMeta } from "./meta-montar";
-import { CONJUNTO_PADRAO, normalizarConfig, WHATSAPP_PADRAO, type ConfigMeta, type ConjuntoMeta, type ObjetivoMeta } from "./modelos";
+import { CONJUNTO_PADRAO, normalizarConfig, WHATSAPP_PADRAO, type ConfigFormulario, type ConfigMeta, type ConjuntoMeta, type ObjetivoMeta } from "./modelos";
 
 // Rascunhos de campanha no painel (como no Gerenciador): o "Duplicar" copia do Meta para cá, você edita tudo
 // (nomes, públicos, textos, mídia) e só no fim publica. Assim tudo nasce com o nome certo, sem " - cópia".
@@ -30,6 +30,7 @@ export type Rascunho = {
   pagina: string;
   instagram: string;
   formulario: string;
+  formularioNovo?: ConfigFormulario | null; // formulario = "novo": o formulário a criar na página
   pixel: string;
   criativos: CriativoRascunho[];
   avisos: string[];

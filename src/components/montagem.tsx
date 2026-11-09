@@ -63,7 +63,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
   const [pixel, setPixel] = useState(rascunho?.pixel || padroes.pixel || "");
   const [formularios, setFormularios] = useState<{ itens: Opcao[]; erro?: string } | null>(null);
   // formulário criado na própria montagem (sem precisar de modelo)
-  const [formNovo, setFormNovo] = useState<ConfigFormulario>(FORMULARIO_PADRAO);
+  const [formNovo, setFormNovo] = useState<ConfigFormulario>(rascunho?.formularioNovo ?? FORMULARIO_PADRAO);
   const [salvarComoModelo, setSalvarComoModelo] = useState("");
   // "modelo:<id>" = criar um formulário novo a partir do modelo; senão o id de um formulário da página
   const [formulario, setFormulario] = useState(
@@ -89,13 +89,14 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
         id: rascunhoId, clienteId, titulo: tituloRascunho.trim() || config.nomeCampanha || "Rascunho",
         origem: rascunho?.origem ?? "Montagem guardada para depois", criadoEm: rascunho?.criadoEm ?? new Date().toISOString(),
         atualizadoEm: new Date().toISOString(), objetivo, conta, destino: destino ?? null, config, pagina, instagram, formulario, pixel,
+        formularioNovo: formulario === "novo" ? formNovo : null,
         criativos, avisos: rascunho?.avisos ?? [],
       };
       fetch("/api/rascunhos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rascunho: r }) })
         .then((x) => x.json()).then((j) => j.atualizadoEm && setSalvoEm(j.atualizadoEm)).catch(() => null);
     }, 1500);
     return () => clearTimeout(t);
-  }, [rascunhoId, tituloRascunho, objetivo, conta, destino, config, pagina, instagram, formulario, pixel, criativos, clienteId, rascunho]);
+  }, [rascunhoId, tituloRascunho, objetivo, conta, destino, config, pagina, instagram, formulario, pixel, criativos, clienteId, rascunho, formNovo]);
 
   // publicou: o rascunho some da lista
   useEffect(() => {
