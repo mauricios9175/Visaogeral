@@ -1,6 +1,8 @@
 import { db, EMPRESA_PADRAO, type Cliente, type ContaAnuncio, type TokenMeta } from "@/lib/db";
 import { Ordenavel } from "@/components/ordenavel";
 import { salvarManualIA } from "@/app/acoes-ia";
+import { statusIA } from "@/lib/ia";
+import { ConfigIA } from "@/components/config-ia";
 import { lerManual } from "@/lib/sugestoes";
 import { MANUAL_GOOGLE_PADRAO, MANUAL_PADRAO } from "@/lib/manual-ia";
 import { diasAte, dinheiro, quandoFoi } from "@/lib/formato";
@@ -26,6 +28,7 @@ const botao = "rounded-lg border border-borda bg-superficie px-3 py-1.5 text-sm 
 const botaoPrimario = "rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium text-white";
 
 export default async function Configuracoes({ searchParams }: PageProps<"/configuracoes">) {
+  const iaStatus = await statusIA().catch(() => []);
   const [manualIA, manualGoogle] = await Promise.all([
     lerManual("meta").catch(() => MANUAL_PADRAO),
     lerManual("google").catch(() => MANUAL_GOOGLE_PADRAO),
@@ -130,6 +133,22 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
     <div className="space-y-8">
       <h1 className="text-[26px] font-extrabold tracking-tight">Configurações</h1>
       {msg && <Aviso>{msg}</Aviso>}
+
+      <section id="ia" className="space-y-3 rounded-2xl border border-borda bg-superficie p-4 lg:p-5">
+        <div>
+          <h2 className="font-bold">✦ IA do painel</h2>
+          <p className="text-sm text-texto-2">
+            Quem responde nas análises, sugestões, esboços e análise de criativos. A ordem é a ordem de tentativa: se a 1ª der
+            limite, erro ou estiver sem chave, o painel passa sozinho para a próxima. Vídeo só o Gemini assiste (as outras analisam
+            pela miniatura); a pesquisa na internet usa Gemini ou Claude. As chaves ficam nas variáveis da Vercel (nunca aqui).
+          </p>
+        </div>
+        <ConfigIA itens={iaStatus} />
+        <p className="text-xs text-texto-3">
+          Modelo vazio = o padrão de cada uma. O Gemini tem plano gratuito; Claude e GPT cobram por uso (crédito na conta de cada um).
+          No Claude, se o modelo recusar um pedido, o próprio servidor da Anthropic tenta outro modelo automaticamente.
+        </p>
+      </section>
 
       <section id="manual-ia" className="space-y-3 rounded-2xl border border-borda bg-superficie p-4 lg:p-5">
         <div>

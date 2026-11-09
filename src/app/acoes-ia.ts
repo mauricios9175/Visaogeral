@@ -34,3 +34,20 @@ export async function salvarParamsIA(form: FormData) {
   const sep = voltar.includes("?") ? "&" : "?";
   redirect(`${voltar.startsWith("/") ? voltar : `/clientes/${clienteId}`}${sep}msg=${encodeURIComponent(error ? `Erro: ${error.message}` : "Parâmetros da IA salvos.")}#sugestoes`);
 }
+
+/** Salva os provedores de IA: ordem de tentativa, ligado/desligado e modelo de cada um. */
+export async function salvarConfigIA(form: FormData) {
+  const { esquecerConfigIA, PROVEDORES } = await import("@/lib/ia");
+  type P = keyof typeof PROVEDORES;
+  const todos = Object.keys(PROVEDORES) as P[];
+  const ordem = String(form.get("ordem") ?? "").split(",").filter((x): x is P => todos.includes(x as P));
+  const valor = {
+    ordem: [...new Set([...ordem, ...todos])],
+    ligados: Object.fromEntries(todos.map((p) => [p, form.get(`ligado_${p}`) === "on"])) as Record<P, boolean>,
+    modelos: Object.fromEntries(todos.map((p) => [p, String(form.get(`modelo_${p}`) ?? "").trim().slice(0, 80)]).filter(([, m]) => m)),
+  };
+  const { error } = await db().from("configuracoes").upsert({ chave: "ia_config", valor, atualizado_em: new Date().toISOString() });
+  esquecerConfigIA();
+  revalidatePath("/configuracoes");
+  redirect(`/configuracoes?msg=${encodeURIComponent(error ? `Erro ao salvar: ${error.message}` : "IA do painel salva.")}#ia`);
+}

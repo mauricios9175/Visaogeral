@@ -29,14 +29,19 @@ const SELOS: Record<Selo, { rotulo: string; icone: string; classe: string; dica:
 
 type Busca = {
   p?: string; de?: string; ate?: string; empresa?: string; cliente?: string;
-  ordem?: string; formato?: string; status?: string; selo?: string; limite?: string;
+  ordem?: string; formato?: string; status?: string; selo?: string; limite?: string; nicho?: string;
 };
 
 export default async function Criativos({ searchParams }: PageProps<"/criativos">) {
   const busca = (await searchParams) as Busca;
   const { atual } = resolverPeriodo(busca);
-  const { data: clientesRaw } = await db().from("clientes").select("id, nome, empresa").eq("ativo", true).order("nome");
-  const clientes = (clientesRaw ?? []) as Pick<Cliente, "id" | "nome" | "empresa">[];
+  const { data: clientesRaw } = await db().from("clientes").select("id, nome, empresa, nicho").eq("ativo", true).order("nome");
+  const clientes = (clientesRaw ?? []) as Pick<Cliente, "id" | "nome" | "empresa" | "nicho">[];
+  // nichos do cadastro dos clientes (mesmo nome com maiúscula/acento diferente vira um só)
+  const semAcento = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const nichos = [...new Map(clientes.filter((c) => c.nicho?.trim()).map((c) => [semAcento(c.nicho!), c.nicho!.trim()])).values()].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const nicho = busca.nicho && nichos.some((n) => semAcento(n) === semAcento(busca.nicho!)) ? busca.nicho : undefined;
+  const clientesDoNicho = nicho ? new Set(clientes.filter((c) => c.nicho && semAcento(c.nicho) === semAcento(nicho)).map((c) => c.id)) : null;
   const empresas = [...new Set(clientes.map((c) => c.empresa || EMPRESA_PADRAO))].sort();
   const empresa = busca.empresa && empresas.includes(busca.empresa) ? busca.empresa : undefined;
   const cliente = clientes.find((c) => c.id === busca.cliente);
@@ -55,6 +60,7 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
   const ordem = ORDENS.find((o) => o.chave === busca.ordem) ?? ORDENS[0];
   const selo = busca.selo && busca.selo in SELOS ? (busca.selo as Selo) : null;
   const filtrados = todos
+    .filter((c) => !clientesDoNicho || clientesDoNicho.has(c.cliente.id))
     .filter((c) => !busca.formato || c.formato === busca.formato)
     .filter((c) => busca.status !== "ativos" || (c.status && ATIVOS.includes(c.status)))
     .filter((c) => !selo || c.selos.includes(selo))
@@ -72,7 +78,7 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
     return `/criativos?${q.toString()}`;
   };
   const extra = Object.fromEntries(
-    Object.entries({ empresa, cliente: cliente?.id, ordem: busca.ordem, formato: busca.formato, status: busca.status, selo: busca.selo })
+    Object.entries({ empresa, cliente: cliente?.id, nicho, ordem: busca.ordem, formato: busca.formato, status: busca.status, selo: busca.selo })
       .filter(([, v]) => v),
   ) as Record<string, string>;
   const chip = (ativo: boolean) =>
@@ -83,7 +89,7 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <Voltar href={cliente ? `/clientes/${cliente.id}?${atual.qs}` : `/?${atual.qs}`}>{cliente ? `Voltar para ${cliente.nome}` : "Visão geral"}</Voltar>
-          <h1 className="mt-1 text-[26px] font-extrabold tracking-tight">Criativos{cliente ? ` · ${cliente.nome}` : empresa ? ` · ${empresa}` : ""}</h1>
+          <h1 className="mt-1 text-[26px] font-extrabold tracking-tight">Criativos{cliente ? ` · ${cliente.nome}` : nicho ? ` · ${nicho}` : empresa ? ` · ${empresa}` : ""}</h1>
           <p className="text-sm text-texto-2">
             {inteiro(todos.length)} anúncios do Meta veicularam no período · ordenados por {ordem.rotulo.toLowerCase()}
           </p>
@@ -96,13 +102,19 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
         <form action="/criativos" className="flex flex-wrap items-center gap-2">
           {Object.entries({ p: busca.p, de: busca.de, ate: busca.ate, ordem: busca.ordem, formato: busca.formato, status: busca.status, selo: busca.selo })
             .filter(([, v]) => v).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
+          {nichos.length > 0 && (
+            <select name="nicho" defaultValue={nicho ?? ""} className="rounded-lg border border-borda bg-fundo px-2 py-1.5">
+              <option value="">Todos os nichos</option>
+              {nichos.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          )}
           <select name="empresa" defaultValue={empresa ?? ""} className="rounded-lg border border-borda bg-fundo px-2 py-1.5">
             <option value="">Todas as empresas</option>
             {empresas.map((e) => <option key={e} value={e}>{e}</option>)}
           </select>
           <select name="cliente" defaultValue={cliente?.id ?? ""} className="rounded-lg border border-borda bg-fundo px-2 py-1.5">
             <option value="">Todos os clientes</option>
-            {clientes.filter((c) => !empresa || (c.empresa || EMPRESA_PADRAO) === empresa)
+            {clientes.filter((c) => (!empresa || (c.empresa || EMPRESA_PADRAO) === empresa) && (!clientesDoNicho || clientesDoNicho.has(c.id)))
               .map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
           <button className="rounded-lg border border-borda bg-superficie px-3 py-1.5 hover:border-destaque">Filtrar</button>

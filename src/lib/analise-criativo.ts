@@ -4,7 +4,7 @@ import { detalheCrm, type NumerosCrm } from "./consultas";
 import { listarCriativos, type Criativo } from "./criativos";
 import { resolverPeriodo } from "./datas";
 import { decimal, dinheiro, inteiro, pct } from "./formato";
-import { apagarArquivoIA, enviarArquivoIA, perguntarIA, pesquisarNaWeb, type ParteIA } from "./ia";
+import { apagarArquivoIA, enviarArquivoIA, geminiParaVideo, perguntarIA, pesquisarNaWeb, type ParteIA } from "./ia";
 import { fonteDoVideo } from "./meta-montar";
 import { chaveDe, nomeDoAnuncio } from "./agrupar";
 import { tokenDaConta } from "./sync";
@@ -172,19 +172,36 @@ export async function analisarCriativo(adId: string, clienteId: string, ctx: { t
   let arquivoIA: string | null = null;
   try {
     if (c.formato === "video" && criativo?.video_id) {
-      const { data: conta } = await db().from("contas_anuncio").select("*").eq("id", criativo.conta_id).maybeSingle();
-      const token = conta ? await tokenDaConta(conta as ContaAnuncio) : undefined;
-      if (!token) throw new Error("Sem token do Meta para baixar o vídeo.");
-      const { fonte } = await fonteDoVideo(criativo.video_id, token);
-      if (!fonte) throw new Error("O Meta não liberou o arquivo deste vídeo para análise.");
-      const r = await fetch(fonte, { signal: AbortSignal.timeout(120_000) });
-      if (!r.ok) throw new Error(`Não consegui baixar o vídeo do Meta (${r.status}).`);
-      const tamanho = Number(r.headers.get("content-length") ?? 0);
-      if (tamanho > LIMITE_VIDEO) throw new Error("Vídeo grande demais para analisar (acima de 200 MB).");
-      const bytes = await r.arrayBuffer();
-      const enviado = await enviarArquivoIA(bytes, r.headers.get("content-type")?.split(";")[0] || "video/mp4", c.nome);
-      arquivoIA = enviado.nome;
-      partes.push({ arquivo: { mime: enviado.mime, uri: enviado.uri } });
+      // miniatura sempre junto: se o Gemini (o único que assiste vídeo) não responder, a outra IA ainda vê a peça
+      const mini = criativo.thumbnail_url || c.miniatura;
+      if (mini) {
+        const m = await fetch(mini, { signal: AbortSignal.timeout(30_000) }).catch(() => null);
+        if (m?.ok) partes.push({ imagem: { mime: m.headers.get("content-type")?.split(";")[0] || "image/jpeg", base64: Buffer.from(await m.arrayBuffer()).toString("base64") } });
+      }
+      if (await geminiParaVideo()) {
+        try {
+          const { data: conta } = await db().from("contas_anuncio").select("*").eq("id", criativo.conta_id).maybeSingle();
+          const token = conta ? await tokenDaConta(conta as ContaAnuncio) : undefined;
+          if (!token) throw new Error("Sem token do Meta para baixar o vídeo.");
+          const { fonte } = await fonteDoVideo(criativo.video_id, token);
+          if (!fonte) throw new Error("O Meta não liberou o arquivo deste vídeo para análise.");
+          const r = await fetch(fonte, { signal: AbortSignal.timeout(120_000) });
+          if (!r.ok) throw new Error(`Não consegui baixar o vídeo do Meta (${r.status}).`);
+          const tamanho = Number(r.headers.get("content-length") ?? 0);
+          if (tamanho > LIMITE_VIDEO) throw new Error("Vídeo grande demais para analisar (acima de 200 MB).");
+          const bytes = await r.arrayBuffer();
+          const enviado = await enviarArquivoIA(bytes, r.headers.get("content-type")?.split(";")[0] || "video/mp4", c.nome);
+          arquivoIA = enviado.nome;
+          partes.unshift({ arquivo: { mime: enviado.mime, uri: enviado.uri } });
+        } catch (e) {
+          if (!partes.length) throw e;
+          partes.push({ texto: `(Não foi possível enviar o vídeo: ${e instanceof Error ? e.message : e}. Analise pela miniatura, pelo texto e pelos números, e diga que não assistiu ao vídeo.)` });
+        }
+      } else if (!partes.length) {
+        throw new Error("Para assistir ao vídeo é preciso o Gemini ligado (Configurações → IA do painel), e não achei a miniatura.");
+      } else {
+        partes.push({ texto: "(Sem o vídeo: analise pela miniatura, pelo texto e pelos números, e diga que não assistiu ao vídeo.)" });
+      }
     } else {
       const url = criativo?.imagem_url || criativo?.thumbnail_url || c.miniatura;
       if (!url) throw new Error("Não achei a imagem deste anúncio.");
