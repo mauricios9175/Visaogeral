@@ -30,7 +30,9 @@ export type Criativo = {
   campanha: string | null;
   conjunto: string | null;
   status: string | null;
-  formato: "video" | "imagem" | "outro";
+  formato: "video" | "imagem" | "outro";   // outro = carrossel, catálogo ou anúncio dinâmico (várias mídias)
+  videoId: string | null;                  // para assistir com som
+  conta: string;
   miniatura: string | null;
   link: string | null;
   texto: string | null;
@@ -106,7 +108,10 @@ export async function listarCriativos(periodo: Periodo, filtro: { clienteId?: st
 
     const plays = soma((l) => l.video_plays ?? 0), s3 = soma((l) => l.video_3s ?? 0);
     const cri = criPorAd.get(adId);
-    const ehVideo = cri?.tipo === "VIDEO" || !!cri?.video_id || s3 > 0;
+    // vídeo pelo criativo (não pelas métricas): o Meta registra "reprodução de 3 s" até em imagem que ele anima
+    // sozinho (recursos automáticos do criativo). Sem os dados do criativo, aí sim vale a métrica.
+    const ehVideo = cri ? cri.tipo === "VIDEO" || !!cri.video_id : s3 > 0;
+    const ehImagem = !ehVideo && !!cri && (cri.tipo === "PHOTO" || ((cri.tipo === "SHARE" || !cri.tipo) && !!cri.imagem_url));
     const recentes = ls.filter((l) => l.data >= ini3), antes = ls.filter((l) => l.data < ini3);
     const ctrRecente = div(soma((l) => l.cliques_link, recentes) * 100, soma((l) => l.impressoes, recentes));
     const ctrAntes = div(soma((l) => l.cliques_link, antes) * 100, soma((l) => l.impressoes, antes));
@@ -119,7 +124,9 @@ export async function listarCriativos(periodo: Periodo, filtro: { clienteId?: st
       campanha: ultima.campaign_nome,
       conjunto: ultima.adset_nome,
       status: statusPorAd.get(adId) ?? null,
-      formato: ehVideo ? "video" : cri?.tipo === "PHOTO" || cri?.imagem_url ? "imagem" : "outro",
+      formato: ehVideo ? "video" : ehImagem ? "imagem" : "outro",
+      videoId: ehVideo ? cri?.video_id ?? null : null,
+      conta: ls[0].conta_id,
       // imagem em tamanho cheio quando houver; vídeo usa a miniatura
       miniatura: (!ehVideo && cri?.imagem_url) || cri?.thumbnail_url || cri?.imagem_url || null,
       link: cri?.link ?? null,

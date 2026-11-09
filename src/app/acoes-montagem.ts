@@ -7,6 +7,7 @@ import { lerDestinoMeta, montarNoMeta, type DestinoMeta } from "@/lib/meta-monta
 import { linkGerenciador } from "@/lib/meta";
 import { tokenDaConta } from "@/lib/sync";
 import { apagar } from "@/lib/armazenamento";
+import { excluirRascunho } from "@/lib/rascunhos";
 
 export type ResultadoMontagem = { ok: boolean; mensagem: string; detalhes: string[]; link: string | null };
 
@@ -19,6 +20,7 @@ type Payload = {
   salvarComoModelo?: string;                  // nome para salvar esse formulário também como modelo
   salvarModeloComo?: string;                  // nome para salvar a campanha (config da montagem) como modelo
   destino?: { campanha?: string; conjunto?: string } | null; // criar dentro de uma campanha ou de um conjunto que já existem
+  rascunhoId?: string | null; // veio de um rascunho: publicado com sucesso, o rascunho é apagado
 };
 
 /** Cria campanha, conjunto e anúncios (tudo pausado) a partir do modelo. Se algo falhar no meio, desfaz o que criou. */
@@ -91,6 +93,7 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
       depois: `${r.conjuntos} conjunto(s), ${r.anuncios} anúncio(s), ${r.falhas.length ? `${r.falhas.length} criativo(s) com erro` : "pausado"}`,
     }).then(() => null, () => null);
     await apagar(p.criativos.map((c) => c.caminho).filter(Boolean));
+    if (p.rascunhoId && (r.anuncios > 0 || !p.criativos.length)) await excluirRascunho(cliente.id, p.rascunhoId).catch(() => null);
     revalidatePath(`/clientes/${cliente.id}`);
     if (destino) {
       const onde = destino.conjunto ? `no conjunto “${destino.conjunto.nome}”` : `na campanha “${destino.campanhaNome}”`;

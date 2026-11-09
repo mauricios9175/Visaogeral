@@ -231,3 +231,16 @@ export function PreviaAnuncio({ conta, anuncioId }: { conta: string; anuncioId: 
     </section>
   );
 }
+
+/** Botão ▶ por cima da miniatura: abre o vídeo grande, com som. */
+export function AssistirVideo({ conta, videoId, titulo }: { conta: string; videoId: string; titulo: string }) {
+  const [aberto, setAberto] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setAberto(true)} className="absolute inset-0 flex items-center justify-center" aria-label={`Assistir ${titulo} com som`}>
+        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/70 text-xl text-white shadow-lg transition hover:scale-105">▶</span>
+      </button>
+      {aberto && <PlayerVideo conta={conta} videoId={videoId} titulo={titulo} onFechar={() => setAberto(false)} />}
+    </>
+  );
+}

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { excluirRascunho, lerRascunho, salvarRascunho, type Rascunho } from "@/lib/rascunhos";
 
 // Rascunhos de campanha (protegido pelo login do painel):
-//   POST { rascunho }            → salva (a tela de montagem salva sozinha enquanto você edita)
+//   POST { rascunho, criar? }    → salva (a tela de montagem salva sozinha); sem criar, só atualiza o que existe
 //   DELETE { clienteId, id }     → exclui
 export async function POST(request: NextRequest) {
   const corpo = await request.json().catch(() => ({}));
@@ -11,6 +11,8 @@ export async function POST(request: NextRequest) {
   try {
     // não deixa trocar o cliente nem a origem de um rascunho que já existe
     const atual = await lerRascunho(r.clienteId, r.id);
+    // salvamento automático de um rascunho que já foi publicado/excluído: não recria
+    if (!atual && !corpo.criar) return NextResponse.json({ ok: false, naoExiste: true });
     const salvo = await salvarRascunho({ ...(atual ?? {}), ...r, criadoEm: atual?.criadoEm ?? r.criadoEm ?? new Date().toISOString() });
     return NextResponse.json({ ok: true, atualizadoEm: salvo.atualizadoEm });
   } catch (e) {

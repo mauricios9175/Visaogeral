@@ -73,6 +73,8 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
   const [rascunhoId, setRascunhoId] = useState<string | null>(rascunho?.id ?? null);
   const [tituloRascunho, setTituloRascunho] = useState(rascunho?.titulo ?? "");
   const [salvoEm, setSalvoEm] = useState<string | null>(rascunho?.atualizadoEm ?? null);
+  // rascunho novo (do "Guardar como rascunho"): o 1º salvamento cria; depois, só atualiza o que ainda existe
+  const [criarRascunho, setCriarRascunho] = useState(false);
   const [biblioteca, setBiblioteca] = useState(false);
   const [tocar, setTocar] = useState<{ videoId?: string; arquivo?: string; nome: string } | null>(null);
   const [manterSemAnuncios, setManterSemAnuncios] = useState(true);
@@ -92,17 +94,23 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
         formularioNovo: formulario === "novo" ? formNovo : null,
         criativos, avisos: rascunho?.avisos ?? [],
       };
-      fetch("/api/rascunhos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rascunho: r }) })
-        .then((x) => x.json()).then((j) => j.atualizadoEm && setSalvoEm(j.atualizadoEm)).catch(() => null);
+      fetch("/api/rascunhos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rascunho: r, criar: criarRascunho }) })
+        .then((x) => x.json()).then((j) => {
+          if (j.atualizadoEm) { setSalvoEm(j.atualizadoEm); setCriarRascunho(false); }
+          // já foi publicado ou excluído: para de salvar
+          if (j.naoExiste) setRascunhoId(null);
+        }).catch(() => null);
     }, 1500);
     return () => clearTimeout(t);
-  }, [rascunhoId, tituloRascunho, objetivo, conta, destino, config, pagina, instagram, formulario, pixel, criativos, clienteId, rascunho, formNovo]);
+  }, [rascunhoId, tituloRascunho, objetivo, conta, destino, config, pagina, instagram, formulario, pixel, criativos, clienteId, rascunho, formNovo, criarRascunho]);
 
   // publicou: o rascunho some da lista
-  useEffect(() => {
-    if (!resultado?.ok || !rascunhoId) return;
-    void fetch("/api/rascunhos", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clienteId, id: rascunhoId }) });
-  }, [resultado, rascunhoId, clienteId]);
+  // publicou: o servidor já apagou o rascunho; aqui o salvamento automático para (senão ele recriaria o rascunho)
+  const [publicado, setPublicado] = useState<ResultadoMontagem | null>(null);
+  if (resultado?.ok && rascunhoId && publicado !== resultado) {
+    setPublicado(resultado);
+    setRascunhoId(null);
+  }
 
 
   // ao trocar de modelo, recarrega os campos dele (mantendo as cidades já escolhidas para o cliente)
@@ -213,6 +221,8 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
     ...(formulario === "novo" && { formularioNovo: formNovo, salvarComoModelo: salvarComoModelo.trim() }),
     salvarModeloComo: salvarModeloComo.trim(),
     manterSemAnuncios: semCriativo || manterSemAnuncios,
+    // publicou: o servidor apaga o rascunho na hora
+    rascunhoId,
   };
   const faltando =
     !pagina ? "Escolha a página do Facebook." :
@@ -419,7 +429,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
           Se o Meta barrar os anúncios, manter a campanha, os conjuntos e o formulário criados (pausados) para eu subir o anúncio no Gerenciador
         </label>}
         {!rascunhoId && (
-          <button type="button" onClick={() => { setRascunhoId(crypto.randomUUID()); setTituloRascunho(config.nomeCampanha); }}
+          <button type="button" onClick={() => { setRascunhoId(crypto.randomUUID()); setCriarRascunho(true); setTituloRascunho(config.nomeCampanha); }}
             className="mr-2 rounded-lg border border-borda px-4 py-2 text-sm hover:border-destaque">
             Guardar como rascunho
           </button>

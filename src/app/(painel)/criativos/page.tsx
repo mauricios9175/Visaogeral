@@ -3,11 +3,12 @@ import { resolverPeriodo } from "@/lib/datas";
 import { db, EMPRESA_PADRAO, type Cliente } from "@/lib/db";
 import { listarCriativos, type Criativo, type Selo } from "@/lib/criativos";
 import { decimal, dinheiro, inteiro, pct } from "@/lib/formato";
+import { AssistirVideo } from "@/components/midia-meta";
 import { Aviso, SeletorPeriodo, SeloStatus, Voltar } from "@/components/ui";
 import { Miniatura } from "@/components/miniatura";
 
 const ATIVOS = ["ACTIVE", "IN_PROCESS", "PENDING_REVIEW", "PREAPPROVED"];
-const LIMITE = 60;
+const POR_VEZ = 60;
 
 const ORDENS = [
   { chave: "gasto", rotulo: "Mais investimento", f: (c: Criativo) => -c.gasto },
@@ -25,7 +26,7 @@ const SELOS: Record<Selo, { rotulo: string; icone: string; classe: string; dica:
 
 type Busca = {
   p?: string; de?: string; ate?: string; empresa?: string; cliente?: string;
-  ordem?: string; formato?: string; status?: string; selo?: string;
+  ordem?: string; formato?: string; status?: string; selo?: string; limite?: string;
 };
 
 export default async function Criativos({ searchParams }: PageProps<"/criativos">) {
@@ -52,13 +53,15 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
     .filter((c) => busca.status !== "ativos" || (c.status && ATIVOS.includes(c.status)))
     .filter((c) => !selo || c.selos.includes(selo))
     .sort((a, b) => ordem.f(a) - ordem.f(b));
-  const mostrados = filtrados.slice(0, LIMITE);
+  const limite = Math.max(POR_VEZ, Math.min(2000, Number(busca.limite) || POR_VEZ));
+  const mostrados = filtrados.slice(0, limite);
   const semVideo = todos.some((c) => c.formato === "video") && !todos.some((c) => c.video);
 
   // monta o link mantendo os filtros atuais
   const link = (mudar: Partial<Busca>) => {
     const q = new URLSearchParams();
-    const tudo = { ...busca, ...mudar };
+    // trocar filtro/ordem volta para o começo da lista
+    const tudo = { ...busca, limite: undefined, ...mudar };
     for (const [k, v] of Object.entries(tudo)) if (v) q.set(k, v);
     return `/criativos?${q.toString()}`;
   };
@@ -106,7 +109,7 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
             </Link>
           ))}
           <span className="mx-1 border-l border-borda" />
-          {[{ v: undefined, r: "Todos os formatos" }, { v: "video", r: "Vídeos" }, { v: "imagem", r: "Imagens" }].map((f) => (
+          {[{ v: undefined, r: "Todos os formatos" }, { v: "video", r: "Vídeos" }, { v: "imagem", r: "Imagens" }, { v: "outro", r: "Carrossel/dinâmico" }].map((f) => (
             <Link key={f.r} href={link({ formato: f.v })} className={chip(busca.formato === f.v)}>{f.r}</Link>
           ))}
           <span className="mx-1 border-l border-borda" />
@@ -134,11 +137,14 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
         {mostrados.map((c) => <CardCriativo key={c.id} c={c} mostrarCliente={!cliente} />)}
       </div>
       {filtrados.length > mostrados.length && (
-        <p className="text-sm text-texto-3">
-          Mostrando {LIMITE} de {filtrados.length}. Use os filtros para ver os outros.
-        </p>
+        <div className="flex flex-wrap items-center gap-3 text-sm text-texto-3">
+          Mostrando {mostrados.length} de {filtrados.length}.
+          <Link href={link({ limite: String(limite + POR_VEZ) })} scroll={false}
+            className="rounded-lg border border-borda px-3 py-1.5 text-texto hover:border-destaque">Mostrar mais {Math.min(POR_VEZ, filtrados.length - mostrados.length)}</Link>
+        </div>
       )}
       <p className="text-xs text-texto-3">
+        Gancho e retenção só aparecem em vídeo (em imagem o Meta às vezes registra “reprodução” quando ele mesmo anima a imagem; isso fica de fora).
         Gancho = reproduções de 3 segundos ÷ impressões. Retenção = ThruPlays (15 s ou o vídeo inteiro) ÷ reproduções de 3 s.
         As barras mostram quantos dos que deram play chegaram a 25%, 50%, 75% e 100% do vídeo. Frequência é aproximada.
       </p>
@@ -151,6 +157,7 @@ function CardCriativo({ c, mostrarCliente }: { c: Criativo; mostrarCliente: bool
     <>
       <div className="relative">
         <Miniatura src={c.miniatura} alt={c.nome} formato={c.formato} />
+        {c.videoId && <AssistirVideo conta={c.conta} videoId={c.videoId} titulo={c.nome} />}
         {c.selos.length > 0 && (
           <div className="absolute left-2 top-2 flex flex-wrap gap-1">
             {c.selos.map((s) => (
@@ -183,11 +190,10 @@ function CardCriativo({ c, mostrarCliente }: { c: Criativo; mostrarCliente: bool
           <p className="text-xs text-atencao">CTR caiu de {pct(c.ctrAntes)} para {pct(c.ctrRecente)} nos últimos 3 dias.</p>
         )}
         {c.video && <BlocoVideo v={c.video} />}
-        {c.link && (
-          <a href={c.link} target="_blank" rel="noreferrer" className="inline-block text-xs text-destaque underline">
-            Ver o anúncio ↗
-          </a>
-        )}
+        <div className="flex flex-wrap gap-3 text-xs">
+          <Link href={`/clientes/${c.cliente.id}/editar?nivel=anuncio&id=${c.id}`} className="text-destaque underline">Editar / prévia</Link>
+          {c.link && <a href={c.link} target="_blank" rel="noreferrer" className="text-destaque underline">Ver o anúncio ↗</a>}
+        </div>
       </div>
     </>
   );
