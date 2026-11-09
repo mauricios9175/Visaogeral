@@ -10,7 +10,7 @@ import { enviarImagem, enviarVideoAoMeta } from "./enviar-midia";
 const pilha: symbol[] = [];
 
 /** Janela por cima da tela (fecha no ✕, no fundo ou com Esc). */
-function Janela({ titulo, onFechar, children, largura = "max-w-5xl" }: { titulo: string; onFechar: () => void; children: React.ReactNode; largura?: string }) {
+export function Janela({ titulo, onFechar, children, largura = "max-w-5xl" }: { titulo: string; onFechar: () => void; children: React.ReactNode; largura?: string }) {
   useEffect(() => {
     const eu = Symbol(titulo);
     pilha.push(eu);

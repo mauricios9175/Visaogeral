@@ -4,6 +4,7 @@ import { db, EMPRESA_PADRAO, type Cliente } from "@/lib/db";
 import { listarCriativos, type Criativo, type Selo } from "@/lib/criativos";
 import { decimal, dinheiro, inteiro, pct } from "@/lib/formato";
 import { AssistirVideo } from "@/components/midia-meta";
+import { AnalisarCriativo } from "@/components/analise-criativo";
 import { Aviso, SeletorPeriodo, SeloStatus, Voltar } from "@/components/ui";
 import { Miniatura } from "@/components/miniatura";
 
@@ -191,6 +192,7 @@ function CardCriativo({ c, mostrarCliente }: { c: Criativo; mostrarCliente: bool
         )}
         {c.video && <BlocoVideo v={c.video} />}
         <div className="flex flex-wrap gap-3 text-xs">
+          <AnalisarCriativo adId={c.id} clienteId={c.cliente.id} nome={c.nome} formato={c.formato} />
           <Link href={`/clientes/${c.cliente.id}/editar?nivel=anuncio&id=${c.id}`} className="text-destaque underline">Editar / prévia</Link>
           {c.link && <a href={c.link} target="_blank" rel="noreferrer" className="text-destaque underline">Ver o anúncio ↗</a>}
         </div>

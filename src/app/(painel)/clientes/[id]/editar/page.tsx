@@ -5,6 +5,7 @@ import { getMeta, linkGerenciador, montarUrl } from "@/lib/meta";
 import { lerParaEditar, type Edicao } from "@/lib/meta-editar";
 import { tokenDaConta } from "@/lib/sync";
 import { EditarMeta } from "@/components/editar-meta";
+import { AnalisarCriativo } from "@/components/analise-criativo";
 
 const NIVEIS = { campanha: "campanha", conjunto: "conjunto", anuncio: "anúncio" } as const;
 
@@ -50,6 +51,7 @@ export default async function Editar({ params, searchParams }: PageProps<"/clien
             {edicao.nivel === "conjunto" ? <>Da campanha “{edicao.campanha}”. </> : edicao.nivel === "anuncio" ? <>Do conjunto “{edicao.conjunto}”. </> : null}
             Lido agora no Meta; ao salvar, muda direto lá.{" "}
             <a href={linkGerenciador(contaId!, nivel, objeto)} target="_blank" rel="noreferrer" className="text-destaque underline">Abrir no Gerenciador ↗</a>
+            {edicao.nivel === "anuncio" && <>{" · "}<AnalisarCriativo adId={objeto} clienteId={id} nome={edicao.nome} formato={edicao.criativo.midia.tipo === "video" ? "video" : "imagem"} /></>}
           </p>
         )}
       </div>
