@@ -1,4 +1,5 @@
 import "server-only";
+import { videoDoCriativo } from "./meta";
 import { db, type ContaAnuncio, type TokenMeta } from "./db";
 import {
   buscarPorIds, criativosDosAnuncios, dadosFinanceiros, extrairResultados, insightsPorAnuncio, listarContas, MetaErro,
@@ -117,10 +118,16 @@ async function salvarCriativos(conta: ContaAnuncio, anuncios: Map<string, Criati
     const agora = new Date().toISOString();
     const registros = [...anuncios.values()].filter((a) => a.creative).map((a) => {
       const c = a.creative!;
+      const video = videoDoCriativo(c);
+      const feed = c.asset_feed_spec;
       return {
-        ad_id: a.id, conta_id: conta.id, tipo: c.object_type ?? (c.video_id ? "VIDEO" : null),
-        thumbnail_url: c.thumbnail_url ?? null, imagem_url: c.image_url ?? null, video_id: c.video_id ?? null,
-        titulo: c.title ?? null, texto: c.body ?? null,
+        ad_id: a.id, conta_id: conta.id,
+        // vídeo no link ou nas variações também é vídeo (o object_type desses vem como SHARE)
+        tipo: video ? "VIDEO" : c.object_type ?? null,
+        thumbnail_url: c.thumbnail_url ?? feed?.videos?.[0]?.thumbnail_url ?? null,
+        imagem_url: video ? null : c.image_url ?? feed?.images?.[0]?.url ?? null, video_id: video,
+        titulo: c.title ?? c.object_story_spec?.video_data?.title ?? feed?.titles?.[0]?.text ?? null,
+        texto: c.body ?? c.object_story_spec?.video_data?.message ?? feed?.bodies?.[0]?.text ?? null,
         link: c.instagram_permalink_url ?? (c.effective_object_story_id ? `https://www.facebook.com/${c.effective_object_story_id}` : null),
         atualizado_em: agora,
       };

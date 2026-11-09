@@ -245,12 +245,20 @@ export type CriativoMeta = {
     body?: string;
     instagram_permalink_url?: string;
     effective_object_story_id?: string;
+    // o vídeo pode estar no link (video_data) ou nas variações do anúncio flexível/Advantage+ (asset_feed_spec)
+    object_story_spec?: { video_data?: { video_id?: string; message?: string; title?: string } };
+    asset_feed_spec?: { videos?: { video_id?: string; thumbnail_url?: string }[]; images?: { hash?: string; url?: string }[]; bodies?: { text?: string }[]; titles?: { text?: string }[] };
   };
 };
 
+/** Id do vídeo do criativo, onde quer que ele esteja (simples, no link ou nas variações). */
+export const videoDoCriativo = (c: NonNullable<CriativoMeta["creative"]>) =>
+  c.video_id ?? c.object_story_spec?.video_data?.video_id ?? c.asset_feed_spec?.videos?.find((v) => v.video_id)?.video_id ?? null;
+
 // thumbnail maior que o padrão (64x64); se o Meta não aceitar o modificador, usamos o campo simples
-const CRIATIVO_GRANDE = "id,effective_status,creative.thumbnail_width(480).thumbnail_height(480){object_type,thumbnail_url,image_url,video_id,title,body,instagram_permalink_url,effective_object_story_id}";
-const CRIATIVO_SIMPLES = "id,effective_status,creative{object_type,thumbnail_url,image_url,video_id,title,body,instagram_permalink_url,effective_object_story_id}";
+const CAMPOS_CRIATIVO = "object_type,thumbnail_url,image_url,video_id,title,body,instagram_permalink_url,effective_object_story_id,object_story_spec,asset_feed_spec";
+const CRIATIVO_GRANDE = `id,effective_status,creative.thumbnail_width(480).thumbnail_height(480){${CAMPOS_CRIATIVO}}`;
+const CRIATIVO_SIMPLES = `id,effective_status,creative{${CAMPOS_CRIATIVO}}`;
 
 /** Status e criativo dos anúncios (pelos ids, 50 por chamada). */
 let camposCriativo: string | null = null;

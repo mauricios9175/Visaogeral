@@ -111,7 +111,8 @@ export async function listarCriativos(periodo: Periodo, filtro: { clienteId?: st
     const cri = criPorAd.get(adId);
     // vídeo pelo criativo (não pelas métricas): o Meta registra "reprodução de 3 s" até em imagem que ele anima
     // sozinho (recursos automáticos do criativo). Sem os dados do criativo, aí sim vale a métrica.
-    const ehVideo = cri ? cri.tipo === "VIDEO" || !!cri.video_id : s3 > 0;
+    // (enquanto a sincronização não regrava o criativo: com reproduções de 3 s e sem imagem própria, é vídeo)
+    const ehVideo = cri ? cri.tipo === "VIDEO" || !!cri.video_id || (s3 > 0 && !cri.imagem_url) : s3 > 0;
     const ehImagem = !ehVideo && !!cri && (cri.tipo === "PHOTO" || ((cri.tipo === "SHARE" || !cri.tipo) && !!cri.imagem_url));
     const recentes = ls.filter((l) => l.data >= ini3), antes = ls.filter((l) => l.data < ini3);
     const ctrRecente = div(soma((l) => l.cliques_link, recentes) * 100, soma((l) => l.impressoes, recentes));
