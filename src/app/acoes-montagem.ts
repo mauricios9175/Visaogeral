@@ -13,7 +13,7 @@ export type ResultadoMontagem = { ok: boolean; mensagem: string; detalhes: strin
 type Payload = {
   clienteId: string; conta: string; modeloId: string; objetivo: ObjetivoMeta; config: ConfigMeta;
   pagina: string; instagram: string; formulario: string; pixel: string;
-  criativos: { caminho: string; nome: string; tipo: string; videoId?: string }[];
+  criativos: { caminho: string; nome: string; tipo: string; videoId?: string; hash?: string }[];
   manterSemAnuncios?: boolean;
   formularioNovo?: Partial<ConfigFormulario>; // formulário criado na própria montagem (formulario = "novo")
   salvarComoModelo?: string;                  // nome para salvar esse formulário também como modelo

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { salvarEdicaoMeta } from "@/app/acoes-editar";
 import type { Edicao, TextosCriativo } from "@/lib/meta-editar";
 import { enviarImagem, enviarVideoAoMeta } from "./enviar-midia";
+import { BibliotecaMidia, PlayerVideo, PreviaAnuncio } from "./midia-meta";
 import { CTAS } from "@/lib/modelos";
 import { BotaoEnviar } from "./botao";
 import { CampoLocais, CartaoConjunto, campo } from "./campos-meta";
@@ -76,6 +77,7 @@ export function EditarMeta({ inicial, contaId, voltar }: { inicial: Edicao; cont
         </section>
       )}
 
+      {e.nivel === "anuncio" && <PreviaAnuncio conta={contaId} anuncioId={e.id} />}
       {e.nivel === "anuncio" && <EditorAnuncio criativo={e.criativo} contaId={contaId} onChange={(c) => mudar({ criativo: c })} />}
 
       <BotaoEnviar className="min-h-11 rounded-[10px] bg-destaque px-5 text-sm font-semibold text-white" aguardando="Salvando no Meta…">
@@ -94,7 +96,9 @@ function EditorAnuncio({ criativo: c, contaId, onChange }: { criativo: TextosCri
   const [formularios, setFormularios] = useState<{ itens: Opcao[]; erro?: string } | null>(null);
   const [enviando, setEnviando] = useState<string | null>(null);
   const [erroMidia, setErroMidia] = useState<string | null>(null);
-  const [previa, setPrevia] = useState<{ url: string; video: boolean } | null>(null);
+  const [previa, setPrevia] = useState<{ url: string; video: boolean; videoId?: string } | null>(null);
+  const [biblioteca, setBiblioteca] = useState(false);
+  const [tocar, setTocar] = useState<{ arquivo?: string; videoId?: string | null } | null>(null);
   const lote = useMemo(() => crypto.randomUUID(), []);
   const post = c.tipo === "post";
 
@@ -157,22 +161,34 @@ function EditorAnuncio({ criativo: c, contaId, onChange }: { criativo: TextosCri
 
       <section className={secao}>
         <h2 className="font-semibold">Mídia</h2>
-        <div className="flex flex-wrap items-start gap-4">
-          <div className="space-y-1 text-xs text-texto-3">
+        <div className="flex flex-wrap items-start gap-5">
+          <div className="space-y-1.5 text-xs text-texto-3">
             <div>{c.novaMidia ? "Nova" : "Atual"} ({c.novaMidia ? (c.novaMidia.tipo === "video" ? "vídeo" : "imagem") : c.midia.tipo === "video" ? "vídeo" : c.midia.tipo === "varias" ? "várias" : c.midia.tipo})</div>
-            {previa ? (previa.video
-              ? <video src={previa.url} className="h-40 rounded-lg border border-borda" controls muted />
-              // eslint-disable-next-line @next/next/no-img-element
-              : <img src={previa.url} alt="Mídia nova" className="h-40 rounded-lg border border-borda object-cover" />)
-              : c.midia.miniatura
-                // eslint-disable-next-line @next/next/no-img-element
-                ? <img src={c.midia.miniatura} alt="Mídia atual" className="h-40 rounded-lg border border-borda object-cover" />
-                : <div className="flex h-40 w-40 items-center justify-center rounded-lg border border-dashed border-borda">sem prévia</div>}
+            {(() => {
+              const video = previa ? previa.video : !c.novaMidia && c.midia.tipo === "video";
+              const img = previa ? (previa.video ? null : previa.url) : c.midia.miniatura;
+              const abrir = () => setTocar(previa ? (previa.videoId ? { videoId: previa.videoId } : { arquivo: previa.url }) : { videoId: c.midia.videoId });
+              return previa?.video && !previa.videoId ? (
+                <video src={previa.url} controls playsInline className="max-h-80 w-auto max-w-[300px] rounded-lg border border-borda bg-black" />
+              ) : (
+                <button type="button" onClick={video ? abrir : undefined} className={`relative block ${video ? "cursor-pointer" : "cursor-default"}`} aria-label={video ? "Assistir com som" : "Mídia"}>
+                  {img || (previa?.video && previa.url)
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={img ?? previa!.url} alt="Mídia" className="max-h-80 w-auto max-w-[300px] rounded-lg border border-borda object-contain" />
+                    : <span className="flex h-48 w-48 items-center justify-center rounded-lg border border-dashed border-borda">sem prévia</span>}
+                  {video && <span className="absolute inset-0 flex items-center justify-center"><span className="flex h-14 w-14 items-center justify-center rounded-full bg-black/70 text-2xl text-white">▶</span></span>}
+                </button>
+              );
+            })()}
+            {(c.midia.tipo === "video" && !c.novaMidia) || previa?.video ? <div>Clique para assistir com som.</div> : null}
           </div>
           {!post && (
             <div className="space-y-2">
+              <button type="button" onClick={() => setBiblioteca(true)} className="block rounded-lg border border-borda bg-superficie-2 px-3 py-2 text-sm font-semibold hover:border-destaque">
+                Escolher da biblioteca da conta
+              </button>
               <label className="inline-flex cursor-pointer items-center rounded-lg border border-borda bg-superficie-2 px-3 py-2 text-sm font-semibold hover:border-destaque">
-                Trocar imagem ou vídeo
+                Enviar do computador
                 <input type="file" accept="image/*,video/*" className="hidden" onChange={(x) => { void trocarMidia(x.target.files?.[0]); x.target.value = ""; }} />
               </label>
               {c.novaMidia && (
@@ -186,6 +202,14 @@ function EditorAnuncio({ criativo: c, contaId, onChange }: { criativo: TextosCri
             </div>
           )}
         </div>
+        {biblioteca && (
+          <BibliotecaMidia conta={contaId} onFechar={() => setBiblioteca(false)} onEscolher={([m]) => {
+            if (!m) return;
+            set({ novaMidia: m.tipo === "video" ? { tipo: "video", videoId: m.id } : { tipo: "imagem", hash: m.id } });
+            setPrevia({ url: m.miniatura ?? "", video: m.tipo === "video", ...(m.tipo === "video" ? { videoId: m.id } : {}) });
+          }} />
+        )}
+        {tocar && <PlayerVideo conta={contaId} videoId={tocar.videoId} arquivo={tocar.arquivo} onFechar={() => setTocar(null)} />}
       </section>
 
       <section className={secao}>

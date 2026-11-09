@@ -32,9 +32,9 @@ export type TextosCriativo = {
   paginaId: string; instagramId: string;
   destino: "formulario" | "whatsapp" | "site" | "outro";
   formularioId: string;
-  midia: { tipo: "imagem" | "video" | "varias" | "nenhuma"; miniatura: string | null };
+  midia: { tipo: "imagem" | "video" | "varias" | "nenhuma"; miniatura: string | null; videoId?: string | null };
   /** mídia nova escolhida na edição: imagem já no Storage (caminho) ou vídeo já enviado ao Meta (videoId) */
-  novaMidia?: { tipo: "imagem"; caminho: string } | { tipo: "video"; videoId: string } | null;
+  novaMidia?: { tipo: "imagem"; caminho?: string; hash?: string } | { tipo: "video"; videoId: string } | null;
 };
 export type EdicaoAnuncio = { nivel: "anuncio"; id: string; nome: string; status: string; conjunto: string; criativo: TextosCriativo };
 export type Edicao = EdicaoCampanha | EdicaoConjunto | EdicaoAnuncio;
@@ -116,6 +116,7 @@ export async function lerParaEditar(nivel: "campanha" | "conjunto" | "anuncio", 
       tipo: (af ? ((af.images?.length ?? 0) + (af.videos?.length ?? 0) > 1 ? "varias" : af.videos?.length ? "video" : af.images?.length ? "imagem" : "nenhuma")
         : vd ? "video" : ld ? "imagem" : "nenhuma") as TextosCriativo["midia"]["tipo"],
       miniatura: c?.thumbnail_url ?? c?.image_url ?? null,
+      videoId: (vd?.video_id as string | undefined) ?? ((af?.videos as { video_id?: string }[] | undefined)?.[0]?.video_id) ?? null,
     },
   };
   const criativo: TextosCriativo = af?.bodies?.length || af?.titles?.length
@@ -198,8 +199,12 @@ async function novoCriativo(adId: string, contaId: string, token: string, a: Tex
   let imagem: string | null = null;
   let video: { id: string; miniatura: string } | null = null;
   if (a.novaMidia?.tipo === "imagem") {
-    imagem = await subirImagem(contaId, token, a.novaMidia.caminho);
-    await apagar([a.novaMidia.caminho]).catch(() => null);
+    // da biblioteca da conta (já tem hash) ou enviada agora (está no Storage)
+    if (a.novaMidia.hash) imagem = a.novaMidia.hash;
+    else if (a.novaMidia.caminho) {
+      imagem = await subirImagem(contaId, token, a.novaMidia.caminho);
+      await apagar([a.novaMidia.caminho]).catch(() => null);
+    }
   } else if (a.novaMidia?.tipo === "video") {
     video = await esperarVideo(a.novaMidia.videoId, token, "vídeo novo");
   }

@@ -1,6 +1,7 @@
 "use client";
 
 import { EsbocoIA } from "./esboco-ia";
+import { BibliotecaMidia, PlayerVideo } from "./midia-meta";
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { montarCampanhaMeta, type ResultadoMontagem } from "@/app/acoes-montagem";
 import { configDoZero, FORMULARIO_PADRAO, normalizarConfig, OBJETIVOS, type ObjetivoMeta, type ConfigFormulario, type ConfigMeta, type Modelo } from "@/lib/modelos";
@@ -10,7 +11,7 @@ import { CamposFormulario } from "./editor-formulario";
 type Opcao = { id: string; nome: string; arquivado?: boolean };
 type Ativos = { paginas: Opcao[]; instagram: Opcao[]; pixels: Opcao[]; erro?: string };
 /** Criativo enviado: imagem fica no Storage (caminho); vídeo vai direto para o Meta da conta (videoId). */
-export type Criativo = { caminho: string; nome: string; tipo: string; tamanho: number; videoId?: string; conta?: string };
+export type Criativo = { caminho: string; nome: string; tipo: string; tamanho: number; videoId?: string; conta?: string; hash?: string; miniatura?: string | null };
 export type Padroes = Partial<{ conta: string; pagina: string; instagram: string; formulario: string; pixel: string; locais: ConfigMeta["locais"] }>;
 
 const botao = "rounded-lg border border-borda bg-superficie px-3 py-1.5 text-sm hover:border-destaque disabled:opacity-60";
@@ -64,6 +65,8 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
   const [formulario, setFormulario] = useState(
     padroes.formulario || (modelosFormulario[0] ? `modelo:${modelosFormulario[0].id}` : ""));
   const [criativos, setCriativos] = useState<Criativo[]>([]);
+  const [biblioteca, setBiblioteca] = useState(false);
+  const [tocar, setTocar] = useState<{ videoId?: string; arquivo?: string; nome: string } | null>(null);
   const [manterSemAnuncios, setManterSemAnuncios] = useState(true);
   const [enviando, setEnviando] = useState<string | null>(null);
   const [erroEnvio, setErroEnvio] = useState<string | null>(null);
@@ -167,7 +170,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
   }
 
   // vídeo enviado ao Meta fica na conta para onde foi; se trocou de conta, ele não serve
-  const criativosDaConta = criativos.filter((c) => !c.videoId || c.conta === conta);
+  const criativosDaConta = criativos.filter((c) => (!c.videoId && !c.hash) || c.conta === conta);
   // sem criativo: cria só a campanha e os conjuntos (o anúncio é subido depois no Gerenciador)
   const semCriativo = !criativosDaConta.length && !soAnuncios;
   const payload = {
@@ -306,6 +309,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
             <input type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" className="hidden"
               onChange={(e) => { enviarDoComputador(e.target.files); e.target.value = ""; }} disabled={!!enviando} />
           </label>
+          <button type="button" onClick={() => setBiblioteca(true)} disabled={!conta} className={botao}>Escolher da biblioteca da conta</button>
           <span className="text-xs text-texto-3">Imagens (JPG, PNG, WEBP) e vídeos (MP4, MOV). Dá para escolher vários de uma vez.</span>
         </div>
         {enviando && <p className="text-sm text-texto-2">⏳ {enviando}</p>}
@@ -313,12 +317,18 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
         {criativos.length > 0 && (
           <ul className="divide-y divide-borda text-sm">
             {criativos.map((c, i) => (
-              <li key={c.caminho || c.videoId} className="flex items-center gap-3 py-1.5">
+              <li key={c.caminho || c.videoId || c.hash} className="flex items-center gap-3 py-1.5">
                 <span className="w-6 text-texto-3">{i + 1}</span>
-                <span>{c.tipo.startsWith("video") ? "▶" : "🖼"}</span>
+                {c.miniatura
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={c.miniatura} alt="" className="h-10 w-10 rounded object-cover" />
+                  : <span>{c.tipo.startsWith("video") ? "▶" : "🖼"}</span>}
+                {c.videoId && (
+                  <button type="button" onClick={() => setTocar({ videoId: c.videoId, nome: c.nome })} className="rounded px-1.5 text-xs text-destaque hover:bg-destaque-bg">▶ assistir</button>
+                )}
                 <span className="min-w-0 flex-1 truncate">
                   {c.nome}
-                  {c.videoId && c.conta !== conta && <span className="ml-2 text-xs text-critico">enviado para outra conta: remova e envie de novo</span>}
+                  {(c.videoId || c.hash) && c.conta !== conta && <span className="ml-2 text-xs text-critico">é de outra conta: remova e escolha de novo</span>}
                 </span>
                 <span className="text-xs text-texto-3">{c.tamanho ? tamanho(c.tamanho) : ""}</span>
                 <button type="button" onClick={() => setCriativos((x) => x.filter((y) => y !== c))} className="text-texto-3 hover:text-critico">remover</button>
@@ -327,6 +337,16 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
           </ul>
         )}
         <p className="text-xs text-texto-3">Cada criativo vira um anúncio em cada conjunto, com os textos do modelo. Normalmente basta um: depois é só duplicar e trocar a imagem.</p>
+        {biblioteca && (
+          <BibliotecaMidia conta={conta} multiplo onFechar={() => setBiblioteca(false)} onEscolher={(itens) => setCriativos((x) => [
+            ...x,
+            ...itens.filter((m) => !x.some((y) => y.videoId === m.id || y.hash === m.id)).map((m): Criativo => ({
+              caminho: "", nome: m.nome, tipo: m.tipo === "video" ? "video/mp4" : "image/jpeg", tamanho: 0, conta, miniatura: m.miniatura,
+              ...(m.tipo === "video" ? { videoId: m.id } : { hash: m.id }),
+            })),
+          ])} />
+        )}
+        {tocar && <PlayerVideo conta={conta} videoId={tocar.videoId} arquivo={tocar.arquivo} titulo={tocar.nome} onFechar={() => setTocar(null)} />}
       </section>
 
       <section className="rounded-2xl border border-borda bg-superficie p-4">

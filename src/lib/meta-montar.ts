@@ -496,7 +496,7 @@ export function segmentacao(c: ConfigMeta, p: ConjuntoMeta) {
 export type DadosMontagem = {
   contaId: string; token: string; clienteNome: string; objetivo: ObjetivoMeta; config: ConfigMeta;
   paginaId: string; instagramId: string | null; formularioId: string | null; pixelId: string | null;
-  criativos: { caminho: string; nome: string; tipo: string; videoId?: string }[];
+  criativos: { caminho: string; nome: string; tipo: string; videoId?: string; hash?: string }[];
   /** objetivo formulário: em vez de um formulário existente, cria um novo na página a partir deste modelo */
   modeloFormulario?: ConfigFormulario | null;
   /** se nenhum anúncio puder ser criado, manter campanha, conjuntos e formulário (pausados) em vez de desfazer */
@@ -615,7 +615,8 @@ export async function montarNoMeta(d: DadosMontagem) {
       try {
         const ehVideo = cr.tipo.startsWith("video");
         // vídeo grande já foi direto para o Meta pelo navegador (cr.videoId); os outros passam pelo Storage
-        const midia = !ehVideo ? { hash: await subirImagem(d.contaId, d.token, cr.caminho) }
+        // imagem da biblioteca da conta já tem o hash; a enviada agora está no Storage
+        const midia = !ehVideo ? { hash: cr.hash ?? await subirImagem(d.contaId, d.token, cr.caminho) }
           : cr.videoId ? await esperarVideo(cr.videoId, d.token, cr.nome)
           : await subirVideo(d.contaId, d.token, cr.caminho, cr.nome);
         const nomeCriativo = aplicarNome(c.nomeAnuncio, { ...nomeBase, conjunto: "" }).replace(/\s*-\s*$/, "");
@@ -711,4 +712,48 @@ export async function lerDestinoMeta(token: string, alvo: { campanha?: string | 
     contaId: `act_${c.account_id}`, campanhaId: c.id, campanhaNome: c.name, objetivoMeta: c.objective,
     orcamentoNaCampanha: Boolean(Number(c.daily_budget) || Number(c.lifetime_budget)), objetivo: porObjetivo(c.objective),
   };
+}
+
+// ---------- Biblioteca de mídia da conta (como a do Gerenciador) e prévias ----------
+
+export type MidiaConta = { tipo: "video" | "imagem"; id: string; nome: string; miniatura: string | null; duracao?: number | null; largura?: number; altura?: number; criadoEm?: string };
+
+/** Vídeos ou imagens da conta de anúncio, mais recentes primeiro (com paginação do Meta). */
+export async function bibliotecaDaConta(contaId: string, token: string, tipo: "video" | "imagem", depois?: string | null) {
+  if (tipo === "video") {
+    const r = await getMeta<{ data: { id: string; title?: string; picture?: string; length?: number; created_time?: string }[]; paging?: { cursors?: { after?: string }; next?: string } }>(
+      montarUrl(`${contaId}/advideos`, token, { fields: "id,title,picture,length,created_time", limit: "40", ...(depois ? { after: depois } : {}) }));
+    return {
+      itens: r.data.map((v): MidiaConta => ({ tipo: "video", id: v.id, nome: v.title || `Vídeo ${v.id}`, miniatura: v.picture ?? null, duracao: v.length ?? null, criadoEm: v.created_time })),
+      depois: r.paging?.next ? r.paging.cursors?.after ?? null : null,
+    };
+  }
+  const r = await getMeta<{ data: { hash: string; name?: string; url?: string; permalink_url?: string; width?: number; height?: number; created_time?: string }[]; paging?: { cursors?: { after?: string }; next?: string } }>(
+    montarUrl(`${contaId}/adimages`, token, { fields: "hash,name,url,permalink_url,width,height,created_time", limit: "40", ...(depois ? { after: depois } : {}) }));
+  return {
+    itens: r.data.map((i): MidiaConta => ({ tipo: "imagem", id: i.hash, nome: i.name || "Imagem", miniatura: i.url ?? i.permalink_url ?? null, largura: i.width, altura: i.height, criadoEm: i.created_time })),
+    depois: r.paging?.next ? r.paging.cursors?.after ?? null : null,
+  };
+}
+
+/** Link do arquivo do vídeo para tocar com som no painel. */
+export async function fonteDoVideo(videoId: string, token: string) {
+  const v = await getMeta<{ source?: string; picture?: string }>(montarUrl(videoId, token, { fields: "source,picture" }));
+  return { fonte: v.source ?? null, miniatura: v.picture ?? null };
+}
+
+export const FORMATOS_PREVIA = {
+  MOBILE_FEED_STANDARD: "Feed do Facebook",
+  INSTAGRAM_STANDARD: "Feed do Instagram",
+  INSTAGRAM_STORY: "Stories do Instagram",
+  INSTAGRAM_REELS: "Reels do Instagram",
+  FACEBOOK_STORY_MOBILE: "Stories do Facebook",
+} as const;
+
+/** Prévia oficial do Meta para o anúncio (o endereço do iframe que o Meta devolve). */
+export async function previaDoAnuncio(adId: string, token: string, formato: keyof typeof FORMATOS_PREVIA) {
+  const r = await getMeta<{ data: { body?: string }[] }>(montarUrl(`${adId}/previews`, token, { ad_format: formato }));
+  const html = r.data[0]?.body ?? "";
+  const src = /src="([^"]+)"/.exec(html)?.[1]?.replace(/&amp;/g, "&") ?? null;
+  return { src };
 }
