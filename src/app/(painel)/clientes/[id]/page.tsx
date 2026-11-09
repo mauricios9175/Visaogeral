@@ -51,7 +51,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
   const { atual, anterior } = resolverPeriodo(busca);
   // O CRM não pode derrubar a tela do cliente: se falhar, mostra o erro só na seção dele.
   const [d, crm, google, { data: historico }] = await Promise.all([
-    detalheCliente(id, atual, anterior).catch((e: unknown) => ({ erroGeral: e instanceof Error ? e.message : String(e) })),
+    detalheCliente(id, atual, anterior, { recentes: true }).catch((e: unknown) => ({ erroGeral: e instanceof Error ? e.message : String(e) })),
     detalheCrm(id, atual, anterior).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })),
     detalheGoogle(id, atual, anterior).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })),
     db().from("acoes_log").select("*").eq("cliente_id", id).order("criado_em", { ascending: false }).limit(30),
@@ -530,6 +530,11 @@ function Tabela({ linhas, meta, nivel, voltar, abrir, destinos }: {
                   </td>
                 )}
                 <td className="px-3 py-2">
+                  <div className="flex items-center justify-end gap-1.5">
+                  <Link href={`${voltar.split("?")[0]}/editar?nivel=${NIVEL_ACAO[nivel]}&id=${l.id}&voltar=${encodeURIComponent(voltar)}`}
+                    className="rounded-md border border-borda bg-superficie px-2 py-0.5 text-xs hover:border-destaque" title="Editar nome, orçamento, público ou textos">
+                    Editar
+                  </Link>
                   <AcoesRapidas
                     plataforma="meta" contaId={l.conta} objetoId={l.id} nivel={NIVEL_ACAO[nivel]} nome={l.nome}
                     ativo={l.status === "ACTIVE" ? true : l.status === "PAUSED" ? false : null}
@@ -537,6 +542,7 @@ function Tabela({ linhas, meta, nivel, voltar, abrir, destinos }: {
                     voltar={voltar}
                     duplicar={{ destinos, campanhaAtual: l.campanhaId, conjuntoAtual: l.conjuntoId }}
                   />
+                  </div>
                 </td>
               </tr>
             );

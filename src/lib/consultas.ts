@@ -236,8 +236,25 @@ function agrupar(
     .sort((a, b) => b.gasto - a.gasto);
 }
 
+/** Itens recentes sem entrega de todas as contas do cliente (lidos no Meta; se falhar, segue sem eles). */
+async function itensRecentesDoCliente(contas: ContaAnuncio[]) {
+  const { tokenDaConta } = await import("./sync");
+  const { itensRecentes } = await import("./meta");
+  const partes = await Promise.all(contas.filter((c) => c.ativa_sync !== false).map(async (c) => {
+    try {
+      const token = await tokenDaConta(c);
+      if (!token) return [];
+      const itens = await Promise.race([itensRecentes(c.id, token), new Promise<never>((_, n) => setTimeout(() => n(new Error("tempo")), 8000))]);
+      return itens.map((i) => ({ ...i, conta: c.id }));
+    } catch {
+      return [];
+    }
+  }));
+  return partes.flat();
+}
+
 /** Tudo que a tela do cliente precisa: totais, série diária e tabelas por nível. */
-export async function detalheCliente(clienteId: string, atual: Periodo, anterior: Periodo) {
+export async function detalheCliente(clienteId: string, atual: Periodo, anterior: Periodo, opcoes: { recentes?: boolean } = {}) {
   const banco = db();
   const { data: cliente } = await banco.from("clientes").select("*").eq("id", clienteId).maybeSingle();
   if (!cliente) return null;
@@ -277,15 +294,34 @@ export async function detalheCliente(clienteId: string, atual: Periodo, anterior
       return { data, gasto: d.gasto, resultados: d.resultados, cpr: d.cpr };
     });
 
+  const campanhas = agrupar(doAtual, (l) => [l.campaign_id, l.campaign_nome], status);
+  const conjuntos = agrupar(doAtual, (l) => [l.adset_id, l.adset_nome, l.campaign_nome], status);
+  const anuncios = agrupar(doAtual, (l) => [l.ad_id, l.ad_nome, l.adset_nome], status);
+  // criados/duplicados há pouco e ainda sem gasto: não estão nos insights; vêm do Meta, com os números zerados
+  if (opcoes.recentes && atual.ate >= somarDiasISO(hojeISO(), -1)) {
+    const recentes = await itensRecentesDoCliente((contas ?? []) as ContaAnuncio[]);
+    const ja = new Set([...campanhas, ...conjuntos, ...anuncios].map((x) => x.id));
+    const zerado = derivar({ ...ZERO });
+    for (const r of recentes) {
+      if (ja.has(r.id)) continue;
+      ja.add(r.id);
+      const linha: LinhaTabela = {
+        ...zerado, id: r.id, nome: r.nome, tipo: null, status: r.status, conta: r.conta, campanhaId: r.campanhaId,
+        conjuntoId: r.conjuntoId, pai: r.nivel === "conjunto" ? r.campanhaNome : r.nivel === "anuncio" ? r.conjuntoNome ?? undefined : undefined,
+        orcamento: r.orcamentoDiario ? { valor: r.orcamentoDiario, tipo: "dia" } : r.orcamentoTotal ? { valor: r.orcamentoTotal, tipo: "total" } : null,
+      };
+      (r.nivel === "campanha" ? campanhas : r.nivel === "conjunto" ? conjuntos : anuncios).push(linha);
+    }
+  }
   return {
     cliente: cliente as Cliente,
     contas: (contas ?? []) as ContaAnuncio[],
     atual: derivar(doAtual.reduce(somar, { ...ZERO })),
     anterior: derivar(doAnterior.reduce(somar, { ...ZERO })),
     serie,
-    campanhas: agrupar(doAtual, (l) => [l.campaign_id, l.campaign_nome], status),
-    conjuntos: agrupar(doAtual, (l) => [l.adset_id, l.adset_nome, l.campaign_nome], status),
-    anuncios: agrupar(doAtual, (l) => [l.ad_id, l.ad_nome, l.adset_nome], status),
+    campanhas,
+    conjuntos,
+    anuncios,
   };
 }
 

@@ -686,3 +686,32 @@ export function linkGerenciador(contaId: string, nivel: "campanha" | "conjunto" 
 
 // usados pela montagem de campanhas (meta-montar.ts)
 export { get as getMeta, post as postMeta, montarUrl, todasPaginas, BASE as BASE_META };
+
+// ---------- Itens recentes sem entrega (criados/duplicados e ainda sem gasto: não aparecem nos insights) ----------
+
+export type ItemRecente = {
+  id: string; nome: string; nivel: "campanha" | "conjunto" | "anuncio"; status: string;
+  campanhaId: string; campanhaNome: string; conjuntoId: string | null; conjuntoNome: string | null;
+  orcamentoDiario: number | null; orcamentoTotal: number | null;
+};
+
+const STATUS_VISIVEIS = JSON.stringify(["ACTIVE", "PAUSED", "IN_PROCESS", "PENDING_REVIEW", "WITH_ISSUES", "CAMPAIGN_PAUSED", "ADSET_PAUSED", "DISAPPROVED", "PREAPPROVED", "PENDING_BILLING_INFO"]);
+
+/** Campanhas, conjuntos e anúncios criados ou alterados nos últimos `dias` dias (para mostrar os que ainda não gastaram). */
+export async function itensRecentes(contaId: string, token: string, dias = 30): Promise<ItemRecente[]> {
+  const desde = String(Math.floor(Date.now() / 1000) - dias * 86_400);
+  const base = { updated_since: desde, effective_status: STATUS_VISIVEIS, limit: "200" };
+  type Obj = { id: string; name?: string; effective_status?: string; daily_budget?: string; lifetime_budget?: string; campaign?: { id: string; name?: string }; adset?: { id: string; name?: string } };
+  const pegar = (borda: string, campos: string) => get<{ data: Obj[] }>(montarUrl(`${contaId}/${borda}`, token, { ...base, fields: campos })).then((r) => r.data).catch(() => [] as Obj[]);
+  const [camps, conjs, ads] = await Promise.all([
+    pegar("campaigns", "id,name,effective_status,daily_budget,lifetime_budget"),
+    pegar("adsets", "id,name,effective_status,daily_budget,lifetime_budget,campaign{id,name}"),
+    pegar("ads", "id,name,effective_status,campaign{id,name},adset{id,name}"),
+  ]);
+  const orc = (o: Obj) => ({ orcamentoDiario: o.daily_budget ? Number(o.daily_budget) / 100 : null, orcamentoTotal: o.lifetime_budget ? Number(o.lifetime_budget) / 100 : null });
+  return [
+    ...camps.map((o): ItemRecente => ({ id: o.id, nome: o.name ?? o.id, nivel: "campanha", status: o.effective_status ?? "", campanhaId: o.id, campanhaNome: o.name ?? "", conjuntoId: null, conjuntoNome: null, ...orc(o) })),
+    ...conjs.map((o): ItemRecente => ({ id: o.id, nome: o.name ?? o.id, nivel: "conjunto", status: o.effective_status ?? "", campanhaId: o.campaign?.id ?? "", campanhaNome: o.campaign?.name ?? "", conjuntoId: o.id, conjuntoNome: o.name ?? "", ...orc(o) })),
+    ...ads.map((o): ItemRecente => ({ id: o.id, nome: o.name ?? o.id, nivel: "anuncio", status: o.effective_status ?? "", campanhaId: o.campaign?.id ?? "", campanhaNome: o.campaign?.name ?? "", conjuntoId: o.adset?.id ?? null, conjuntoNome: o.adset?.name ?? null, orcamentoDiario: null, orcamentoTotal: null })),
+  ];
+}

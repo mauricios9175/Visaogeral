@@ -471,7 +471,7 @@ function agruparPorTipo(itens: Interesse[]) {
   return grupos;
 }
 
-function segmentacao(c: ConfigMeta, p: ConjuntoMeta) {
+export function segmentacao(c: ConfigMeta, p: ConjuntoMeta) {
   const cidades = c.locais.filter((l) => l.tipo === "city")
     .map((l) => (l.raio ? { key: l.key, radius: l.raio, distance_unit: "kilometer" } : { key: l.key }));
   const regioes = c.locais.filter((l) => l.tipo === "region").map((l) => ({ key: l.key }));

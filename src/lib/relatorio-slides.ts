@@ -424,7 +424,7 @@ function somarFunil(a: NumerosFunil, b: NumerosFunil): NumerosFunil {
 }
 
 const VERBO: Record<string, string> = {
-  pausar: "Pausamos", ativar: "Ativamos", orcamento: "Ajustamos o orçamento de", duplicar: "Duplicamos", montar: "Criamos",
+  pausar: "Pausamos", ativar: "Ativamos", orcamento: "Ajustamos o orçamento de", duplicar: "Duplicamos", montar: "Criamos", editar: "Editamos",
 };
 
 const diaCurto = (iso: string) =>

@@ -177,28 +177,7 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
         <legend className="mb-2 text-sm font-medium">Localização <span className="font-normal text-texto-3">(vale para todos os conjuntos)</span></legend>
         <div className="space-y-1">
           {!naMontagem && <span className={dica}>Opcional no modelo; na montagem você escolhe a cidade do cliente.</span>}
-          <Busca<Local>
-            tipo="local" conta={conta} placeholder="Digite a cidade ou o estado…"
-            rotuloItem={(l) => l.nome}
-            onEscolher={(l) => !valor.locais.some((x) => x.key === l.key) && set("locais", [...valor.locais, { ...l, raio: l.tipo === "city" ? 15 : undefined }])}
-          />
-          <div className="flex flex-wrap gap-2">
-            {valor.locais.map((l, i) => (
-              <span key={l.key} className="inline-flex items-center gap-1 rounded-full bg-fundo px-2 py-0.5 text-xs ring-1 ring-borda">
-                {l.nome}
-                {l.tipo === "city" && (
-                  <select
-                    value={l.raio ?? 0}
-                    onChange={(e) => set("locais", valor.locais.map((x, j) => (j === i ? { ...x, raio: Number(e.target.value) || undefined } : x)))}
-                    className="rounded bg-transparent text-xs"
-                  >
-                    {RAIOS.map((r) => <option key={r} value={r}>{r ? `+${r} km` : "só a cidade"}</option>)}
-                  </select>
-                )}
-                <button type="button" onClick={() => set("locais", valor.locais.filter((_, j) => j !== i))} className="text-texto-3 hover:text-critico" aria-label="Remover">×</button>
-              </span>
-            ))}
-          </div>
+          <CampoLocais valor={valor.locais} onChange={(v) => set("locais", v)} conta={conta} />
         </div>
       </fieldset>
 
@@ -257,14 +236,14 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
 }
 
 /** Um conjunto do modelo: nome, orçamento (ABO), idade, gênero, Advantage+ e interesses. */
-function CartaoConjunto({ indice, conjunto, conta, comOrcamento, podeRemover, onChange, onDuplicar, onRemover }: {
+export function CartaoConjunto({ indice, conjunto, conta, comOrcamento, podeRemover, onChange, onDuplicar, onRemover }: {
   indice: number;
   conjunto: ConjuntoMeta;
   conta?: string;
   comOrcamento: boolean;
   podeRemover: boolean;
   onChange: (c: ConjuntoMeta) => void;
-  onDuplicar: () => void;
+  onDuplicar?: () => void;
   onRemover: () => void;
 }) {
   const set = <K extends keyof ConjuntoMeta>(k: K, v: ConjuntoMeta[K]) => onChange({ ...conjunto, [k]: v });
@@ -280,7 +259,7 @@ function CartaoConjunto({ indice, conjunto, conta, comOrcamento, podeRemover, on
             <input type="number" min={1} step="0.01" value={conjunto.orcamentoDiario} onChange={(e) => set("orcamentoDiario", Number(e.target.value))} className={campo} />
           </label>
         )}
-        <button type="button" onClick={onDuplicar} className="pb-2 text-xs text-destaque underline">duplicar</button>
+        {onDuplicar && <button type="button" onClick={onDuplicar} className="pb-2 text-xs text-destaque underline">duplicar</button>}
         {podeRemover && <button type="button" onClick={onRemover} className="pb-2 text-xs text-texto-3 underline hover:text-critico">remover</button>}
       </div>
       <div className="grid gap-3 md:grid-cols-4">
@@ -323,5 +302,35 @@ function CartaoConjunto({ indice, conjunto, conta, comOrcamento, podeRemover, on
           onEscolher={(x) => !conjunto.interesses.some((y) => y.id === x.id) && set("interesses", [...conjunto.interesses, x])} />
       </div>
     </div>
+  );
+}
+
+/** Busca e lista de locais (cidade com raio, estado, país). */
+export function CampoLocais({ valor, onChange, conta }: { valor: Local[]; onChange: (v: Local[]) => void; conta?: string }) {
+  return (
+    <>
+          <Busca<Local>
+            tipo="local" conta={conta} placeholder="Digite a cidade ou o estado…"
+            rotuloItem={(l) => l.nome}
+            onEscolher={(l) => !valor.some((x) => x.key === l.key) && onChange([...valor, { ...l, raio: l.tipo === "city" ? 15 : undefined }])}
+          />
+          <div className="flex flex-wrap gap-2">
+            {valor.map((l, i) => (
+              <span key={l.key} className="inline-flex items-center gap-1 rounded-full bg-fundo px-2 py-0.5 text-xs ring-1 ring-borda">
+                {l.nome}
+                {l.tipo === "city" && (
+                  <select
+                    value={l.raio ?? 0}
+                    onChange={(e) => onChange(valor.map((x, j) => (j === i ? { ...x, raio: Number(e.target.value) || undefined } : x)))}
+                    className="rounded bg-transparent text-xs"
+                  >
+                    {RAIOS.map((r) => <option key={r} value={r}>{r ? `+${r} km` : "só a cidade"}</option>)}
+                  </select>
+                )}
+                <button type="button" onClick={() => onChange(valor.filter((_, j) => j !== i))} className="text-texto-3 hover:text-critico" aria-label="Remover">×</button>
+              </span>
+            ))}
+          </div>
+    </>
   );
 }
