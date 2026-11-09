@@ -386,7 +386,7 @@ export async function criarFormulario(paginaId: string, token: string, f: Config
 
 // ---------- mídia ----------
 
-async function subirImagem(contaId: string, token: string, caminho: string) {
+export async function subirImagem(contaId: string, token: string, caminho: string) {
   const arquivo = await baixar(caminho);
   const bytes = Buffer.from(await arquivo.arrayBuffer()).toString("base64");
   const r = await postMeta(`${contaId}/adimages`, token, { bytes });
@@ -403,7 +403,7 @@ async function subirVideo(contaId: string, token: string, caminho: string, nome:
 }
 
 /** Espera o Meta processar o vídeo e devolve o id e a miniatura (o anúncio de vídeo precisa dela). */
-async function esperarVideo(id: string, token: string, nome: string) {
+export async function esperarVideo(id: string, token: string, nome: string) {
   for (let i = 0; i < 40; i++) {
     const v = await getMeta<{ status?: { video_status?: string }; picture?: string; thumbnails?: { data?: { uri: string; is_preferred?: boolean }[] } }>(
       montarUrl(id, token, { fields: "status,picture,thumbnails" }),

@@ -1,6 +1,7 @@
 import "server-only";
 import { getMeta, montarUrl, postMeta } from "./meta";
-import { segmentacao } from "./meta-montar";
+import { esperarVideo, segmentacao, subirImagem } from "./meta-montar";
+import { apagar } from "./armazenamento";
 import { CONJUNTO_PADRAO, normalizarConfig, type ConjuntoMeta, type Interesse, type Local } from "./modelos";
 
 // Edição de campanha, conjunto e anúncio do Meta pelo painel. Tudo é lido na hora no Meta e salvo direto lá.
@@ -27,6 +28,13 @@ export type EdicaoConjunto = {
 export type TextosCriativo = {
   tipo: "link" | "video" | "feed" | "post";
   textos: string[]; titulos: string[]; descricoes: string[]; link: string; cta: string; urlTags: string;
+  // identidade, destino e mídia (como no Gerenciador)
+  paginaId: string; instagramId: string;
+  destino: "formulario" | "whatsapp" | "site" | "outro";
+  formularioId: string;
+  midia: { tipo: "imagem" | "video" | "varias" | "nenhuma"; miniatura: string | null };
+  /** mídia nova escolhida na edição: imagem já no Storage (caminho) ou vídeo já enviado ao Meta (videoId) */
+  novaMidia?: { tipo: "imagem"; caminho: string } | { tipo: "video"; videoId: string } | null;
 };
 export type EdicaoAnuncio = { nivel: "anuncio"; id: string; nome: string; status: string; conjunto: string; criativo: TextosCriativo };
 export type Edicao = EdicaoCampanha | EdicaoConjunto | EdicaoAnuncio;
@@ -84,20 +92,38 @@ export async function lerParaEditar(nivel: "campanha" | "conjunto" | "anuncio", 
       montarUrl(id, token, { fields: "id,name,effective_status,daily_budget,lifetime_budget,targeting,campaign{name}" }));
     return { nivel, id: a.id, nome: a.name, status: a.effective_status, campanha: a.campaign?.name ?? "", orcamento: orcamentoDe(a), ...lerPublico(a.targeting ?? {}) };
   }
-  type Spec = { link_data?: Record<string, unknown> & { message?: string; name?: string; description?: string; link?: string; call_to_action?: { type?: string } };
-    video_data?: Record<string, unknown> & { message?: string; title?: string; link_description?: string; call_to_action?: { type?: string; value?: { link?: string } } } };
-  type Feed = { bodies?: { text: string }[]; titles?: { text: string }[]; descriptions?: { text: string }[]; link_urls?: { website_url?: string }[]; call_to_action_types?: string[] };
+  type CTA = { type?: string; value?: { link?: string; lead_gen_form_id?: string; app_destination?: string } };
+  type Spec = { page_id?: string; instagram_user_id?: string; instagram_actor_id?: string;
+    link_data?: Record<string, unknown> & { message?: string; name?: string; description?: string; link?: string; call_to_action?: CTA };
+    video_data?: Record<string, unknown> & { message?: string; title?: string; link_description?: string; call_to_action?: CTA } };
+  type Feed = { bodies?: { text: string }[]; titles?: { text: string }[]; descriptions?: { text: string }[]; link_urls?: { website_url?: string }[];
+    call_to_action_types?: string[]; images?: unknown[]; videos?: unknown[] };
   const ad = await getMeta<{ id: string; name: string; effective_status: string; adset?: { name?: string };
-    creative?: { id: string; object_story_spec?: Spec; asset_feed_spec?: Feed; url_tags?: string; object_story_id?: string } }>(
-    montarUrl(id, token, { fields: "id,name,effective_status,adset{name},creative{id,object_story_spec,asset_feed_spec,url_tags,object_story_id}" }));
+    creative?: { id: string; object_story_spec?: Spec; asset_feed_spec?: Feed; url_tags?: string; object_story_id?: string; thumbnail_url?: string; image_url?: string; instagram_user_id?: string } }>(
+    montarUrl(id, token, { fields: "id,name,effective_status,adset{name},creative{id,object_story_spec,asset_feed_spec,url_tags,object_story_id,thumbnail_url,image_url,instagram_user_id}" }));
   const c = ad.creative;
-  const ld = c?.object_story_spec?.link_data, vd = c?.object_story_spec?.video_data, af = c?.asset_feed_spec;
+  const oss = c?.object_story_spec;
+  const ld = oss?.link_data, vd = oss?.video_data, af = c?.asset_feed_spec;
+  const cta = ld?.call_to_action ?? vd?.call_to_action;
+  const ctaTipo = cta?.type ?? af?.call_to_action_types?.[0] ?? "";
+  const formularioId = cta?.value?.lead_gen_form_id ?? "";
+  const link = cta?.value?.link && cta.value.link !== "http://fb.me/" ? cta.value.link : ld?.link ?? af?.link_urls?.[0]?.website_url ?? "";
+  const destino: TextosCriativo["destino"] = formularioId ? "formulario" : /WHATSAPP/.test(ctaTipo) || cta?.value?.app_destination === "WHATSAPP" ? "whatsapp"
+    : link && !/fb\.me|api\.whatsapp/.test(link) ? "site" : "outro";
+  const extras = {
+    paginaId: oss?.page_id ?? "", instagramId: oss?.instagram_user_id ?? c?.instagram_user_id ?? "", destino, formularioId,
+    midia: {
+      tipo: (af ? ((af.images?.length ?? 0) + (af.videos?.length ?? 0) > 1 ? "varias" : af.videos?.length ? "video" : af.images?.length ? "imagem" : "nenhuma")
+        : vd ? "video" : ld ? "imagem" : "nenhuma") as TextosCriativo["midia"]["tipo"],
+      miniatura: c?.thumbnail_url ?? c?.image_url ?? null,
+    },
+  };
   const criativo: TextosCriativo = af?.bodies?.length || af?.titles?.length
     ? { tipo: "feed", textos: (af.bodies ?? []).map((x) => x.text), titulos: (af.titles ?? []).map((x) => x.text), descricoes: (af.descriptions ?? []).map((x) => x.text),
-        link: af.link_urls?.[0]?.website_url ?? "", cta: af.call_to_action_types?.[0] ?? "", urlTags: c?.url_tags ?? "" }
-    : ld ? { tipo: "link", textos: [ld.message ?? ""], titulos: [ld.name ?? ""], descricoes: [ld.description ?? ""], link: ld.link ?? "", cta: ld.call_to_action?.type ?? "", urlTags: c?.url_tags ?? "" }
-    : vd ? { tipo: "video", textos: [vd.message ?? ""], titulos: [vd.title ?? ""], descricoes: [vd.link_description ?? ""], link: vd.call_to_action?.value?.link ?? "", cta: vd.call_to_action?.type ?? "", urlTags: c?.url_tags ?? "" }
-    : { tipo: "post", textos: [], titulos: [], descricoes: [], link: "", cta: "", urlTags: c?.url_tags ?? "" };
+        link, cta: ctaTipo, urlTags: c?.url_tags ?? "", ...extras }
+    : ld ? { tipo: "link", textos: [ld.message ?? ""], titulos: [ld.name ?? ""], descricoes: [ld.description ?? ""], link, cta: ctaTipo, urlTags: c?.url_tags ?? "", ...extras }
+    : vd ? { tipo: "video", textos: [vd.message ?? ""], titulos: [vd.title ?? ""], descricoes: [vd.link_description ?? ""], link, cta: ctaTipo, urlTags: c?.url_tags ?? "", ...extras }
+    : { tipo: "post", textos: [], titulos: [], descricoes: [], link: "", cta: "", urlTags: c?.url_tags ?? "", ...extras };
   return { nivel: "anuncio", id: ad.id, nome: ad.name, status: ad.effective_status, conjunto: ad.adset?.name ?? "", criativo };
 }
 
@@ -138,48 +164,100 @@ export async function salvarEdicao(e: Edicao, contaId: string, token: string): P
 
   if (e.nivel === "anuncio" && atual.nivel === "anuncio") {
     const a = e.criativo, o = atual.criativo;
-    const mudouTexto = JSON.stringify([a.textos, a.titulos, a.descricoes, a.link, a.cta, a.urlTags]) !== JSON.stringify([o.textos, o.titulos, o.descricoes, o.link, o.cta, o.urlTags]);
-    if (mudouTexto) {
-      if (o.tipo === "post") throw new Error("Este anúncio usa uma publicação já existente: o texto só muda na própria publicação.");
-      // o Meta não deixa editar um criativo: cria um novo igual, com os textos novos, e troca no anúncio
-      const ad = await getMeta<{ creative: { id: string } }>(montarUrl(e.id, token, { fields: "creative{id}" }));
-      const c = await getMeta<{ name?: string; object_story_spec?: Record<string, Record<string, unknown>>; asset_feed_spec?: Record<string, unknown> }>(
-        montarUrl(ad.creative.id, token, { fields: "name,object_story_spec,asset_feed_spec" }));
-      const limpo = (l: string[]) => l.map((x) => x.trim()).filter(Boolean);
-      const novo: Record<string, string> = { name: `${c.name ?? atual.nome} (editado)` };
-      if (o.tipo === "feed" && c.asset_feed_spec) {
-        const feed = { ...c.asset_feed_spec,
-          bodies: limpo(a.textos).map((text) => ({ text })), titles: limpo(a.titulos).map((text) => ({ text })),
-          ...(limpo(a.descricoes).length ? { descriptions: limpo(a.descricoes).map((text) => ({ text })) } : {}),
-          ...(a.link ? { link_urls: [{ ...((c.asset_feed_spec.link_urls as Record<string, unknown>[] | undefined)?.[0] ?? {}), website_url: a.link }] } : {}),
-          ...(a.cta ? { call_to_action_types: [a.cta] } : {}),
-        };
-        novo.asset_feed_spec = JSON.stringify(feed);
-        if (c.object_story_spec) novo.object_story_spec = JSON.stringify(c.object_story_spec);
-      } else if (c.object_story_spec) {
-        const spec = JSON.parse(JSON.stringify(c.object_story_spec)) as Record<string, Record<string, unknown>>;
-        if (spec.link_data) {
-          Object.assign(spec.link_data, { message: a.textos[0] ?? "", name: a.titulos[0] ?? "", ...(a.descricoes[0] ? { description: a.descricoes[0] } : {}) });
-          if (a.link && spec.link_data.link !== "http://fb.me/") spec.link_data.link = a.link;
-          const cta = spec.link_data.call_to_action as { type?: string; value?: Record<string, unknown> } | undefined;
-          if (cta && a.cta) cta.type = a.cta;
-          if (cta?.value?.link && a.link && cta.value.link !== "http://fb.me/") cta.value.link = a.link;
-        } else if (spec.video_data) {
-          Object.assign(spec.video_data, { message: a.textos[0] ?? "", title: a.titulos[0] ?? "", ...(a.descricoes[0] ? { link_description: a.descricoes[0] } : {}) });
-          const cta = spec.video_data.call_to_action as { type?: string; value?: Record<string, unknown> } | undefined;
-          if (cta && a.cta) cta.type = a.cta;
-          if (cta?.value?.link && a.link) cta.value.link = a.link;
-        }
-        novo.object_story_spec = JSON.stringify(spec);
-      }
-      if (a.urlTags.trim()) novo.url_tags = a.urlTags.trim().replace(/^[?&]+/, "");
-      const criado = await postMeta(`${contaId}/adcreatives`, token, novo);
-      campos.creative = JSON.stringify({ creative_id: criado.id });
-      mudou.push("textos do anúncio");
+    const chave = (x: TextosCriativo) => JSON.stringify([x.textos, x.titulos, x.descricoes, x.link, x.cta, x.urlTags, x.paginaId, x.instagramId, x.formularioId]);
+    if (chave(a) !== chave(o) || a.novaMidia) {
+      if (o.tipo === "post") throw new Error("Este anúncio usa uma publicação já existente: texto e mídia só mudam na própria publicação.");
+      const novo = await novoCriativo(e.id, contaId, token, a, o, atual.nome);
+      campos.creative = JSON.stringify({ creative_id: novo });
+      const oque = [
+        chave({ ...a, paginaId: "", instagramId: "", formularioId: "" }) !== chave({ ...o, paginaId: "", instagramId: "", formularioId: "" }) && "textos",
+        a.novaMidia && (a.novaMidia.tipo === "video" ? "vídeo" : "imagem"),
+        a.formularioId !== o.formularioId && "formulário",
+        (a.paginaId !== o.paginaId || a.instagramId !== o.instagramId) && "identidade",
+      ].filter(Boolean);
+      mudou.push(`anúncio (${oque.join(", ") || "criativo"})`);
     }
   }
 
   if (!Object.keys(campos).length) return [];
   await postMeta(e.id, token, campos);
   return mudou;
+}
+
+/**
+ * Cria o criativo novo do anúncio: igual ao atual, com textos, destino, identidade e mídia trocados.
+ * O Meta não deixa alterar um criativo que já existe.
+ */
+async function novoCriativo(adId: string, contaId: string, token: string, a: TextosCriativo, o: TextosCriativo, nomeAnuncio: string) {
+  const ad = await getMeta<{ creative: { id: string } }>(montarUrl(adId, token, { fields: "creative{id}" }));
+  const c = await getMeta<{ name?: string; object_story_spec?: Record<string, unknown>; asset_feed_spec?: Record<string, unknown> }>(
+    montarUrl(ad.creative.id, token, { fields: "name,object_story_spec,asset_feed_spec" }));
+  const limpo = (l: string[]) => l.map((x) => x.trim()).filter(Boolean);
+
+  // mídia nova (sobe a imagem para o Meta; o vídeo já foi pelo navegador e só espera ficar pronto)
+  let imagem: string | null = null;
+  let video: { id: string; miniatura: string } | null = null;
+  if (a.novaMidia?.tipo === "imagem") {
+    imagem = await subirImagem(contaId, token, a.novaMidia.caminho);
+    await apagar([a.novaMidia.caminho]).catch(() => null);
+  } else if (a.novaMidia?.tipo === "video") {
+    video = await esperarVideo(a.novaMidia.videoId, token, "vídeo novo");
+  }
+
+  const novo: Record<string, string> = { name: `${c.name ?? nomeAnuncio} (editado)` };
+  const spec = JSON.parse(JSON.stringify(c.object_story_spec ?? {})) as Record<string, unknown> & {
+    page_id?: string; instagram_user_id?: string; instagram_actor_id?: string;
+    link_data?: Record<string, unknown>; video_data?: Record<string, unknown>;
+  };
+  if (a.paginaId) spec.page_id = a.paginaId;
+  if (a.instagramId) spec.instagram_user_id = a.instagramId; else delete spec.instagram_user_id;
+  delete spec.instagram_actor_id;
+
+  if (o.tipo === "feed" && c.asset_feed_spec) {
+    const f = c.asset_feed_spec as Record<string, unknown>;
+    const feed: Record<string, unknown> = { ...f,
+      bodies: limpo(a.textos).map((text) => ({ text })), titles: limpo(a.titulos).map((text) => ({ text })),
+      ...(limpo(a.descricoes).length ? { descriptions: limpo(a.descricoes).map((text) => ({ text })) } : {}),
+      ...(a.link && a.destino === "site" ? { link_urls: [{ ...((f.link_urls as Record<string, unknown>[] | undefined)?.[0] ?? {}), website_url: a.link }] } : {}),
+      ...(a.cta ? { call_to_action_types: [a.cta] } : {}),
+    };
+    if (imagem) { feed.images = [{ hash: imagem }]; delete feed.videos; feed.ad_formats = ["SINGLE_IMAGE"]; }
+    if (video) { feed.videos = [{ video_id: video.id, thumbnail_url: video.miniatura }]; delete feed.images; feed.ad_formats = ["SINGLE_VIDEO"]; }
+    novo.asset_feed_spec = JSON.stringify(feed);
+    novo.object_story_spec = JSON.stringify({ page_id: spec.page_id, ...(spec.instagram_user_id ? { instagram_user_id: spec.instagram_user_id } : {}) });
+  } else {
+    const atual = (spec.link_data ?? spec.video_data ?? {}) as Record<string, unknown> & { call_to_action?: { type?: string; value?: Record<string, unknown> } };
+    // destino: o link do formulário é o padrão do Meta; WhatsApp não leva link
+    const linkSite = a.destino === "site" ? a.link : a.destino === "formulario" ? "http://fb.me/" : a.destino === "whatsapp" ? "https://api.whatsapp.com/send" : String(atual.link ?? a.link ?? "");
+    const ctaValor: Record<string, unknown> = { ...(atual.call_to_action?.value ?? {}) };
+    if (a.destino === "formulario") { ctaValor.lead_gen_form_id = a.formularioId; ctaValor.link = "http://fb.me/"; }
+    else if (a.destino === "site" && a.link) ctaValor.link = a.link;
+    const virarVideo = !!video || (!imagem && !!spec.video_data);
+    const ctaTipo = a.cta || atual.call_to_action?.type;
+    let cta: Record<string, unknown> | undefined = ctaTipo ? { type: ctaTipo, ...(Object.keys(ctaValor).length ? { value: ctaValor } : {}) } : undefined;
+    if (a.destino === "whatsapp") cta = virarVideo ? { type: "WHATSAPP_MESSAGE" } : { type: "WHATSAPP_MESSAGE", value: { app_destination: "WHATSAPP" } };
+    if (virarVideo) {
+      const v = spec.video_data ?? {};
+      spec.video_data = {
+        ...v, ...(video ? { video_id: video.id, image_url: video.miniatura } : {}),
+        message: a.textos[0] ?? "", title: a.titulos[0] ?? "", ...(a.descricoes[0] ? { link_description: a.descricoes[0] } : {}),
+        ...(cta ? { call_to_action: cta } : {}),
+      };
+      delete (spec.video_data as Record<string, unknown>).image_hash;
+      delete spec.link_data;
+    } else {
+      const l = spec.link_data ?? {};
+      spec.link_data = {
+        ...l, ...(imagem ? { image_hash: imagem } : {}), link: linkSite,
+        message: a.textos[0] ?? "", name: a.titulos[0] ?? "", ...(a.descricoes[0] ? { description: a.descricoes[0] } : {}),
+        ...(cta ? { call_to_action: cta } : {}),
+      };
+      if (imagem) { delete (spec.link_data as Record<string, unknown>).picture; delete (spec.link_data as Record<string, unknown>).image_url; }
+      delete spec.video_data;
+    }
+    novo.object_story_spec = JSON.stringify(spec);
+  }
+  if (a.urlTags.trim() && a.destino !== "whatsapp") novo.url_tags = a.urlTags.trim().replace(/^[?&]+/, "");
+  const criado = await postMeta(`${contaId}/adcreatives`, token, novo);
+  return String(criado.id);
 }

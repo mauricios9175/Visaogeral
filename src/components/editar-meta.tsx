@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { salvarEdicaoMeta } from "@/app/acoes-editar";
-import type { Edicao } from "@/lib/meta-editar";
+import type { Edicao, TextosCriativo } from "@/lib/meta-editar";
+import { enviarImagem, enviarVideoAoMeta } from "./enviar-midia";
 import { CTAS } from "@/lib/modelos";
 import { BotaoEnviar } from "./botao";
 import { CampoLocais, CartaoConjunto, campo } from "./campos-meta";
@@ -75,49 +76,173 @@ export function EditarMeta({ inicial, contaId, voltar }: { inicial: Edicao; cont
         </section>
       )}
 
-      {e.nivel === "anuncio" && (
-        <section className={caixa}>
-          <h2 className="font-semibold">Anúncio</h2>
-          {e.criativo.tipo === "post" ? (
-            <p className="text-sm text-texto-2">Este anúncio usa uma publicação que já existe na página: os textos só mudam na própria publicação. Aqui dá para mudar o nome e os parâmetros de URL.</p>
-          ) : (
-            <>
-              <Lista titulo="Texto principal" linhas={4} valor={e.criativo.textos.length ? e.criativo.textos : [""]} max={e.criativo.tipo === "feed" ? 5 : 1}
-                onChange={(v) => mudar({ criativo: { ...e.criativo, textos: v } })} />
-              <Lista titulo="Título" valor={e.criativo.titulos.length ? e.criativo.titulos : [""]} max={e.criativo.tipo === "feed" ? 5 : 1}
-                onChange={(v) => mudar({ criativo: { ...e.criativo, titulos: v } })} />
-              <Lista titulo="Descrição (opcional)" valor={e.criativo.descricoes.length ? e.criativo.descricoes : [""]} max={e.criativo.tipo === "feed" ? 5 : 1}
-                onChange={(v) => mudar({ criativo: { ...e.criativo, descricoes: v } })} />
-              <div className="grid gap-3 md:grid-cols-2">
-                {e.criativo.cta && (
-                  <label className={rotulo}>Botão
-                    <select value={e.criativo.cta} onChange={(x) => mudar({ criativo: { ...e.criativo, cta: x.target.value } })} className={campo}>
-                      {!BOTOES.some((b) => b.valor === e.criativo.cta) && <option value={e.criativo.cta}>{e.criativo.cta}</option>}
-                      {BOTOES.map((b) => <option key={b.valor} value={b.valor}>{b.rotulo}</option>)}
-                    </select>
-                  </label>
-                )}
-                {e.criativo.link && !/fb\.me|api\.whatsapp\.com/.test(e.criativo.link) && (
-                  <label className={rotulo}>Link
-                    <input value={e.criativo.link} onChange={(x) => mudar({ criativo: { ...e.criativo, link: x.target.value } })} className={campo} />
-                  </label>
-                )}
-              </div>
-            </>
-          )}
-          <label className={rotulo}>Parâmetros de URL <span className="text-xs text-texto-3">(UTMs)</span>
-            <input value={e.criativo.urlTags} onChange={(x) => mudar({ criativo: { ...e.criativo, urlTags: x.target.value } })} className={`${campo} font-mono text-xs`} />
-          </label>
-          <p className="text-xs text-texto-3">
-            O Meta não deixa alterar um criativo que já existe: mudando textos, link, botão ou UTMs, o painel cria um criativo novo
-            igual (mesma imagem/vídeo) com as mudanças e troca no anúncio. O anúncio volta para análise do Meta.
-          </p>
-        </section>
-      )}
+      {e.nivel === "anuncio" && <EditorAnuncio criativo={e.criativo} contaId={contaId} onChange={(c) => mudar({ criativo: c })} />}
 
       <BotaoEnviar className="min-h-11 rounded-[10px] bg-destaque px-5 text-sm font-semibold text-white" aguardando="Salvando no Meta…">
         Salvar no Meta
       </BotaoEnviar>
     </form>
+  );
+}
+
+type Opcao = { id: string; nome: string; arquivado?: boolean };
+
+/** Edição do anúncio, nas seções do Gerenciador: identidade, mídia, texto, destino, botão e UTMs. */
+function EditorAnuncio({ criativo: c, contaId, onChange }: { criativo: TextosCriativo; contaId: string; onChange: (c: TextosCriativo) => void }) {
+  const set = (x: Partial<TextosCriativo>) => onChange({ ...c, ...x });
+  const [ativos, setAtivos] = useState<{ paginas: Opcao[]; instagram: Opcao[]; erro?: string } | null>(null);
+  const [formularios, setFormularios] = useState<{ itens: Opcao[]; erro?: string } | null>(null);
+  const [enviando, setEnviando] = useState<string | null>(null);
+  const [erroMidia, setErroMidia] = useState<string | null>(null);
+  const [previa, setPrevia] = useState<{ url: string; video: boolean } | null>(null);
+  const lote = useMemo(() => crypto.randomUUID(), []);
+  const post = c.tipo === "post";
+
+  useEffect(() => {
+    let vivo = true;
+    fetch(`/api/meta/ativos?conta=${encodeURIComponent(contaId)}`).then((r) => r.json()).then((x) => vivo && setAtivos(x))
+      .catch(() => vivo && setAtivos({ paginas: [], instagram: [], erro: "Falha ao buscar páginas e Instagram." }));
+    return () => { vivo = false; };
+  }, [contaId]);
+  useEffect(() => {
+    if (c.destino !== "formulario" || !c.paginaId) return;
+    let vivo = true;
+    fetch(`/api/meta/formularios?conta=${encodeURIComponent(contaId)}&pagina=${c.paginaId}`).then((r) => r.json()).then((x) => vivo && setFormularios(x))
+      .catch(() => vivo && setFormularios({ itens: [], erro: "Falha ao buscar os formulários." }));
+    return () => { vivo = false; };
+  }, [c.destino, c.paginaId, contaId]);
+
+  async function trocarMidia(f: File | undefined) {
+    if (!f) return;
+    setErroMidia(null);
+    try {
+      if (f.type.startsWith("video/")) {
+        const { videoId } = await enviarVideoAoMeta(f, contaId, (pct) => setEnviando(`Enviando ${f.name} para o Meta… ${pct}%`));
+        set({ novaMidia: { tipo: "video", videoId } });
+      } else {
+        setEnviando(`Enviando ${f.name}…`);
+        const { caminho } = await enviarImagem(f, lote);
+        set({ novaMidia: { tipo: "imagem", caminho } });
+      }
+      setPrevia({ url: URL.createObjectURL(f), video: f.type.startsWith("video/") });
+    } catch (e) {
+      setErroMidia(`${f.name}: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setEnviando(null);
+    }
+  }
+
+  const secao = "space-y-3 rounded-2xl border border-borda bg-superficie p-4";
+  return (
+    <>
+      <section className={secao}>
+        <h2 className="font-semibold">Identidade</h2>
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className={rotulo}>Página do Facebook
+            <select value={c.paginaId} onChange={(x) => set({ paginaId: x.target.value })} disabled={post} className={campo}>
+              {!ativos?.paginas.some((p) => p.id === c.paginaId) && <option value={c.paginaId}>{c.paginaId ? `Página ${c.paginaId}` : "—"}</option>}
+              {ativos?.paginas.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+            </select>
+          </label>
+          <label className={rotulo}>Conta do Instagram
+            <select value={c.instagramId} onChange={(x) => set({ instagramId: x.target.value })} disabled={post} className={campo}>
+              <option value="">Usar a página do Facebook</option>
+              {c.instagramId && !ativos?.instagram.some((p) => p.id === c.instagramId) && <option value={c.instagramId}>Instagram {c.instagramId}</option>}
+              {ativos?.instagram.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+            </select>
+          </label>
+        </div>
+        {ativos?.erro && <p className="text-xs text-critico">{ativos.erro}</p>}
+      </section>
+
+      <section className={secao}>
+        <h2 className="font-semibold">Mídia</h2>
+        <div className="flex flex-wrap items-start gap-4">
+          <div className="space-y-1 text-xs text-texto-3">
+            <div>{c.novaMidia ? "Nova" : "Atual"} ({c.novaMidia ? (c.novaMidia.tipo === "video" ? "vídeo" : "imagem") : c.midia.tipo === "video" ? "vídeo" : c.midia.tipo === "varias" ? "várias" : c.midia.tipo})</div>
+            {previa ? (previa.video
+              ? <video src={previa.url} className="h-40 rounded-lg border border-borda" controls muted />
+              // eslint-disable-next-line @next/next/no-img-element
+              : <img src={previa.url} alt="Mídia nova" className="h-40 rounded-lg border border-borda object-cover" />)
+              : c.midia.miniatura
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={c.midia.miniatura} alt="Mídia atual" className="h-40 rounded-lg border border-borda object-cover" />
+                : <div className="flex h-40 w-40 items-center justify-center rounded-lg border border-dashed border-borda">sem prévia</div>}
+          </div>
+          {!post && (
+            <div className="space-y-2">
+              <label className="inline-flex cursor-pointer items-center rounded-lg border border-borda bg-superficie-2 px-3 py-2 text-sm font-semibold hover:border-destaque">
+                Trocar imagem ou vídeo
+                <input type="file" accept="image/*,video/*" className="hidden" onChange={(x) => { void trocarMidia(x.target.files?.[0]); x.target.value = ""; }} />
+              </label>
+              {c.novaMidia && (
+                <button type="button" onClick={() => { set({ novaMidia: null }); setPrevia(null); }} className="block text-xs text-texto-3 hover:text-critico">
+                  desfazer troca
+                </button>
+              )}
+              {c.midia.tipo === "varias" && <p className="max-w-xs text-xs text-texto-3">Este anúncio tem várias mídias: trocando, fica só a nova.</p>}
+              {enviando && <p className="text-xs text-destaque">{enviando}</p>}
+              {erroMidia && <p className="text-xs text-critico">{erroMidia}</p>}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className={secao}>
+        <h2 className="font-semibold">Texto</h2>
+        {post ? (
+          <p className="text-sm text-texto-2">Este anúncio usa uma publicação que já existe na página: texto e mídia só mudam na própria publicação. Aqui dá para mudar o nome e os parâmetros de URL.</p>
+        ) : (
+          <>
+            <Lista titulo="Texto principal" linhas={5} valor={c.textos.length ? c.textos : [""]} max={c.tipo === "feed" ? 5 : 1} onChange={(v) => set({ textos: v })} />
+            <Lista titulo="Título" valor={c.titulos.length ? c.titulos : [""]} max={c.tipo === "feed" ? 5 : 1} onChange={(v) => set({ titulos: v })} />
+            <Lista titulo="Descrição (opcional)" valor={c.descricoes.length ? c.descricoes : [""]} max={c.tipo === "feed" ? 5 : 1} onChange={(v) => set({ descricoes: v })} />
+          </>
+        )}
+      </section>
+
+      {!post && (
+        <section className={secao}>
+          <h2 className="font-semibold">Destino</h2>
+          {c.destino === "formulario" && (
+            <label className={rotulo}>Formulário instantâneo
+              <select value={c.formularioId} onChange={(x) => set({ formularioId: x.target.value })} className={campo}>
+                {!formularios?.itens.some((f) => f.id === c.formularioId) && <option value={c.formularioId}>{formularios ? `Formulário ${c.formularioId}` : "Carregando…"}</option>}
+                {formularios?.itens.map((f) => <option key={f.id} value={f.id}>{f.nome}{f.arquivado ? " (arquivado)" : ""}</option>)}
+              </select>
+              {formularios?.erro && <span className="block text-xs text-critico">{formularios.erro}</span>}
+              {c.tipo === "feed" && <span className="block text-xs text-atencao">Anúncio com várias variações: o formulário não muda por aqui (use o Gerenciador).</span>}
+            </label>
+          )}
+          {c.destino === "site" && (
+            <label className={rotulo}>Link do site
+              <input value={c.link} onChange={(x) => set({ link: x.target.value })} placeholder="https://" className={campo} />
+            </label>
+          )}
+          {c.destino === "whatsapp" && <p className="text-sm text-texto-2">Conversa no WhatsApp (o número é o da página).</p>}
+          {c.destino === "outro" && <p className="text-sm text-texto-2">Destino que o painel não edita (fica como está).</p>}
+          <div className="grid gap-3 md:grid-cols-2">
+            {c.cta && (
+              <label className={rotulo}>Botão
+                <select value={c.cta} onChange={(x) => set({ cta: x.target.value })} className={campo}>
+                  {!BOTOES.some((b) => b.valor === c.cta) && <option value={c.cta}>{c.cta}</option>}
+                  {BOTOES.map((b) => <option key={b.valor} value={b.valor}>{b.rotulo}</option>)}
+                </select>
+              </label>
+            )}
+            {c.destino !== "whatsapp" && (
+              <label className={rotulo}>Parâmetros de URL <span className="text-xs text-texto-3">(UTMs)</span>
+                <input value={c.urlTags} onChange={(x) => set({ urlTags: x.target.value })} placeholder="utm_source=facebook&utm_campaign={{campaign.name}}…" className={`${campo} font-mono text-xs`} />
+              </label>
+            )}
+          </div>
+        </section>
+      )}
+
+      <p className="text-xs text-texto-3">
+        O Meta não deixa alterar um criativo que já existe: mudando texto, mídia, destino, identidade ou UTMs, o painel cria um criativo
+        novo igual com as mudanças e troca no anúncio (o anúncio volta para análise do Meta). Só o nome muda direto.
+      </p>
+    </>
   );
 }
