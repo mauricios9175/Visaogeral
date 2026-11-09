@@ -4,6 +4,7 @@ import { EsbocoIA } from "./esboco-ia";
 import { BibliotecaMidia, PlayerVideo } from "./midia-meta";
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { montarCampanhaMeta, type ResultadoMontagem } from "@/app/acoes-montagem";
+import type { Rascunho } from "@/lib/rascunhos";
 import { configDoZero, FORMULARIO_PADRAO, normalizarConfig, OBJETIVOS, type ObjetivoMeta, type ConfigFormulario, type ConfigMeta, type Modelo } from "@/lib/modelos";
 import { CamposMeta, campo } from "./campos-meta";
 import { CamposFormulario } from "./editor-formulario";
@@ -27,7 +28,7 @@ export type DestinoMontagem = {
   conjunto?: { id: string; nome: string };
 };
 
-export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos, padroes, modelosFormulario, pedidoInicial, destino }: {
+export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos, padroes, modelosFormulario, pedidoInicial, destino: destinoPagina, rascunho }: {
   clienteId: string;
   clienteNome: string;
   contas: Opcao[];
@@ -38,33 +39,40 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
   /** pedido vindo da caixa "Pergunte ao painel": já faz o esboço com IA */
   pedidoInicial?: string;
   destino?: DestinoMontagem | null;
+  /** rascunho salvo (do "Duplicar" ou de uma montagem guardada para depois) */
+  rascunho?: Rascunho | null;
 }) {
+  const destino = rascunho ? rascunho.destino : destinoPagina;
   // numa campanha que já existe, só os objetivos que ela aceita
   const objetivosPossiveis = (Object.keys(OBJETIVOS) as ObjetivoMeta[])
     .filter((o) => !destino || (destino.objetivo ? o === destino.objetivo : o !== "mensagens"));
   const modelos = todosModelos.filter((m) => objetivosPossiveis.includes(m.objetivo));
   // "zero:<objetivo>" = campanha do zero, sem modelo
-  const [modeloId, setModeloId] = useState(modelos[0]?.id ?? `zero:${objetivosPossiveis[0] ?? "formulario"}`);
+  const [modeloId, setModeloId] = useState(rascunho ? `zero:${rascunho.objetivo}` : modelos[0]?.id ?? `zero:${objetivosPossiveis[0] ?? "formulario"}`);
   const modelo = modelos.find((m) => m.id === modeloId);
   const objetivo: ObjetivoMeta = modelo?.objetivo ?? (modeloId.startsWith("zero:") ? (modeloId.slice(5) as ObjetivoMeta) : "formulario");
-  const [config, setConfig] = useState<ConfigMeta>(() => normalizarConfig({
+  const [config, setConfig] = useState<ConfigMeta>(() => rascunho ? normalizarConfig(rascunho.config) : normalizarConfig({
     ...(modelos[0]?.config ?? configDoZero(objetivosPossiveis[0] ?? "formulario")), ...(padroes.locais?.length ? { locais: padroes.locais } : {}),
   }));
   const [salvarModeloComo, setSalvarModeloComo] = useState("");
-  const [conta, setConta] = useState(destino?.conta ?? (contas.some((c) => c.id === padroes.conta) ? padroes.conta! : contas[0]?.id ?? ""));
+  const [conta, setConta] = useState(rascunho?.conta ?? destino?.conta ?? (contas.some((c) => c.id === padroes.conta) ? padroes.conta! : contas[0]?.id ?? ""));
   const soAnuncios = !!destino?.conjunto;
   const [ativos, setAtivos] = useState<Ativos | null>(null);
-  const [pagina, setPagina] = useState(padroes.pagina ?? "");
-  const [instagram, setInstagram] = useState(padroes.instagram ?? "");
-  const [pixel, setPixel] = useState(padroes.pixel ?? "");
+  const [pagina, setPagina] = useState(rascunho?.pagina || padroes.pagina || "");
+  const [instagram, setInstagram] = useState(rascunho ? rascunho.instagram : padroes.instagram ?? "");
+  const [pixel, setPixel] = useState(rascunho?.pixel || padroes.pixel || "");
   const [formularios, setFormularios] = useState<{ itens: Opcao[]; erro?: string } | null>(null);
   // formulário criado na própria montagem (sem precisar de modelo)
   const [formNovo, setFormNovo] = useState<ConfigFormulario>(FORMULARIO_PADRAO);
   const [salvarComoModelo, setSalvarComoModelo] = useState("");
   // "modelo:<id>" = criar um formulário novo a partir do modelo; senão o id de um formulário da página
   const [formulario, setFormulario] = useState(
-    padroes.formulario || (modelosFormulario[0] ? `modelo:${modelosFormulario[0].id}` : ""));
-  const [criativos, setCriativos] = useState<Criativo[]>([]);
+    rascunho?.formulario || padroes.formulario || (modelosFormulario[0] ? `modelo:${modelosFormulario[0].id}` : ""));
+  const [criativos, setCriativos] = useState<Criativo[]>(rascunho?.criativos ?? []);
+  // rascunho: salvo sozinho enquanto você edita (só publica no Meta quando você mandar)
+  const [rascunhoId, setRascunhoId] = useState<string | null>(rascunho?.id ?? null);
+  const [tituloRascunho, setTituloRascunho] = useState(rascunho?.titulo ?? "");
+  const [salvoEm, setSalvoEm] = useState<string | null>(rascunho?.atualizadoEm ?? null);
   const [biblioteca, setBiblioteca] = useState(false);
   const [tocar, setTocar] = useState<{ videoId?: string; arquivo?: string; nome: string } | null>(null);
   const [manterSemAnuncios, setManterSemAnuncios] = useState(true);
@@ -72,6 +80,29 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
   const [erroEnvio, setErroEnvio] = useState<string | null>(null);
   const lote = useMemo(() => crypto.randomUUID(), []);
   const [resultado, enviar, montando] = useActionState<ResultadoMontagem | null, FormData>(montarCampanhaMeta, null);
+
+  // salva o rascunho sozinho, 1,5 s depois da última mudança
+  useEffect(() => {
+    if (!rascunhoId) return;
+    const t = setTimeout(() => {
+      const r: Rascunho = {
+        id: rascunhoId, clienteId, titulo: tituloRascunho.trim() || config.nomeCampanha || "Rascunho",
+        origem: rascunho?.origem ?? "Montagem guardada para depois", criadoEm: rascunho?.criadoEm ?? new Date().toISOString(),
+        atualizadoEm: new Date().toISOString(), objetivo, conta, destino: destino ?? null, config, pagina, instagram, formulario, pixel,
+        criativos, avisos: rascunho?.avisos ?? [],
+      };
+      fetch("/api/rascunhos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rascunho: r }) })
+        .then((x) => x.json()).then((j) => j.atualizadoEm && setSalvoEm(j.atualizadoEm)).catch(() => null);
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [rascunhoId, tituloRascunho, objetivo, conta, destino, config, pagina, instagram, formulario, pixel, criativos, clienteId, rascunho]);
+
+  // publicou: o rascunho some da lista
+  useEffect(() => {
+    if (!resultado?.ok || !rascunhoId) return;
+    void fetch("/api/rascunhos", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clienteId, id: rascunhoId }) });
+  }, [resultado, rascunhoId, clienteId]);
+
 
   // ao trocar de modelo, recarrega os campos dele (mantendo as cidades já escolhidas para o cliente)
   function trocarModelo(id: string) {
@@ -192,6 +223,21 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
 
   return (
     <div className="space-y-6">
+      {rascunhoId && (
+        <div className="space-y-2 rounded-2xl border border-atencao/50 bg-atencao-bg/30 p-4 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-atencao-bg px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide text-atencao">Rascunho</span>
+            <input value={tituloRascunho} onChange={(e) => setTituloRascunho(e.target.value)} placeholder="Nome do rascunho" aria-label="Nome do rascunho"
+              className="min-h-9 min-w-0 flex-1 rounded-lg border border-borda bg-fundo px-2.5 text-sm font-semibold" />
+            <span className="text-xs text-texto-3">{salvoEm ? `salvo às ${new Date(salvoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : "salvando…"}</span>
+          </div>
+          <p className="text-xs text-texto-2">
+            {rascunho?.origem ? `${rascunho.origem}. ` : ""}Nada vai para o Meta até você clicar em publicar: edite nomes, públicos, textos e mídia à vontade.
+            Ele fica salvo na tela do cliente (Rascunhos) para continuar depois.
+          </p>
+          {(rascunho?.avisos ?? []).map((a, i) => <p key={i} className="text-xs text-atencao">▲ {a}</p>)}
+        </div>
+      )}
       {destino && (
         <div className="rounded-2xl border border-destaque/50 bg-destaque-bg/40 p-4 text-sm">
           <b>{soAnuncios ? "Anúncios novos" : "Conjuntos novos"}</b> {soAnuncios ? <>no conjunto <b>“{destino.conjunto!.nome}”</b>, da campanha “{destino.campanhaNome}”.</> : <>na campanha <b>“{destino.campanhaNome}”</b>.</>}
@@ -371,6 +417,12 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
           <input type="checkbox" checked={manterSemAnuncios} onChange={(e) => setManterSemAnuncios(e.target.checked)} />
           Se o Meta barrar os anúncios, manter a campanha, os conjuntos e o formulário criados (pausados) para eu subir o anúncio no Gerenciador
         </label>}
+        {!rascunhoId && (
+          <button type="button" onClick={() => { setRascunhoId(crypto.randomUUID()); setTituloRascunho(config.nomeCampanha); }}
+            className="mr-2 rounded-lg border border-borda px-4 py-2 text-sm hover:border-destaque">
+            Guardar como rascunho
+          </button>
+        )}
         <button
           disabled={!!faltando || montando || !!enviando}
           onClick={(e) => {
@@ -381,7 +433,8 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
           }}
           className="rounded-lg bg-destaque px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {montando ? "Montando no Meta… (vídeos podem levar alguns minutos)"
+          {montando ? "Publicando no Meta… (vídeos podem levar alguns minutos)"
+            : rascunhoId ? (soAnuncios ? "Publicar os anúncios no Meta (pausados)" : destino ? "Publicar os conjuntos no Meta (pausados)" : "Publicar a campanha no Meta (pausada)")
             : soAnuncios ? "Criar anúncios pausados neste conjunto"
             : destino ? (semCriativo ? "Criar conjuntos pausados (sem anúncios)" : "Criar conjuntos pausados nesta campanha")
             : semCriativo ? "Criar campanha e conjuntos pausados (sem anúncios)" : "Montar campanha pausada no Meta"}

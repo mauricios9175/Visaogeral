@@ -11,6 +11,8 @@ import { BarrasDiarias } from "@/components/graficos";
 import { AnaliseIA } from "@/components/analise-ia";
 import { SugestoesIA, type AcaoPainel } from "@/components/sugestoes-ia";
 import { LinkCliente } from "@/components/link-cliente";
+import { ListaRascunhos } from "@/components/lista-rascunhos";
+import { listarRascunhos } from "@/lib/rascunhos";
 import { TabelaGoogle, type LinhaTabelaGoogle } from "@/components/google-niveis";
 import { NIVEIS_GOOGLE } from "@/lib/niveis-google";
 import { AdicionarPalavras, NovoAnuncioGoogle } from "@/components/criar-google";
@@ -56,10 +58,11 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
     detalheGoogle(id, atual, anterior).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })),
     db().from("acoes_log").select("*").eq("cliente_id", id).order("criado_em", { ascending: false }).limit(30),
   ]);
-  const [paramsIA, historicoIA, tokenPortal] = await Promise.all([
+  const [paramsIA, historicoIA, tokenPortal, rascunhos] = await Promise.all([
     lerParams(id).catch(() => PARAMS_PADRAO),
     lerHistoricoSugestoes(id).catch(() => []),
     linkDoCliente(id).catch(() => null),
+    listarRascunhos(id).catch(() => []),
   ]);
   // ações feitas pelo painel depois da sugestão mais antiga guardada (para marcar "✓ feito")
   const desdeIA = historicoIA.at(-1)?.criado_em;
@@ -152,6 +155,12 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
       />
 
       {g && <ResumoGeral meta={a} metaAnt={b} g={g} metaCpl={c.cpl_meta} />}
+
+      <ListaRascunhos clienteId={id} itens={rascunhos.map((r) => ({
+        id: r.id, titulo: r.titulo, origem: r.origem, atualizadoEm: r.atualizadoEm, anuncios: r.criativos.length,
+        conjuntos: r.destino?.conjunto ? 0 : r.config.conjuntos.length,
+        onde: r.destino?.conjunto ? `no conjunto “${r.destino.conjunto.nome}”` : r.destino ? `na campanha “${r.destino.campanhaNome}”` : "campanha nova",
+      }))} />
 
       <h2 className="text-lg font-bold">Meta Ads</h2>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">

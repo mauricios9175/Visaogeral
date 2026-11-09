@@ -112,9 +112,37 @@ function Duplicar(p: PropsAcoes & { duplicar: NonNullable<PropsAcoes["duplicar"]
   const btn = "rounded-md border border-borda bg-superficie px-2 py-0.5 text-xs hover:border-destaque";
   const conjuntos = destinos.conjuntos.filter((c) => c.conta === p.contaId);
   const campanhas = destinos.campanhas.filter((c) => c.conta === p.contaId);
+  // tela do cliente (o rascunho abre na montagem dele)
+  const base = p.voltar.split("#")[0].split("?")[0];
   return (
     <details>
-      <summary className={`${btn} cursor-pointer list-none`} title="Duplicar (a cópia nasce pausada)">⧉ Duplicar</summary>
+      <summary className={`${btn} cursor-pointer list-none`} title="Duplicar: editar antes de publicar">⧉ Duplicar</summary>
+      <form action={`${base}/montar`} method="get" className="mt-1 w-72 space-y-2 rounded-lg border border-destaque/50 bg-fundo p-3 text-left text-xs">
+        <input type="hidden" name="duplicar" value={`${p.nivel}:${p.objetoId}`} />
+        <div className="font-semibold text-texto">Duplicar e editar antes de publicar</div>
+        {p.nivel === "anuncio" && (
+          <label className="block space-y-1">
+            <span className="text-texto-3">No conjunto</span>
+            <select name="destino" defaultValue={conjuntoAtual ?? ""} className={campo}>
+              {conjuntos.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.id === conjuntoAtual ? " (o mesmo)" : ` · ${c.pai}`}</option>)}
+            </select>
+          </label>
+        )}
+        {p.nivel === "conjunto" && (
+          <label className="block space-y-1">
+            <span className="text-texto-3">Na campanha</span>
+            <select name="destino" defaultValue={campanhaAtual} className={campo}>
+              {campanhas.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.id === campanhaAtual ? " (a mesma)" : ""}</option>)}
+              <option value="nova">＋ Campanha nova</option>
+            </select>
+          </label>
+        )}
+        <p className="text-texto-3">Abre um rascunho com tudo copiado (nomes, público, textos, mídia). Você edita e só depois publica: nada de “ - cópia” no nome nem nas UTMs.</p>
+        <button className={`${btn} w-full border-destaque font-semibold text-destaque`}>Abrir rascunho</button>
+      </form>
+      <details className="mt-1 w-72">
+        <summary className="cursor-pointer text-[11px] text-texto-3 hover:text-texto">Cópia rápida direto no Meta</summary>
+
       <form
         action={acaoMeta}
         onSubmit={(e) => {
@@ -157,6 +185,7 @@ function Duplicar(p: PropsAcoes & { duplicar: NonNullable<PropsAcoes["duplicar"]
         <p className="text-texto-3">A cópia nasce pausada, com “ - cópia” no nome. Você revisa e ativa no Gerenciador.</p>
         <Botao className={`${btn} w-full`}>Criar cópia pausada</Botao>
       </form>
+      </details>
     </details>
   );
 }

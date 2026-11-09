@@ -6,13 +6,18 @@ import { normalizarConfig, OBJETIVO_FORMULARIO, type Modelo } from "@/lib/modelo
 import { Montagem, type DestinoMontagem, type Padroes } from "@/components/montagem";
 import { lerDestinoMeta } from "@/lib/meta-montar";
 import { tokenDaConta } from "@/lib/sync";
+import { redirect } from "next/navigation";
+import { getMeta, montarUrl } from "@/lib/meta";
+import { lerRascunho, rascunhoDeMeta, salvarRascunho, type Rascunho } from "@/lib/rascunhos";
 import type { ContaAnuncio } from "@/lib/db";
 
 export const maxDuration = 300;
 
 export default async function Montar({ params, searchParams }: PageProps<"/clientes/[id]/montar">) {
   const { id } = await params;
-  const { pedido, campanha, conjunto } = (await searchParams) as { pedido?: string; campanha?: string; conjunto?: string };
+  const { pedido, campanha, conjunto, duplicar, destino: destinoDuplicar, rascunho: rascunhoId } = (await searchParams) as {
+    pedido?: string; campanha?: string; conjunto?: string; duplicar?: string; destino?: string; rascunho?: string;
+  };
   const banco = db();
   const [{ data: cliente }, { data: contas }, { data: modelos }] = await Promise.all([
     banco.from("clientes").select("*").eq("id", id).maybeSingle(),
@@ -20,6 +25,30 @@ export default async function Montar({ params, searchParams }: PageProps<"/clien
     banco.from("modelos").select("*").eq("plataforma", "meta").order("nome"),
   ]);
   if (!cliente) notFound();
+
+  // "Duplicar" (?duplicar=conjunto:123&destino=…): copia do Meta para um rascunho e abre para editar antes de publicar
+  let erroDuplicar: string | null = null;
+  const dup = /^(campanha|conjunto|anuncio):(\d+)$/.exec(duplicar ?? "");
+  if (dup) {
+    let novo: Rascunho | null = null;
+    const { data: todas } = await banco.from("contas_anuncio").select("*").eq("cliente_id", id);
+    for (const c of (todas ?? []) as ContaAnuncio[]) {
+      const token = await tokenDaConta(c);
+      if (!token) continue;
+      try {
+        const { account_id } = await getMeta<{ account_id: string }>(montarUrl(dup[2], token, { fields: "account_id" }));
+        if (`act_${account_id}` !== c.id) continue;
+        novo = await salvarRascunho(await rascunhoDeMeta(id, c.id, token, dup[1] as "campanha" | "conjunto" | "anuncio", dup[2],
+          /^(\d+|nova)$/.test(destinoDuplicar ?? "") ? destinoDuplicar : null));
+        break;
+      } catch (e) {
+        erroDuplicar = e instanceof Error ? e.message : String(e);
+      }
+    }
+    if (novo) redirect(`/clientes/${id}/montar?rascunho=${novo.id}`);
+    erroDuplicar ??= "Não achei esse item nas contas deste cliente.";
+  }
+  const rascunho = rascunhoId ? await lerRascunho(id, rascunhoId).catch(() => null) : null;
 
   // criar dentro do que já existe (?campanha=… ou ?conjunto=…): lê no Meta com o token de uma conta do cliente
   let destino: DestinoMontagem | null = null;
@@ -42,7 +71,7 @@ export default async function Montar({ params, searchParams }: PageProps<"/clien
     }
     if (!destino && !erroDestino) erroDestino = "Não achei essa campanha/conjunto nas contas deste cliente.";
   }
-  const titulo = destino?.conjunto ? "Novo anúncio no conjunto" : destino ? "Novo conjunto na campanha" : "Montar campanha no Meta";
+  const titulo = rascunho ? `Rascunho: ${rascunho.titulo}` : destino?.conjunto ? "Novo anúncio no conjunto" : destino ? "Novo conjunto na campanha" : "Montar campanha no Meta";
 
   return (
     <div className="space-y-5">
@@ -58,6 +87,8 @@ export default async function Montar({ params, searchParams }: PageProps<"/clien
         </p>
       </div>
       {erroDestino && <Aviso>{erroDestino}</Aviso>}
+      {erroDuplicar && <Aviso>Não consegui copiar do Meta para o rascunho: {erroDuplicar}</Aviso>}
+      {rascunhoId && !rascunho && <Aviso>Esse rascunho não existe mais (já foi publicado ou excluído).</Aviso>}
       <Montagem
         clienteId={id}
         clienteNome={cliente.nome}
@@ -68,6 +99,8 @@ export default async function Montar({ params, searchParams }: PageProps<"/clien
         padroes={(cliente.padroes_meta ?? {}) as Padroes}
         pedidoInicial={pedido?.slice(0, 1000)}
         destino={destino}
+        rascunho={rascunho}
+        key={rascunho?.id ?? "nova"}
       />
     </div>
   );

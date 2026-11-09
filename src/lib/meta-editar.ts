@@ -43,7 +43,7 @@ export type TextosCriativo = {
   paginaId: string; instagramId: string;
   destino: "formulario" | "whatsapp" | "site" | "outro";
   formularioId: string;
-  midia: { tipo: "imagem" | "video" | "varias" | "nenhuma"; miniatura: string | null; videoId?: string | null };
+  midia: { tipo: "imagem" | "video" | "varias" | "nenhuma"; miniatura: string | null; videoId?: string | null; imagemHash?: string | null };
   whatsapp: MensagemWhatsApp | null;   // anúncio de WhatsApp: modelo de mensagem
   linkExibicao: string;                // site: o link que aparece no anúncio (ex.: www.loja.com.br)
   novoFormulario?: ConfigFormulario | null; // formulário: criar um novo na página e usar no anúncio
@@ -142,6 +142,7 @@ export async function lerParaEditar(nivel: "campanha" | "conjunto" | "anuncio", 
         : vd ? "video" : ld ? "imagem" : "nenhuma") as TextosCriativo["midia"]["tipo"],
       miniatura: c?.thumbnail_url ?? c?.image_url ?? null,
       videoId: (vd?.video_id as string | undefined) ?? ((af?.videos as { video_id?: string }[] | undefined)?.[0]?.video_id) ?? null,
+      imagemHash: (ld?.image_hash as string | undefined) ?? ((af?.images as { hash?: string }[] | undefined)?.[0]?.hash) ?? null,
     },
   };
   const criativo: TextosCriativo = af?.bodies?.length || af?.titles?.length
