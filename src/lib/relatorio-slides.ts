@@ -714,26 +714,34 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
       });
     }
   }
-  // Vendas realizadas: o marcador {{grafico:vendas}} do modelo; nos modelos sem ele, uma cópia do slide de
-  // oportunidades (fica logo depois dele). Dois gráficos lado a lado: número de vendas e valor das vendas.
-  const graficoVendas = (pg: string, c: Caixa): Req[] => {
-    const metade = { ...c, w: c.w * 0.49 };
-    return [
-      ...grafico(pg, metade, "Vendas realizadas", categorias, [{ nome: `Nº ${funil.vendas}`, valores: valoresDe((m) => m.vendas, vendas) }], (v) => inteiro(v)),
-      ...grafico(pg, { ...metade, x: c.x + c.w * 0.51 }, "Valor das vendas", categorias, [{ nome: "Valor", valores: valoresDe((m) => m.faturamento, faturamento) }], moedaCurta),
-    ];
+  // Vendas realizadas: dois slides, cada um com um gráfico na largura toda (lado a lado ficava apertado em
+  // clientes com muitos meses): o número de vendas e, no seguinte, o valor das vendas.
+  // Com o marcador {{grafico:vendas}} no modelo, o slide dele é o do número e uma cópia é a do valor; sem ele,
+  // as duas são cópias do slide de oportunidades (logo depois dele).
+  const graficoNumVendas = (pg: string, c: Caixa): Req[] =>
+    grafico(pg, c, "Vendas realizadas", categorias, [{ nome: `Nº ${funil.vendas}`, valores: valoresDe((m) => m.vendas, vendas) }], (v) => inteiro(v));
+  const graficoValorVendas = (pg: string, c: Caixa): Req[] =>
+    grafico(pg, c, "Valor das vendas", categorias, [{ nome: "Valor", valores: valoresDe((m) => m.faturamento, faturamento) }], moedaCurta);
+  /** Copia o slide do marcador (a cópia fica logo depois do original), troca os textos e desenha o gráfico. */
+  const copiaCom = (m: { slide: string; elemento: string; caixa: Caixa }, trocas: [string, string][], gerar: (pg: string, c: Caixa) => Req[]) => {
+    const slide = novoId("vd"), elemento = novoId("vde");
+    reqs.push({ duplicateObject: { objectId: m.slide, objectIds: { [m.slide]: slide, [m.elemento]: elemento } } });
+    for (const [de, para] of trocas) reqs.push({ replaceAllText: { containsText: { text: de, matchCase: false }, replaceText: para, pageObjectIds: [slide] } });
+    reqs.push({ deleteObject: { objectId: elemento } });
+    reqs.push(...gerar(slide, m.caixa));
   };
   const querVendas = (p.vendas ?? true) && temCrm;
-  if (marcadores.has("grafico:vendas")) preencher("grafico:vendas", querVendas ? graficoVendas : null);
-  else if (querVendas) {
+  const mv = marcadores.get("grafico:vendas");
+  if (mv) {
+    // a cópia (valor) é feita antes de preencher o original, que apaga o marcador
+    if (querVendas) copiaCom(mv, [["Vendas realizadas", "Valor das vendas"], ["Nº de vendas", "Valor das vendas"]], graficoValorVendas);
+    preencher("grafico:vendas", querVendas ? graficoNumVendas : null);
+  } else if (querVendas) {
     const mo = marcadores.get("grafico:oportunidades");
     if (mo) {
-      const slide = novoId("vd"), elemento = novoId("vde");
-      // antes de preencher o original (que apaga o marcador copiado)
-      reqs.push({ duplicateObject: { objectId: mo.slide, objectIds: { [mo.slide]: slide, [mo.elemento]: elemento } } });
-      reqs.push({ replaceAllText: { containsText: { text: "oportunidades", matchCase: false }, replaceText: "vendas", pageObjectIds: [slide] } });
-      reqs.push({ deleteObject: { objectId: elemento } });
-      reqs.push(...graficoVendas(slide, mo.caixa));
+      // cada cópia entra logo depois do original: primeiro a do valor, depois a do número (que fica no meio)
+      copiaCom(mo, [["das oportunidades", "do valor das vendas"], ["oportunidades", "valor das vendas"]], graficoValorVendas);
+      copiaCom(mo, [["oportunidades", "vendas"]], graficoNumVendas);
     }
   }
   preencher("grafico:oportunidades", (pg, c) => grafico(pg, c, "Evolução das oportunidades", categorias, [
