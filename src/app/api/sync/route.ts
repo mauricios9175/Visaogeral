@@ -28,6 +28,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ contas, crms, aviso });
       }
       case "conta": {
+        // histórico: um pedaço de até ~31 dias (a tela divide o período em meses)
+        const data = /^\d{4}-\d{2}-\d{2}$/;
+        if (data.test(String(corpo.desde)) && data.test(String(corpo.ate))) {
+          const dias = (Date.parse(corpo.ate) - Date.parse(corpo.desde)) / 86_400_000;
+          if (dias < 0 || dias > 31) throw new Error("Intervalo inválido (até 31 dias por vez)");
+          return NextResponse.json({ linhas: await sincronizarContaPorId(String(corpo.id), { desde: corpo.desde, ate: corpo.ate }) });
+        }
         const modo: ModoSync = corpo.modo === "mes" ? "mes" : corpo.modo === "hoje" ? "hoje" : "semana";
         return NextResponse.json({ linhas: await sincronizarContaPorId(String(corpo.id), modo) });
       }
@@ -35,6 +42,18 @@ export async function POST(request: NextRequest) {
         const { data } = await db().from("crm_conexoes").select("*").eq("cliente_id", String(corpo.clienteId)).maybeSingle();
         if (!data) throw new Error("Cliente sem CRM conectado");
         return NextResponse.json({ linhas: await sincronizarCrmCliente(data as ConexaoCrm, 30) });
+      }
+      case "historico_feito": {
+        // lembra até onde o histórico de cada conta já foi puxado (dias sem gasto não deixam linha nos dados)
+        const desde = String(corpo.desde);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(desde)) throw new Error("data inválida");
+        for (const id of (Array.isArray(corpo.contas) ? corpo.contas : []).map(String)) {
+          const chave = `historico_meta:${id}`;
+          const { data: ja } = await db().from("configuracoes").select("valor").eq("chave", chave).maybeSingle();
+          const antes = typeof ja?.valor === "string" ? ja.valor : null;
+          if (!antes || desde < antes) await db().from("configuracoes").upsert({ chave, valor: desde, atualizado_em: new Date().toISOString() });
+        }
+        return NextResponse.json({ ok: true });
       }
       case "fim": {
         await registrarExecucao(String(corpo.modo), Number(corpo.contas) || 0, Number(corpo.linhas) || 0, corpo.erros ?? []);

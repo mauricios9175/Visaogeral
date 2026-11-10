@@ -278,12 +278,13 @@ export async function contasParaSincronizar() {
 }
 
 /** Sincroniza uma conta só. Lança o erro com uma mensagem legível. */
-export async function sincronizarContaPorId(contaId: string, modo: ModoSync) {
+export async function sincronizarContaPorId(contaId: string, modo: ModoSync | { desde: string; ate: string }) {
   const banco = db();
   const { data } = await banco.from("contas_anuncio").select("*").eq("id", contaId).maybeSingle();
   if (!data) throw new Error("Conta não encontrada");
   const conta = data as ContaAnuncio;
-  const { desde, ate } = intervalo(modo);
+  // um intervalo livre (puxar histórico) ou um dos modos de sempre
+  const { desde, ate } = typeof modo === "string" ? intervalo(modo) : modo;
   try {
     const token = await tokenDaConta(conta);
     if (!token) throw new Error("Sem token para esta conta (reconecte o Facebook em Configurações)");

@@ -23,6 +23,7 @@ import { lerHistoricoSugestoes, lerParams } from "@/lib/sugestoes";
 import { PARAMS_PADRAO } from "@/lib/manual-ia";
 import { AcoesRapidas, type DestinosDuplicar } from "@/components/acoes-rapidas";
 import { db } from "@/lib/db";
+import { PuxarHistoricoMeta } from "@/components/puxar-historico";
 import { chaveDe, gastoPorNome, NIVEL_DA_UTM } from "@/lib/agrupar";
 
 
@@ -83,6 +84,18 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
     );
   }
   const { cliente: c, atual: a, anterior: b } = d;
+  // desde quando o painel tem os dados de cada conta (1º dia guardado ou até onde o histórico já foi puxado);
+  // vale a conta mais "atrasada"
+  const contasSync = d.contas.filter((x) => x.ativa_sync !== false);
+  const inicioDasContas = await Promise.all(contasSync.map(async (x): Promise<string | null> => {
+    const [{ data: primeira }, { data: marca }] = await Promise.all([
+      db().from("metricas_diarias").select("data").eq("conta_id", x.id).order("data").limit(1).maybeSingle(),
+      db().from("configuracoes").select("valor").eq("chave", `historico_meta:${x.id}`).maybeSingle(),
+    ]);
+    const datas = [primeira?.data as string | undefined, typeof marca?.valor === "string" ? marca.valor : undefined].filter(Boolean) as string[];
+    return datas.sort()[0] ?? null;
+  })).catch((): (string | null)[] => []);
+  const primeiroDia = inicioDasContas.includes(null) ? null : (inicioDasContas as string[]).sort().at(-1) ?? null;
   const nivelAtual = NIVEIS.find((n) => n.chave === nivel) ?? NIVEIS[0];
   // navegação igual ao Gerenciador: escolher uma campanha filtra conjuntos e anúncios; um conjunto filtra os anúncios
   const campanhaSel = d.campanhas.find((x) => x.id === busca.campanha) ?? null;
@@ -166,6 +179,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
       }))} />
 
       <h2 className="text-lg font-bold">Meta Ads</h2>
+      <PuxarHistoricoMeta contas={contasSync.map((x) => ({ id: x.id, nome: x.nome }))} desde={atual.desde} ate={atual.ate} primeiroDia={primeiroDia} />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi rotulo="Investido" valor={dinheiro(a.gasto)} serie={d.serie.map((x) => x.gasto)}><Variacao atual={a.gasto} anterior={b.gasto} neutro /></Kpi>
         <Kpi rotulo="Resultados" valor={inteiro(a.resultados)} serie={d.serie.map((x) => x.resultados)}>
