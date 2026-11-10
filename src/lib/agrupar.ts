@@ -59,11 +59,20 @@ export const NIVEL_DA_UTM: Record<string, "campanha" | "conjunto" | "anuncio" | 
 };
 
 /** Gasto por nome (chave sem maiúsculas/acentos/espaços), para cruzar o valor da UTM com o investido. */
-export function gastoPorNome(itens: { nome: string; gasto: number }[]) {
+export function gastoPorNome(itens: { nome: string; gasto: number; nomesAntigos?: string[] }[]) {
   const mapa = new Map<string, number>();
   for (const x of itens) {
     const k = chaveDe(x.nome);
     mapa.set(k, (mapa.get(k) ?? 0) + Number(x.gasto));
+  }
+  // renomeados: o nome antigo também leva ao gasto, mas só se nenhum item tem esse nome hoje
+  // (assim um nome reaproveitado por outro conjunto não soma o gasto dos dois)
+  const atuais = new Set(mapa.keys());
+  for (const x of itens) {
+    for (const n of new Set((x.nomesAntigos ?? []).map(chaveDe))) {
+      if (atuais.has(n)) continue;
+      mapa.set(n, (mapa.get(n) ?? 0) + Number(x.gasto));
+    }
   }
   return mapa;
 }
