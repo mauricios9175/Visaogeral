@@ -4,12 +4,16 @@ import { Voltar } from "@/components/ui";
 import { EditorFicha } from "@/components/ficha";
 import { db } from "@/lib/db";
 import { lerFicha } from "@/lib/ficha";
+import { checklistDoCliente, lerModelo } from "@/lib/implantacao";
+import { ChecklistImplantacao } from "@/components/implantacao";
 
 export default async function PaginaFicha({ params }: PageProps<"/clientes/[id]/ficha">) {
   const { id } = await params;
-  const [{ data: cliente }, ficha] = await Promise.all([
+  const [{ data: cliente }, ficha, checklist, modelo] = await Promise.all([
     db().from("clientes").select("id, nome, empresa, nicho").eq("id", id).maybeSingle(),
     lerFicha(id),
+    checklistDoCliente(id).catch(() => null),
+    lerModelo(),
   ]);
   if (!cliente) notFound();
   return (
@@ -22,6 +26,7 @@ export default async function PaginaFicha({ params }: PageProps<"/clientes/[id]/
           {" · "}<Link href="/configuracoes/importar-trello" className="underline">importar do Trello</Link>
         </p>
       </header>
+      {checklist && <ChecklistImplantacao clienteId={id} inicial={checklist} modelo={modelo} />}
       <EditorFicha clienteId={id} inicial={ficha} />
     </div>
   );

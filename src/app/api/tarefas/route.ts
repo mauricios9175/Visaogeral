@@ -1,11 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { criarTarefa, excluirTarefa, listarTarefas, mudarTarefa, type MudancaTarefa } from "@/lib/tarefas";
+import { criarTarefa, descartarSugestao, excluirTarefa, listarTarefas, mudarTarefa, type MudancaTarefa } from "@/lib/tarefas";
 
 // Tarefas (protegido pelo login do painel). Toda resposta devolve a lista inteira, para a tela ficar igual ao banco.
 //   GET                                              → { tarefas }
 //   POST { op: "criar", texto, clienteId?, data?, aguardando? }
 //   POST { op: "mudar", id, mudanca: { titulo?, clienteId?, data?, aguardando?, nota?, feita? } }
 //   POST { op: "excluir", id }
+//   POST { op: "descartar", chave }   → a sugestão do Dash não volta (até a chave mudar: nova semana/mês)
 export async function GET() {
   return NextResponse.json({ tarefas: await listarTarefas() });
 }
@@ -22,6 +23,8 @@ export async function POST(request: NextRequest) {
             clienteId: corpo.clienteId === undefined ? undefined : String(corpo.clienteId ?? ""),
             data: corpo.data ? String(corpo.data) : null,
             aguardando: !!corpo.aguardando,
+            origem: typeof corpo.origem === "string" ? corpo.origem : undefined,
+            link: typeof corpo.link === "string" ? corpo.link : undefined,
           }),
         });
       case "mudar": {
@@ -35,6 +38,9 @@ export async function POST(request: NextRequest) {
         if (typeof m.feita === "boolean") mudanca.feita = m.feita;
         return NextResponse.json({ tarefas: await mudarTarefa(String(corpo.id), mudanca) });
       }
+      case "descartar":
+        await descartarSugestao(String(corpo.chave ?? ""));
+        return NextResponse.json({ tarefas: await listarTarefas() });
       case "excluir":
         return NextResponse.json({ tarefas: await excluirTarefa(String(corpo.id)) });
       default:

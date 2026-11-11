@@ -15,6 +15,8 @@ export type Tarefa = {
   data: string;               // AAAA-MM-DD: quando fazer (ou, se aguardando, quando cobrar)
   aguardando?: boolean;       // falta informação / esperando o cliente
   nota?: string;
+  origem?: string;            // tarefa sugerida pelo Dash (alerta, sugestão da IA, relatório…): a chave dela
+  link?: string;              // onde resolver (tela do painel)
   feita: boolean;
   feitaEm?: string | null;
   criadaEm: string;
@@ -41,7 +43,9 @@ async function gravar(lista: Tarefa[]) {
  * Cria a tarefa a partir do texto (digitado ou falado). O cliente vem do texto quando não foi escolhido;
  * a data vem do texto ("amanhã", "sexta", "dia 20", "semana que vem") quando não foi escolhida.
  */
-export async function criarTarefa(entrada: { texto: string; clienteId?: string | null; data?: string | null; aguardando?: boolean }) {
+export async function criarTarefa(entrada: {
+  texto: string; clienteId?: string | null; data?: string | null; aguardando?: boolean; origem?: string; link?: string;
+}) {
   const texto = entrada.texto.trim();
   if (!texto) throw new Error("Escreva a tarefa.");
   const lida = dataDoTexto(texto);
@@ -60,6 +64,8 @@ export async function criarTarefa(entrada: { texto: string; clienteId?: string |
     clienteId,
     data: entrada.data || lida.data || hojeISO(),
     ...(entrada.aguardando ? { aguardando: true } : {}),
+    ...(entrada.origem ? { origem: entrada.origem.slice(0, 200) } : {}),
+    ...(entrada.link && entrada.link.startsWith("/") ? { link: entrada.link.slice(0, 500) } : {}),
     feita: false,
     criadaEm: new Date().toISOString(),
   };
@@ -91,10 +97,33 @@ export async function mudarTarefa(id: string, m: MudancaTarefa) {
 }
 
 export async function excluirTarefa(id: string) {
-  return gravar((await listarTarefas()).filter((x) => x.id !== id));
+  const lista = await listarTarefas();
+  // apagou uma tarefa sugerida pelo Dash: a mesma sugestão não volta
+  const origem = lista.find((x) => x.id === id)?.origem;
+  if (origem) await descartarSugestao(origem).catch(() => null);
+  return gravar(lista.filter((x) => x.id !== id));
 }
 
 /** Quantas tarefas pedem atenção hoje (de hoje ou atrasadas, sem as que estão aguardando o cliente). */
 export function contarParaHoje(lista: Tarefa[], hoje = hojeISO()) {
   return lista.filter((t) => !t.feita && !t.aguardando && t.data <= hoje).length;
+}
+
+// ---------- Sugestões descartadas (para o Dash não sugerir de novo a mesma coisa) ----------
+
+const CHAVE_DESCARTADAS = "tarefas_descartadas";
+
+export async function lerDescartadas(): Promise<Record<string, string>> {
+  const { data } = await db().from("configuracoes").select("valor").eq("chave", CHAVE_DESCARTADAS).maybeSingle();
+  return data?.valor && typeof data.valor === "object" && !Array.isArray(data.valor) ? (data.valor as Record<string, string>) : {};
+}
+
+export async function descartarSugestao(chave: string) {
+  const atual = await lerDescartadas();
+  // guarda só os últimos 60 dias (as chaves têm a semana/mês, então não voltam depois disso)
+  const limite = somarDias(hojeISO(), -60);
+  const fica = Object.fromEntries(Object.entries(atual).filter(([, d]) => d >= limite));
+  fica[chave.slice(0, 200)] = hojeISO();
+  const { error } = await db().from("configuracoes").upsert({ chave: CHAVE_DESCARTADAS, valor: fica, atualizado_em: new Date().toISOString() });
+  if (error) throw new Error(error.message);
 }

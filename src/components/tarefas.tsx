@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Tarefa } from "@/lib/tarefas";
+import type { SugestaoTarefa } from "@/lib/tarefas-auto";
 import { dataDoTexto, rotuloData } from "@/lib/tarefas-texto";
 import { somarDias } from "@/lib/datas";
 import { BotaoMicrofone, useMicrofone } from "./analise-ia";
@@ -38,8 +39,8 @@ function OpcoesClientes({ clientes }: { clientes: ClienteTarefa[] }) {
  * Tarefas do gestor. Na tela "Tarefas": todas, por seção (atrasadas, hoje, aguardando, próximas, feitas).
  * Na tela do cliente (`clienteFixo`): só as dele, e a nova tarefa já nasce dele.
  */
-export function Tarefas({ inicial, clientes, hoje, clienteFixo }: {
-  inicial: Tarefa[]; clientes: ClienteTarefa[]; hoje: string; clienteFixo?: string;
+export function Tarefas({ inicial, clientes, hoje, clienteFixo, sugestoes: sugestoesIniciais = [] }: {
+  inicial: Tarefa[]; clientes: ClienteTarefa[]; hoje: string; clienteFixo?: string; sugestoes?: SugestaoTarefa[];
 }) {
   const router = useRouter();
   const [tarefas, setTarefas] = useState(inicial);
@@ -50,6 +51,7 @@ export function Tarefas({ inicial, clientes, hoje, clienteFixo }: {
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [empresa, setEmpresa] = useState<string | null>(null);
+  const [sugestoes, setSugestoes] = useState(sugestoesIniciais);
   const mic = useMicrofone(setTexto, (e) => setErro(e));
 
   const porId = useMemo(() => new Map(clientes.map((c) => [c.id, c])), [clientes]);
@@ -113,6 +115,17 @@ export function Tarefas({ inicial, clientes, hoje, clienteFixo }: {
   const feitasHoje = feitas.filter((t) => t.feitaEm && diaEmBrasilia(t.feitaEm) === hoje);
 
   const empresas = [...new Set(clientes.map((c) => c.empresa))];
+  const sugestoesVisiveis = sugestoes.filter((x) => !empresa || (empresa === "__geral__" ? false : porId.get(x.clienteId)?.empresa === empresa));
+  async function aceitar(x: SugestaoTarefa) {
+    setSugestoes((xs) => xs.filter((y) => y.chave !== x.chave));
+    const ok = await enviar({ op: "criar", texto: x.titulo, clienteId: x.clienteId, data: hoje, origem: x.chave, link: x.link });
+    if (!ok) setSugestoes((xs) => [x, ...xs]);
+  }
+  async function descartar(x: SugestaoTarefa) {
+    setSugestoes((xs) => xs.filter((y) => y.chave !== x.chave));
+    const ok = await enviar({ op: "descartar", chave: x.chave });
+    if (!ok) setSugestoes((xs) => [x, ...xs]);
+  }
   const contaEmpresa = (e: string | null) => tarefas.filter((t) => !t.feita && (e === null || (e === "__geral__" ? !t.clienteId || !porId.has(t.clienteId) : porId.get(t.clienteId ?? "")?.empresa === e))).length;
   const chip = (sel: boolean) => `rounded-full border px-3 py-1.5 text-sm ${sel ? "border-destaque bg-destaque-bg font-semibold text-texto" : "border-borda text-texto-2 hover:text-texto"}`;
 
@@ -169,6 +182,30 @@ export function Tarefas({ inicial, clientes, hoje, clienteFixo }: {
             </button>
           ))}
         </div>
+      )}
+
+      {!clienteFixo && sugestoesVisiveis.length > 0 && (
+        <details open className="rounded-2xl border border-destaque/40 bg-destaque-bg/20 p-3">
+          <summary className="cursor-pointer text-sm font-bold">
+            Sugestões do Dash <span className="font-normal text-texto-3">({sugestoesVisiveis.length}) · alertas de conta, sugestões da IA, relatório do mês e clientes parados</span>
+          </summary>
+          <ul className="mt-2 space-y-1.5">
+            {sugestoesVisiveis.map((x) => (
+              <li key={x.chave} className="flex flex-wrap items-center gap-2 rounded-xl border border-borda bg-superficie px-3 py-2 text-sm">
+                <div className="min-w-0 flex-1">
+                  <div>{x.titulo}</div>
+                  <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-texto-3">
+                    <Link href={`/clientes/${x.clienteId}`} className="font-medium text-destaque">{porId.get(x.clienteId)?.nome ?? "Cliente"}</Link>
+                    <span>{x.motivo}</span>
+                    <Link href={x.link} className="underline">ver</Link>
+                  </div>
+                </div>
+                <button type="button" onClick={() => aceitar(x)} className="rounded-lg bg-destaque px-3 py-1.5 text-xs font-semibold text-white">+ Tarefa de hoje</button>
+                <button type="button" onClick={() => descartar(x)} className="rounded-lg border border-borda px-3 py-1.5 text-xs text-texto-2 hover:text-texto">Descartar</button>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       {clienteFixo ? (
@@ -266,6 +303,8 @@ function LinhaTarefa({ t, hoje, cliente, clientes, mostrarCliente, mudar, exclui
             {!t.feita && <span className={atrasada ? "font-semibold text-critico" : "text-texto-3"}>{t.aguardando ? "cobrar " : ""}{rotuloData(t.data, hoje).toLowerCase()}</span>}
             {t.aguardando && !t.feita && <span className="rounded-md bg-atencao-bg px-1.5 py-0.5 text-atencao">aguardando cliente</span>}
             {t.nota && <span className="text-texto-3" title={t.nota}>📝</span>}
+            {t.link && !t.feita && <Link href={t.link} className="text-destaque underline">abrir</Link>}
+            {t.origem && <span className="text-texto-3">· sugerida pelo Dash</span>}
           </div>
         </div>
         {!t.feita && t.data <= hoje && !aberta && (

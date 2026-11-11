@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import { db, EMPRESA_PADRAO } from "@/lib/db";
 import { hojeISO } from "@/lib/datas";
 import { listarTarefas } from "@/lib/tarefas";
+import { sugestoesDeTarefa } from "@/lib/tarefas-auto";
 import { Tarefas, type ClienteTarefa } from "@/components/tarefas";
 
 export default async function PaginaTarefas() {
@@ -10,6 +11,10 @@ export default async function PaginaTarefas() {
     listarTarefas(),
     db().from("clientes").select("id, nome, empresa").eq("ativo", true).order("nome"),
   ]);
+  const sugestoes = await sugestoesDeTarefa(tarefas).catch((e) => {
+    console.error("sugestões de tarefa:", e);
+    return [];
+  });
   const clientes: ClienteTarefa[] = ((data ?? []) as { id: string; nome: string; empresa: string | null }[])
     .map((c) => ({ id: c.id, nome: c.nome, empresa: c.empresa || EMPRESA_PADRAO }))
     // empresas em ordem, clientes próprios por último (igual ao menu)
@@ -23,7 +28,7 @@ export default async function PaginaTarefas() {
           O cliente e a data saem do texto. Sem data, vai para hoje.
         </p>
       </header>
-      <Tarefas inicial={tarefas} clientes={clientes} hoje={hojeISO()} />
+      <Tarefas inicial={tarefas} clientes={clientes} hoje={hojeISO()} sugestoes={sugestoes} />
     </div>
   );
 }
