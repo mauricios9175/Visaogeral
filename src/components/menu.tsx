@@ -27,6 +27,10 @@ export const ITENS: Item[] = [
     icone: icone(<><rect x="3" y="4" width="18" height="16" rx="2.5" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-8 9" /></>),
   },
   {
+    href: "/radar", rotulo: "Radar de criativos", curto: "Radar",
+    icone: icone(<><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><path d="M12 12l6-6" /></>),
+  },
+  {
     href: "/modelos", rotulo: "Modelos de campanha", curto: "Modelos",
     icone: icone(<><path d="M12 3l9 5-9 5-9-5 9-5z" /><path d="M3 13l9 5 9-5" /></>),
   },

@@ -6,6 +6,7 @@ import { atualizarHistoricoRecente } from "@/lib/historico";
 import { enviarAvisos } from "@/lib/push";
 import { rodadaAutomaticaSugestoes } from "@/lib/sugestoes-auto";
 import { analisarCriativosPendentes } from "@/lib/analise-criativo";
+import { gerarRadar } from "@/lib/radar";
 
 export const maxDuration = 300;
 
@@ -16,6 +17,7 @@ export const maxDuration = 300;
 // ?modo=avisos — notificações no celular com os alertas novos (de hora em hora, depois do Meta)
 // ?modo=sugestoes — sugestões com IA nos clientes com sinal de problema (de madrugada; repetir enquanto restantes > 0)
 // ?modo=criativos — análise com IA dos criativos ainda sem análise (de madrugada; repetir enquanto restantes > 0)
+// ?modo=radar — radar de criativos do dia (melhores por nicho, buscas na Biblioteca e pesquisa)
 // ?modo=historico — grava o mês atual (e o anterior até o dia 10) no histórico mensal de cada cliente
 export async function GET(request: NextRequest) {
   const segredo = process.env.CRON_SECRET;
@@ -31,6 +33,7 @@ export async function GET(request: NextRequest) {
   if (modo === "avisos") return NextResponse.json(await enviarAvisos());
   if (modo === "sugestoes") return NextResponse.json(await rodadaAutomaticaSugestoes());
   if (modo === "criativos") return NextResponse.json(await analisarCriativosPendentes());
+  if (modo === "radar") { const r = await gerarRadar(); return NextResponse.json({ nichos: r.nichos.length, data: r.data }); }
   if (modo === "google") {
     const dias = Math.min(Number(request.nextUrl.searchParams.get("dias")) || 2, 90);
     return NextResponse.json(await sincronizarGoogle(dias));

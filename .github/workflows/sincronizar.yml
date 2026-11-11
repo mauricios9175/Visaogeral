@@ -97,6 +97,15 @@ jobs:
             echo "$R" | grep -q '"restantes":0' && break
           done
 
+      # Radar de criativos do dia (fica pronto antes de amanhecer)
+      - name: Radar de criativos
+        if: always()
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -sS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/sync?modo=radar" || true
+
       # Análise dos criativos com IA (os novos e os que ainda não têm), maiores gastos primeiro
       - name: Análise dos criativos
         if: always()
