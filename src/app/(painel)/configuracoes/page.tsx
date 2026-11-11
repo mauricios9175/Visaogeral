@@ -19,6 +19,8 @@ import { registrarRecargaGoogle, removerRecargaGoogle } from "../../acoes-anunci
 import { hojeISO } from "@/lib/datas";
 import type { ContaGoogle } from "@/lib/sync-google";
 import { PainelSincronizacao } from "@/components/sincronizacao";
+import { contaAgenda } from "@/lib/agenda";
+import { sairDaAgenda } from "@/app/acoes-agenda";
 
 export const maxDuration = 300;
 
@@ -29,6 +31,7 @@ const botaoPrimario = "rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium te
 
 export default async function Configuracoes({ searchParams }: PageProps<"/configuracoes">) {
   const iaStatus = await statusIA().catch(() => []);
+  const agenda = await contaAgenda().catch(() => null);
   const [manualIA, manualGoogle] = await Promise.all([
     lerManual("meta").catch(() => MANUAL_PADRAO),
     lerManual("google").catch(() => MANUAL_GOOGLE_PADRAO),
@@ -346,6 +349,35 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
             </div>
           </details>
         )}
+      </section>
+
+      {/* ---------- Google Agenda ---------- */}
+      <section id="agenda" className="space-y-3">
+        <h2 className="font-medium">Google Agenda</h2>
+        <div className="space-y-2 rounded-2xl border border-borda bg-superficie p-4 text-sm">
+          {agenda ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <span>Conectado: <b>{agenda.email}</b>. A agenda aparece em Tarefas e dá para marcar reunião pela tela do cliente.</span>
+              <form action={sairDaAgenda}><button className="text-xs text-texto-3 underline hover:text-critico">Desconectar</button></form>
+            </div>
+          ) : (
+            <>
+              <p className="text-texto-2">
+                Conecte a conta Google da <b>sua agenda</b> (pode ser diferente da do Google Ads). O painel só lê e cria eventos; não mexe em mais nada da conta.
+              </p>
+              <a href="/api/agenda/conectar" className="inline-flex rounded-[10px] bg-destaque px-4 py-2 font-semibold text-white">Conectar Google Agenda</a>
+              <details className="text-xs text-texto-3">
+                <summary className="cursor-pointer">Antes da primeira vez (uma vez só, no Google Cloud)</summary>
+                <ol className="mt-2 list-decimal space-y-1 pl-5">
+                  <li>Em console.cloud.google.com, no mesmo projeto do Google Ads: <b>APIs e serviços › Biblioteca</b> › procure <b>Google Calendar API</b> › <b>Ativar</b>.</li>
+                  <li>Em <b>Tela de consentimento OAuth</b> (ou <b>Google Auth Platform › Acesso a dados</b>): <b>Adicionar escopos</b> › marque <b>.../auth/calendar.events</b> › salvar.</li>
+                  <li>Se o app estiver em modo <b>Teste</b>, a conta da sua agenda precisa estar em <b>Usuários de teste</b>.</li>
+                  <li>Volte aqui e clique em Conectar. Se o Google avisar que o app não foi verificado, clique em <b>Avançado › Acessar</b> (é o seu próprio app).</li>
+                </ol>
+              </details>
+            </>
+          )}
+        </div>
       </section>
 
       {/* ---------- Google Ads ---------- */}

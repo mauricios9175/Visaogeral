@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
 type Resultado = { cliente: { id: string; nome: string }; periodo: { rotulo: string; qs: string }; texto: string };
+type RespostaAssistente = { resposta: string; links?: { rotulo: string; href: string }[] };
 
 // reconhecimento de voz do navegador (Chrome/Android/Safari); sem custo
 type ResultadoVoz = ArrayLike<{ transcript: string }> & { isFinal: boolean };
@@ -121,11 +122,14 @@ function Texto({ texto }: { texto: string }) {
  * "Pergunte ao painel": análise em texto com IA.
  * Na visão geral, o cliente e o período vêm do texto. Na tela do cliente, `clienteId` e `periodo` já vêm da tela.
  */
-export function AnaliseIA({ clienteId, periodo, rotuloPeriodo }: { clienteId?: string; periodo?: { p: string; de?: string; ate?: string }; rotuloPeriodo?: string }) {
+export function AnaliseIA({ clienteId, periodo, rotuloPeriodo, assistente }: {
+  clienteId?: string; periodo?: { p: string; de?: string; ate?: string }; rotuloPeriodo?: string; assistente?: boolean;
+}) {
   const [pedido, setPedido] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [res, setRes] = useState<Resultado | null>(null);
+  const [resAssist, setResAssist] = useState<RespostaAssistente | null>(null);
   const router = useRouter();
 
   async function analisar(corpo: Record<string, unknown>) {
@@ -137,6 +141,14 @@ export function AnaliseIA({ clienteId, periodo, rotuloPeriodo }: { clienteId?: s
       if (j.erro) throw new Error(j.erro);
       // pedido de campanha: abre a montagem, que faz o esboço
       if (j.ir) { router.push(j.ir); return; }
+      if (j.assistente) {
+        setRes(null);
+        setResAssist(j.assistente as RespostaAssistente);
+        setPedido("");
+        router.refresh(); // tarefa criada/concluída: atualiza as listas e o contador do menu
+        return;
+      }
+      setResAssist(null);
       setRes(j as Resultado);
     } catch (e) {
       setErro(e instanceof Error ? e.message : String(e));
@@ -154,14 +166,16 @@ export function AnaliseIA({ clienteId, periodo, rotuloPeriodo }: { clienteId?: s
 
   const { ouvindo, falar, parar } = useMicrofone(setPedido, setErro);
 
-  const exemplo = clienteId
-    ? "ex.: do dia 1 ao dia 15, mês passado, ou “monta uma campanha de WhatsApp…”"
-    : "ex.: análise dos últimos 14 dias da Loja X · ou: campanha de formulário para a Loja X";
+  const exemplo = assistente
+    ? "ex.: o que eu tenho pra hoje? · cria tarefa trocar criativo do Kiko amanhã · marca reunião com a Vidros quinta 15h"
+    : clienteId
+    ? "ex.: do dia 1 ao dia 15, mês passado, “cria tarefa …”, “marca reunião sexta 10h”"
+    : "ex.: análise dos últimos 14 dias da Loja X · o que eu tenho pra hoje? · marca reunião com a Loja X quinta 15h";
   return (
     <section className="rounded-2xl border border-borda bg-superficie p-4 lg:p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 font-bold">
-          <span aria-hidden className="text-destaque">✦</span> {clienteId ? "Análise com IA" : "Pergunte ao painel"}
+          <span aria-hidden className="text-destaque">✦</span> {assistente ? "Assistente" : clienteId ? "Análise com IA" : "Pergunte ao painel"}
         </h2>
         {clienteId && periodo && (
           <button type="button" disabled={ocupado} onClick={() => analisar({ clienteId, ...periodo })}
@@ -178,11 +192,23 @@ export function AnaliseIA({ clienteId, periodo, rotuloPeriodo }: { clienteId?: s
         />
         <BotaoMicrofone ouvindo={ouvindo} falar={() => falar(pedido)} />
         <button disabled={ocupado} className="min-h-11 shrink-0 rounded-[10px] border border-borda bg-superficie-2 px-4 text-sm font-semibold hover:border-destaque disabled:opacity-60">
-          {ocupado ? "…" : "Analisar"}
+          {ocupado ? "…" : assistente ? "Enviar" : "Analisar"}
         </button>
       </form>
       {ouvindo && <p className="mt-2 text-xs text-destaque">● Ouvindo… pode fazer pausas. Toque no microfone de novo quando terminar.</p>}
-      {ocupado && <p className="mt-3 text-sm text-texto-3">Juntando os números e escrevendo a análise (leva uns 10 a 30 segundos)…</p>}
+      {ocupado && <p className="mt-3 text-sm text-texto-3">{assistente ? "Pensando…" : "Juntando os números e escrevendo a análise (leva uns 10 a 30 segundos)…"}</p>}
+      {resAssist && !ocupado && (
+        <div className="mt-4 space-y-2 border-t border-borda pt-4">
+          <Texto texto={resAssist.resposta} />
+          {!!resAssist.links?.length && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {resAssist.links.map((l) => l.href.startsWith("/")
+                ? <Link key={l.href} href={l.href} className="rounded-lg border border-borda px-3 py-1.5 text-xs hover:border-destaque">{l.rotulo}</Link>
+                : <a key={l.href} href={l.href} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-borda px-3 py-1.5 text-xs hover:border-destaque">{l.rotulo}</a>)}
+            </div>
+          )}
+        </div>
+      )}
       {erro && <p className="mt-3 text-sm text-critico">{erro}</p>}
       {res && !ocupado && (
         <div className="mt-4 border-t border-borda pt-4">
@@ -199,4 +225,9 @@ export function AnaliseIA({ clienteId, periodo, rotuloPeriodo }: { clienteId?: s
       )}
     </section>
   );
+}
+
+/** Assistente (tela de Tarefas): o mesmo “Pergunte ao painel”, com exemplos de tarefas, reuniões e resumo do dia. */
+export function Assistente() {
+  return <AnaliseIA assistente />;
 }

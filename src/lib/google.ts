@@ -19,13 +19,13 @@ function credenciais() {
 
 export const googleConfigurado = () => Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
 
-export function urlLoginGoogle(redirect: string, state: string) {
+export function urlLoginGoogle(redirect: string, state: string, escopos = ESCOPOS) {
   const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   u.search = new URLSearchParams({
     client_id: credenciais().id,
     redirect_uri: redirect,
     response_type: "code",
-    scope: ESCOPOS,
+    scope: escopos,
     access_type: "offline",
     prompt: "consent", // garante que o Google devolva o refresh token
     include_granted_scopes: "true",

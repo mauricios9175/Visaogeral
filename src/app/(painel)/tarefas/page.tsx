@@ -4,6 +4,8 @@ import { hojeISO } from "@/lib/datas";
 import { listarTarefas } from "@/lib/tarefas";
 import { sugestoesDeTarefa } from "@/lib/tarefas-auto";
 import { Tarefas, type ClienteTarefa } from "@/components/tarefas";
+import { Agenda } from "@/components/agenda";
+import { Assistente } from "@/components/analise-ia";
 
 export default async function PaginaTarefas() {
   await connection();
@@ -28,6 +30,11 @@ export default async function PaginaTarefas() {
           O cliente e a data saem do texto. Sem data, vai para hoje.
         </p>
       </header>
+      <Assistente />
+      <details open className="rounded-2xl border border-borda bg-superficie p-4">
+        <summary className="cursor-pointer text-sm font-bold">Agenda · próximos 7 dias</summary>
+        <div className="mt-3"><Agenda hoje={hojeISO()} dias={7} clientes={clientes} /></div>
+      </details>
       <Tarefas inicial={tarefas} clientes={clientes} hoje={hojeISO()} sugestoes={sugestoes} />
     </div>
   );

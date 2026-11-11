@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { trocarCodigoGoogle } from "@/lib/google";
 import { importarContasGoogle } from "@/lib/sync-google";
+import { PREFIXO_ESTADO, salvarLoginAgenda } from "@/lib/agenda";
 
 export const maxDuration = 300;
 
@@ -14,6 +15,18 @@ export async function GET(request: NextRequest) {
   const code = params.get("code");
   if (!code || params.get("state") !== request.cookies.get("google_state")?.value) {
     return voltar("Falha na validação do login com Google. Tente de novo.");
+  }
+
+  // login da agenda (Google Agenda): guarda à parte e volta para a seção da agenda
+  if (params.get("state")!.startsWith(PREFIXO_ESTADO)) {
+    const voltarAgenda = (msg: string) => NextResponse.redirect(new URL(`/configuracoes?msg=${encodeURIComponent(msg)}#agenda`, request.url));
+    try {
+      const { refreshToken, email } = await trocarCodigoGoogle(code, new URL("/api/google/callback", request.url).toString());
+      await salvarLoginAgenda(email, refreshToken);
+      return voltarAgenda(`Google Agenda conectado (${email}).`);
+    } catch (e) {
+      return voltarAgenda(`Erro ao conectar o Google Agenda: ${e instanceof Error ? e.message : e}`);
+    }
   }
 
   try {

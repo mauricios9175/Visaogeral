@@ -44,6 +44,12 @@ export function Tarefas({ inicial, clientes, hoje, clienteFixo, sugestoes: suges
 }) {
   const router = useRouter();
   const [tarefas, setTarefas] = useState(inicial);
+  // a lista do servidor mudou (ex.: o assistente criou uma tarefa e a tela recarregou): usa a nova
+  const [base, setBase] = useState(inicial);
+  if (inicial !== base) {
+    setBase(inicial);
+    setTarefas(inicial);
+  }
   const [texto, setTexto] = useState("");
   const [clienteEscolhido, setClienteEscolhido] = useState(clienteFixo ?? DESCOBRIR);
   const [dataEscolhida, setDataEscolhida] = useState("");

@@ -28,6 +28,7 @@ import { LinksFicha } from "@/components/ficha";
 import { lerFicha } from "@/lib/ficha";
 import { checklistDoCliente } from "@/lib/implantacao";
 import { Tarefas } from "@/components/tarefas";
+import { ReunioesDoCliente } from "@/components/agenda";
 import { listarTarefas } from "@/lib/tarefas";
 import { hojeISO } from "@/lib/datas";
 import { chaveDe, gastoPorNome, NIVEL_DA_UTM } from "@/lib/agrupar";
@@ -183,9 +184,12 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
 
       <details open={tarefas.some((t) => t.clienteId === id && !t.feita)} className="rounded-2xl border border-borda bg-superficie p-4">
         <summary className="cursor-pointer text-sm font-semibold">
-          Tarefas deste cliente <span className="font-normal text-texto-3">({tarefas.filter((t) => t.clienteId === id && !t.feita).length} abertas)</span>
+          Tarefas e reuniões <span className="font-normal text-texto-3">({tarefas.filter((t) => t.clienteId === id && !t.feita).length} abertas)</span>
           <Link href="/tarefas" className="ml-3 text-xs font-normal text-destaque underline">ver todas</Link>
         </summary>
+        <div className="mt-3 border-b border-borda pb-3">
+          <ReunioesDoCliente clienteId={id} nomeCliente={c.nome} hoje={hojeISO()} />
+        </div>
         <div className="mt-3">
           <Tarefas inicial={tarefas} hoje={hojeISO()} clienteFixo={id}
             clientes={((clientesAtivos ?? []) as { id: string; nome: string; empresa: string | null }[]).map((x) => ({ id: x.id, nome: x.nome, empresa: x.empresa || EMPRESA_PADRAO }))} />

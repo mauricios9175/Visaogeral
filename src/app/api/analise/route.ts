@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { analisarPedido, analisarPeriodo, clienteDoPedido, ehPedidoDeCampanha } from "@/lib/analise";
+import { intencaoDo, responder } from "@/lib/assistente";
 
 export const maxDuration = 120;
 
@@ -12,6 +13,11 @@ export async function POST(request: NextRequest) {
   const pedido = typeof corpo.pedido === "string" ? corpo.pedido.trim().slice(0, 500) : "";
   const clienteId = typeof corpo.clienteId === "string" && corpo.clienteId ? corpo.clienteId : undefined;
   try {
+    // assistente: resumo do dia, tarefas, reuniões e perguntas gerais (sem cliente no texto)
+    if (pedido && (intencaoDo(pedido) || !clienteId)) {
+      const r = await responder(pedido, { clienteId, geralSeNaoAchar: !ehPedidoDeCampanha(pedido) });
+      if (r) return NextResponse.json({ assistente: r });
+    }
     // "monta uma campanha de formulário para a Loja X": vai para a montagem, que faz o esboço com a IA
     if (pedido && ehPedidoDeCampanha(pedido)) {
       const id = clienteId ?? (await clienteDoPedido(pedido)).id;

@@ -68,8 +68,11 @@ const REGRAS: Regra[] = [
     // só vale com "na/até/próxima…", com "-feira" ou no fim da frase ("segunda versão do criativo" não é data)
     re: /\b((?:na|no|pra|para|ate)\s+)?((?:a\s+)?proxim[ao]\s+)?(domingo|segunda|terca|quarta|quinta|sexta|sabado)(-feira| feira)?\b/,
     data: (m, h) => {
-      const noFim = !m.input.slice(m.index + m[0].length).replace(/[\s.!?]/g, "");
-      if (!m[1] && !m[2] && !m[4] && !noFim) return null;
+      const depois = m.input.slice(m.index + m[0].length);
+      const noFim = !depois.replace(/[\s.!?]/g, "");
+      // "quinta às 15h", "sexta 9h30", "segunda de manhã": seguido de horário também é data
+      const comHora = /^\s*(,\s*)?(as\b|a partir|pras?\b|\d{1,2}\s*(h|:)|de (manha|tarde|noite)|(a|pela) (manha|tarde|noite))/.test(depois);
+      if (!m[1] && !m[2] && !m[4] && !noFim && !comHora) return null;
       return somarDias(h, ((DIAS_SEMANA.indexOf(m[3]) - diaDaSemana(h) + 7) % 7) || 7);
     },
   },
@@ -114,3 +117,4 @@ export function rotuloData(iso: string, hoje = hojeISO()) {
   }
   return curta;
 }
+
