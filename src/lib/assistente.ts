@@ -7,7 +7,8 @@ import { alertasContas, resumoClientes } from "./consultas";
 import { criarTarefa, listarTarefas, mudarTarefa, type Tarefa } from "./tarefas";
 import { sugestoesDeTarefa } from "./tarefas-auto";
 import { dataDoTexto, rotuloData } from "./tarefas-texto";
-import { contasAgenda, horaDoTexto, marcarReuniao, proximosEventos, type Evento } from "./agenda";
+import { contasAgenda, marcarReuniao, proximosEventos, type Evento } from "./agenda";
+import { duracaoDoTexto, horarioDoTexto, intencaoDo } from "./assistente-texto";
 import { perguntarIA } from "./ia";
 
 // Assistente do painel: entende o pedido (escrito ou falado) e faz. Usado na tela e, depois, no WhatsApp.
@@ -21,16 +22,7 @@ export type Resposta = { resposta: string; links?: { rotulo: string; href: strin
 
 const sem = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
-export type Intencao = "reuniao" | "tarefa" | "concluir" | "resumo" | null;
-
-export function intencaoDo(texto: string): Intencao {
-  const t = sem(texto);
-  if (/\b(marc|agend)\w*\b.*\b(reuniao|call|chamada|meet|conversa)\b|\b(reuniao|call)\b.*\b(marc|agend)\w*\b/.test(t)) return "reuniao";
-  if (/^\s*(conclui|concluir|terminei|finalizei|fiz|feito|marca(r)? (como )?feit)/.test(t) || /\b(marca(r)?|marque) (a tarefa )?.*\bcomo feita\b/.test(t)) return "concluir";
-  if (/^\s*(cria|criar|crie|anota|anotar|anote|adiciona|adicionar|adicione|me lembr[ae]|lembr[ae]|lembrar|nova tarefa|tarefa:)/.test(t)) return "tarefa";
-  if (/\b(o que|oq|que) (eu )?(tenho|preciso|devo)\b|\bmeu dia\b|\bresumo do dia\b|\b(tarefas|agenda) (de|pra|para) hoje\b|\bpendencias?\b|\bquais clientes\b.*\b(fazer|preciso|atencao|hoje)\b|\bbom dia\b/.test(t)) return "resumo";
-  return null;
-}
+export { intencaoDo, type Intencao } from "./assistente-texto";
 
 async function clientesAtivos() {
   const { data } = await db().from("clientes").select("id, nome, empresa").eq("ativo", true);
@@ -121,15 +113,16 @@ async function novaReuniao(texto: string, clienteId?: string): Promise<Resposta>
     }
   }
   const { data } = dataDoTexto(texto);
-  const hora = horaDoTexto(texto);
+  const horario = horarioDoTexto(texto);
+  const hora = horario?.inicio ?? null;
   if (!data || !hora) {
     return { resposta: `Para marcar com **${cli.nome}**, diga ${!data && !hora ? "o dia e o horário" : !data ? "o dia" : "o horário"} (ex.: “quinta às 15h”, “amanhã 9h30”, “dia 20 às 14h”).` };
   }
   const t = sem(texto);
-  const dur = /(\d{2,3})\s*min/.exec(t);
-  const minutos = dur ? Number(dur[1]) : /\b(1|uma) hora\b|\b1h\b(?!\d)/.test(t.replace(/\d{1,2}h\d{0,2}/, "")) ? 60 : 30;
+  const minutos = duracaoDoTexto(texto);
+  const fimTxt = horario?.fim ? ` às ${horario.fim}` : ` (${minutos} min)`;
   if (!(await contasAgenda()).length) {
-    await criarTarefa({ texto: `Reunião com ${cli.nome} às ${hora}`, clienteId: cli.id, data });
+    await criarTarefa({ texto: `Reunião com ${cli.nome} às ${hora}`, clienteId: cli.id, data: data! });
     return {
       resposta: `O Google Agenda ainda não está conectado, então anotei como tarefa: **reunião com ${cli.nome}**, ${rotuloData(data, hojeISO()).toLowerCase()} às ${hora}.`,
       links: [{ rotulo: "Conectar o Google Agenda", href: "/configuracoes#agenda" }],
@@ -137,9 +130,26 @@ async function novaReuniao(texto: string, clienteId?: string): Promise<Resposta>
   }
   const ev = await marcarReuniao({ titulo: `Reunião · ${cli.nome}`, inicio: `${data}T${hora}`, minutos, clienteId: cli.id, meet: !/sem meet|presencial/.test(t) });
   return {
-    resposta: `✓ Reunião marcada com **${cli.nome}**: ${rotuloData(data, hojeISO()).toLowerCase()} às ${hora} (${minutos} min).${ev.meet ? `\nMeet: ${ev.meet}` : ""}`,
+    resposta: `✓ Reunião marcada no Google Agenda com **${cli.nome}**: ${rotuloData(data, hojeISO()).toLowerCase()}, das ${hora}${fimTxt.replace(" às ", " às ")}.${ev.meet ? `\nMeet: ${ev.meet}` : ""}`,
     links: [...(ev.link ? [{ rotulo: "Abrir na agenda", href: ev.link }] : []), { rotulo: cli.nome, href: `/clientes/${cli.id}` }],
   };
+}
+
+/** "quais reuniões eu tenho amanhã?", "como está minha agenda essa semana?" */
+async function verAgenda(texto: string): Promise<Resposta> {
+  if (!(await contasAgenda()).length) return { resposta: "O Google Agenda ainda não está conectado.", links: [{ rotulo: "Conectar o Google Agenda", href: "/configuracoes#agenda" }] };
+  const hoje = hojeISO();
+  const t = sem(texto);
+  const semana = /\bsemana\b/.test(t);
+  const { data } = dataDoTexto(texto);
+  const dia = data ?? hoje;
+  const eventos = await proximosEventos(semana ? 7 : Math.max(1, Math.round((Date.parse(dia) - Date.parse(hoje)) / 86_400_000) + 1));
+  const diaDe = (e: Evento) => (e.diaInteiro ? e.inicio : new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date(e.inicio)));
+  const lista = semana ? eventos : eventos.filter((e) => diaDe(e) === dia);
+  const titulo = semana ? "Agenda dos próximos 7 dias" : `Agenda de ${rotuloData(dia, hoje).toLowerCase()}`;
+  if (!lista.length) return { resposta: `${titulo}: nada marcado.`, links: [{ rotulo: "Abrir Tarefas", href: "/tarefas" }] };
+  const linhas = lista.map((e) => `- ${semana ? `${rotuloData(diaDe(e), hoje)}, ` : ""}${e.diaInteiro ? "dia inteiro" : horaBR(e.inicio)}: ${e.titulo}${e.meet ? " (Meet)" : ""}`);
+  return { resposta: `## ${titulo} (${lista.length})\n${linhas.join("\n")}`, links: [{ rotulo: "Abrir Tarefas", href: "/tarefas" }] };
 }
 
 /** Pergunta geral ("quais clientes estão com custo alto?"): IA com os números dos últimos 7 dias de todos os clientes. */
@@ -172,6 +182,8 @@ export async function responder(texto: string, ctx: { clienteId?: string; geralS
   if (intencao === "tarefa") return novaTarefa(texto, ctx.clienteId);
   if (intencao === "concluir") return concluirTarefa(texto);
   if (intencao === "reuniao") return novaReuniao(texto, ctx.clienteId);
+  if (intencao === "agenda") return verAgenda(texto);
+  if (intencao === "campanha") return null; // quem chama abre a montagem com o esboço
   if (ctx.clienteId || !ctx.geralSeNaoAchar) return null;
   // cita um cliente: é análise (quem chama faz); senão, pergunta geral
   try {

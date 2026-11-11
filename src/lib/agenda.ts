@@ -174,15 +174,4 @@ export async function marcarReuniao(p: {
   return converter(e, conta.email);
 }
 
-/** "15h", "15h30", "15:30", "às 9", "às 3 da tarde", "meio-dia" → "HH:MM" (ou null). */
-export function horaDoTexto(texto: string): string | null {
-  const t = semAcento(texto);
-  if (/\bmeio[- ]dia\b/.test(t)) return "12:00";
-  const m = /\b(\d{1,2})\s*(?:h|:)\s*(\d{2})?\b/.exec(t) ?? /\b(?:as|pras|para as|a partir das)\s+(\d{1,2})\b/.exec(t);
-  if (!m) return null;
-  let h = Number(m[1]);
-  const min = m[2] ? Number(m[2]) : 0;
-  if (/\b(da|de) (tarde|noite)\b/.test(t) && h < 12) h += 12;
-  if (h > 23 || min > 59) return null;
-  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
-}
+export { horaDoTexto } from "./assistente-texto";

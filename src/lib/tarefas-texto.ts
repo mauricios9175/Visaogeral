@@ -71,7 +71,7 @@ const REGRAS: Regra[] = [
       const depois = m.input.slice(m.index + m[0].length);
       const noFim = !depois.replace(/[\s.!?]/g, "");
       // "quinta às 15h", "sexta 9h30", "segunda de manhã": seguido de horário também é data
-      const comHora = /^\s*(,\s*)?(as\b|a partir|pras?\b|\d{1,2}\s*(h|:)|de (manha|tarde|noite)|(a|pela) (manha|tarde|noite))/.test(depois);
+      const comHora = /^\s*(,\s*)?(as\b|das\b|de \d|entre \d|a partir|pras?\b|\d{1,2}\s*(h|:)|de (manha|tarde|noite)|(a|pela) (manha|tarde|noite))/.test(depois);
       if (!m[1] && !m[2] && !m[4] && !noFim && !comHora) return null;
       return somarDias(h, ((DIAS_SEMANA.indexOf(m[3]) - diaDaSemana(h) + 7) % 7) || 7);
     },
