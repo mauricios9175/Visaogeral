@@ -19,8 +19,8 @@ import { registrarRecargaGoogle, removerRecargaGoogle } from "../../acoes-anunci
 import { hojeISO } from "@/lib/datas";
 import type { ContaGoogle } from "@/lib/sync-google";
 import { PainelSincronizacao } from "@/components/sincronizacao";
-import { contaAgenda } from "@/lib/agenda";
-import { sairDaAgenda } from "@/app/acoes-agenda";
+import { contasAgenda } from "@/lib/agenda";
+import { agendaPrincipal, sairDaAgenda } from "@/app/acoes-agenda";
 
 export const maxDuration = 300;
 
@@ -31,7 +31,7 @@ const botaoPrimario = "rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium te
 
 export default async function Configuracoes({ searchParams }: PageProps<"/configuracoes">) {
   const iaStatus = await statusIA().catch(() => []);
-  const agenda = await contaAgenda().catch(() => null);
+  const agendas = await contasAgenda().catch(() => []);
   const [manualIA, manualGoogle] = await Promise.all([
     lerManual("meta").catch(() => MANUAL_PADRAO),
     lerManual("google").catch(() => MANUAL_GOOGLE_PADRAO),
@@ -355,10 +355,22 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
       <section id="agenda" className="space-y-3">
         <h2 className="font-medium">Google Agenda</h2>
         <div className="space-y-2 rounded-2xl border border-borda bg-superficie p-4 text-sm">
-          {agenda ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <span>Conectado: <b>{agenda.email}</b>. A agenda aparece em Tarefas e dá para marcar reunião pela tela do cliente.</span>
-              <form action={sairDaAgenda}><button className="text-xs text-texto-3 underline hover:text-critico">Desconectar</button></form>
+          {agendas.length ? (
+            <div className="space-y-2">
+              <p className="text-texto-2">Os compromissos de todas aparecem juntos em Tarefas. As reuniões são marcadas na <b>principal</b> (dá para escolher outra na hora).</p>
+              <ul className="space-y-1">
+                {agendas.map((a, i) => (
+                  <li key={a.email} className="flex flex-wrap items-center gap-3">
+                    <b>{a.email}</b>
+                    {i === 0 ? <span className="rounded bg-destaque-bg px-1.5 py-0.5 text-xs text-destaque">principal</span> : (
+                      <form action={agendaPrincipal}><input type="hidden" name="email" value={a.email} /><button className="text-xs text-texto-3 underline hover:text-texto">tornar principal</button></form>
+                    )}
+                    <form action={sairDaAgenda}><input type="hidden" name="email" value={a.email} /><button className="text-xs text-texto-3 underline hover:text-critico">Desconectar</button></form>
+                  </li>
+                ))}
+              </ul>
+              <a href="/api/agenda/conectar" className="inline-flex rounded-[10px] border border-borda px-3 py-1.5 font-semibold hover:border-destaque">+ Conectar outra conta (ex.: a pessoal)</a>
+              <p className="text-xs text-texto-3">Na tela do Google, escolha a outra conta. Se o app estiver em modo Teste no Google Cloud, adicione esse e-mail em Usuários de teste.</p>
             </div>
           ) : (
             <>

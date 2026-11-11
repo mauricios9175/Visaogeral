@@ -7,7 +7,7 @@ import { alertasContas, resumoClientes } from "./consultas";
 import { criarTarefa, listarTarefas, mudarTarefa, type Tarefa } from "./tarefas";
 import { sugestoesDeTarefa } from "./tarefas-auto";
 import { dataDoTexto, rotuloData } from "./tarefas-texto";
-import { contaAgenda, horaDoTexto, marcarReuniao, proximosEventos, type Evento } from "./agenda";
+import { contasAgenda, horaDoTexto, marcarReuniao, proximosEventos, type Evento } from "./agenda";
 import { perguntarIA } from "./ia";
 
 // Assistente do painel: entende o pedido (escrito ou falado) e faz. Usado na tela e, depois, no WhatsApp.
@@ -44,7 +44,7 @@ export async function resumoDoDia(): Promise<Resposta> {
   const hoje = hojeISO();
   const [tarefas, clientes, contas, agenda] = await Promise.all([
     listarTarefas(), clientesAtivos(), alertasContas().catch(() => []),
-    contaAgenda().then((c) => (c ? proximosEventos(1).catch(() => null) : null)),
+    contasAgenda().then((c) => (c.length ? proximosEventos(1).catch(() => null) : null)),
   ]);
   const nome = new Map(clientes.map((c) => [c.id, c.nome]));
   const sugestoes = await sugestoesDeTarefa(tarefas).catch(() => []);
@@ -128,7 +128,7 @@ async function novaReuniao(texto: string, clienteId?: string): Promise<Resposta>
   const t = sem(texto);
   const dur = /(\d{2,3})\s*min/.exec(t);
   const minutos = dur ? Number(dur[1]) : /\b(1|uma) hora\b|\b1h\b(?!\d)/.test(t.replace(/\d{1,2}h\d{0,2}/, "")) ? 60 : 30;
-  if (!(await contaAgenda())) {
+  if (!(await contasAgenda()).length) {
     await criarTarefa({ texto: `Reunião com ${cli.nome} às ${hora}`, clienteId: cli.id, data });
     return {
       resposta: `O Google Agenda ainda não está conectado, então anotei como tarefa: **reunião com ${cli.nome}**, ${rotuloData(data, hojeISO()).toLowerCase()} às ${hora}.`,

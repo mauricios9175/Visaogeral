@@ -21,7 +21,7 @@ function rotuloDia(dia: string, hoje: string) {
 export function Agenda({ hoje, dias = 7, clienteId, clientes = [], recarregar = 0 }: {
   hoje: string; dias?: number; clienteId?: string; clientes?: { id: string; nome: string }[]; recarregar?: number;
 }) {
-  const [estado, setEstado] = useState<{ conectado: boolean; eventos: Evento[]; erro?: string } | null>(null);
+  const [estado, setEstado] = useState<{ conectado: boolean; contas?: string[]; eventos: Evento[]; erro?: string } | null>(null);
   useEffect(() => {
     let vivo = true;
     fetch(`/api/agenda?dias=${dias}${clienteId ? `&cliente=${clienteId}` : ""}`)
@@ -58,6 +58,7 @@ export function Agenda({ hoje, dias = 7, clienteId, clientes = [], recarregar = 
               {!clienteId && e.clienteId && nomes.has(e.clienteId) && (
                 <Link href={`/clientes/${e.clienteId}`} className="rounded-md bg-destaque-bg px-1.5 py-0.5 text-xs font-medium text-destaque">{nomes.get(e.clienteId)}</Link>
               )}
+              {(estado.contas?.length ?? 0) > 1 && <span className="text-[11px] text-texto-3" title={e.conta}>{e.conta.split("@")[0]}</span>}
               {e.meet && <a href={e.meet} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-bom underline">Meet</a>}
             </div>
           ))}
@@ -72,7 +73,14 @@ export function MarcarReuniao({ clienteId, nomeCliente, hoje, classe, aoMarcar }
   clienteId: string; nomeCliente: string; hoje: string; classe?: string; aoMarcar?: () => void;
 }) {
   const [aberto, setAberto] = useState(false);
-  const [f, setF] = useState({ titulo: `Reunião · ${nomeCliente}`, dia: hoje, hora: "10:00", minutos: 30, meet: true, convidados: "", descricao: "" });
+  const [f, setF] = useState({ titulo: `Reunião · ${nomeCliente}`, dia: hoje, hora: "10:00", minutos: 30, meet: true, convidados: "", descricao: "", conta: "" });
+  const [contas, setContas] = useState<string[]>([]);
+  function abrir() {
+    setAberto(true);
+    setFeito(null);
+    // as agendas conectadas (para escolher onde marcar, se houver mais de uma)
+    fetch("/api/agenda?dias=1").then((r) => r.json()).then((j) => setContas(j.contas ?? [])).catch(() => null);
+  }
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [feito, setFeito] = useState<Evento | null>(null);
@@ -86,6 +94,7 @@ export function MarcarReuniao({ clienteId, nomeCliente, hoje, classe, aoMarcar }
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           clienteId, titulo: f.titulo, inicio: `${f.dia}T${f.hora}`, minutos: f.minutos, meet: f.meet, descricao: f.descricao,
+          ...(f.conta ? { conta: f.conta } : {}),
           convidados: f.convidados.split(/[\s,;]+/).filter(Boolean),
         }),
       });
@@ -103,7 +112,7 @@ export function MarcarReuniao({ clienteId, nomeCliente, hoje, classe, aoMarcar }
   const campo = "min-h-10 w-full rounded-lg border border-borda bg-fundo px-3 text-sm";
   return (
     <>
-      <button type="button" onClick={() => { setAberto(true); setFeito(null); }} className={classe ?? "inline-flex min-h-[42px] items-center rounded-[10px] border border-borda bg-superficie px-4 text-sm font-semibold hover:border-destaque"}>
+      <button type="button" onClick={abrir} className={classe ?? "inline-flex min-h-[42px] items-center rounded-[10px] border border-borda bg-superficie px-4 text-sm font-semibold hover:border-destaque"}>
         Marcar reunião
       </button>
       {aberto && (
@@ -131,6 +140,12 @@ export function MarcarReuniao({ clienteId, nomeCliente, hoje, classe, aoMarcar }
                     {[15, 30, 45, 60, 90, 120].map((m) => <option key={m} value={m}>{m < 60 ? `${m} min` : `${m / 60}h${m % 60 ? "30" : ""}`}</option>)}
                   </select></label>
               </div>
+              {contas.length > 1 && (
+                <label className="block space-y-1"><span className="text-xs text-texto-3">Marcar na agenda</span>
+                  <select value={f.conta || contas[0]} onChange={(e) => setF({ ...f, conta: e.target.value })} className={campo}>
+                    {contas.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select></label>
+              )}
               <label className="flex items-center gap-2"><input type="checkbox" checked={f.meet} onChange={(e) => setF({ ...f, meet: e.target.checked })} /> Criar link do Google Meet</label>
               <label className="block space-y-1"><span className="text-xs text-texto-3">Convidar (e-mails, opcional: o Google manda o convite)</span>
                 <input value={f.convidados} onChange={(e) => setF({ ...f, convidados: e.target.value })} placeholder="cliente@empresa.com" className={campo} /></label>

@@ -1,15 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { contaAgenda, marcarReuniao, proximosEventos } from "@/lib/agenda";
+import { contasAgenda, marcarReuniao, proximosEventos } from "@/lib/agenda";
 
 // Google Agenda (protegido pelo login do painel).
-//   GET ?dias=7&cliente=<id>                 → { conectado, eventos }
-//   POST { clienteId?, titulo, inicio: "AAAA-MM-DDTHH:MM", minutos, meet?, convidados?: string[], descricao? } → { evento }
+//   GET ?dias=7&cliente=<id>                 → { conectado, contas, eventos }
+//   POST { clienteId?, titulo, inicio: "AAAA-MM-DDTHH:MM", minutos, meet?, convidados?: string[], descricao?, conta? } → { evento }
 export async function GET(request: NextRequest) {
   const q = request.nextUrl.searchParams;
   try {
-    if (!(await contaAgenda())) return NextResponse.json({ conectado: false, eventos: [] });
+    const contas = (await contasAgenda()).map((c) => c.email);
+    if (!contas.length) return NextResponse.json({ conectado: false, contas, eventos: [] });
     const dias = Math.min(Math.max(Number(q.get("dias")) || 7, 1), 60);
-    return NextResponse.json({ conectado: true, eventos: await proximosEventos(dias, { clienteId: q.get("cliente") ?? undefined }) });
+    return NextResponse.json({ conectado: true, contas, eventos: await proximosEventos(dias, { clienteId: q.get("cliente") ?? undefined }) });
   } catch (e) {
     return NextResponse.json({ conectado: true, eventos: [], erro: e instanceof Error ? e.message : String(e) });
   }
@@ -26,6 +27,7 @@ export async function POST(request: NextRequest) {
       descricao: typeof c.descricao === "string" ? c.descricao : undefined,
       meet: !!c.meet,
       convidados: Array.isArray(c.convidados) ? c.convidados.map(String) : [],
+      conta: typeof c.conta === "string" ? c.conta : undefined,
     });
     return NextResponse.json({ evento });
   } catch (e) {
