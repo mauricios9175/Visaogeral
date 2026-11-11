@@ -20,7 +20,6 @@ import { hojeISO, somarDias, type Periodo } from "./datas";
 
 const DRIVE = "https://www.googleapis.com/drive/v3";
 const SLIDES = "https://slides.googleapis.com/v1/presentations";
-const ARQUIVO_MODELO = path.join(process.cwd(), "modelos", "relatorio-propulsao.pptx");
 
 export type ConfigRelatorio = { modeloId: string; pastaId: string | null; tokenId: string; email: string };
 
@@ -55,16 +54,11 @@ async function acessoDoToken(tokenId: string) {
   return { acesso: await tokenDeAcesso(data.refresh_token as string), email: data.email as string };
 }
 
-/** Sobe o modelo da Propulsão para o Drive (convertido em Google Slides), dentro de uma pasta só dos relatórios. */
-export async function criarModeloNoDrive(tokenId: string) {
-  const { acesso, email } = await acessoDoToken(tokenId);
-  const pasta = await api<{ id: string }>(acesso, `${DRIVE}/files?fields=id`, {
-    method: "POST",
-    body: JSON.stringify({ name: "Relatórios · Visão Geral", mimeType: "application/vnd.google-apps.folder" }),
-  });
-  const pptx = await readFile(ARQUIVO_MODELO);
+/** Sobe um arquivo de modelo (PowerPoint) para o Drive, convertido em Google Slides. */
+async function subirModelo(acesso: string, tipo: TipoModelo, pastaId: string | null) {
+  const pptx = await readFile(path.join(process.cwd(), "modelos", MODELOS[tipo].arquivo));
   const limite = `limite${Date.now()}`;
-  const meta = JSON.stringify({ name: "Modelo de relatório · Propulsão", mimeType: "application/vnd.google-apps.presentation", parents: [pasta.id] });
+  const meta = JSON.stringify({ name: `Modelo de relatório · ${MODELOS[tipo].nome}`, mimeType: "application/vnd.google-apps.presentation", ...(pastaId && { parents: [pastaId] }) });
   const corpo = Buffer.concat([
     Buffer.from(`--${limite}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n`),
     Buffer.from(`--${limite}\r\nContent-Type: application/vnd.openxmlformats-officedocument.presentationml.presentation\r\n\r\n`),
@@ -76,10 +70,38 @@ export async function criarModeloNoDrive(tokenId: string) {
     headers: { "Content-Type": `multipart/related; boundary=${limite}` },
     body: corpo,
   });
-  const valor: ConfigRelatorio = { modeloId: arquivo.id, pastaId: pasta.id, tokenId, email };
+  return arquivo.id;
+}
+
+/** Sobe o modelo da Propulsão para o Drive (convertido em Google Slides), dentro de uma pasta só dos relatórios. */
+export async function criarModeloNoDrive(tokenId: string) {
+  const { acesso, email } = await acessoDoToken(tokenId);
+  const pasta = await api<{ id: string }>(acesso, `${DRIVE}/files?fields=id`, {
+    method: "POST",
+    body: JSON.stringify({ name: "Relatórios · Visão Geral", mimeType: "application/vnd.google-apps.folder" }),
+  });
+  const modeloId = await subirModelo(acesso, "propulsao", pasta.id);
+  const valor: ConfigRelatorio = { modeloId, pastaId: pasta.id, tokenId, email };
   const { error } = await db().from("configuracoes").upsert({ chave: "relatorio_slides", valor, atualizado_em: new Date().toISOString() });
   if (error) throw new Error(`${error.message} (rode o SQL 0016 no Supabase)`);
   return valor;
+}
+
+/** Ids dos modelos dos clientes próprios e da Viccon no Drive (o da Propulsão fica em relatorio_slides). */
+export async function outrosModelos(): Promise<Partial<Record<TipoModelo, string>>> {
+  const { data } = await db().from("configuracoes").select("valor").eq("chave", "relatorio_modelos").maybeSingle();
+  return (data?.valor as Partial<Record<TipoModelo, string>> | undefined) ?? {};
+}
+
+/** Id do modelo do tipo no Drive; o dos clientes próprios e o da Viccon são criados na primeira vez (mesma pasta e login). */
+async function idDoModelo(tipo: TipoModelo, config: ConfigRelatorio, acesso: string, recriar = false) {
+  if (tipo === "propulsao") return config.modeloId;
+  const outros = await outrosModelos();
+  if (outros[tipo] && !recriar) return outros[tipo]!;
+  const id = await subirModelo(acesso, tipo, config.pastaId);
+  const { error } = await db().from("configuracoes").upsert({ chave: "relatorio_modelos", valor: { ...outros, [tipo]: id }, atualizado_em: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+  return id;
 }
 
 /** Dados para o seletor de pastas do Google (Google Picker) no navegador. */
@@ -116,9 +138,35 @@ const propriedades = (pagina: string, c: Caixa) => ({
   transform: { scaleX: 1, scaleY: 1, translateX: Math.round(c.x), translateY: Math.round(c.y), unit: "EMU" },
 });
 
-const ROXO = "6900AF";
-const PALETA = ["6900AF", "B57BEE", "1FB5CC", "F2A900", "E0559B", "4C7BE0", "2FA36B"];
-const FONTE = "Saira";
+// ---------- Modelos (Propulsão, clientes próprios, Viccon) e as cores de cada um ----------
+
+export type TipoModelo = "propulsao" | "proprio" | "viccon";
+
+type Tema = { primaria: string; paleta: string[]; fonte: string; fonteFunil: string; clara: string; escura: string; media: string };
+
+export const MODELOS: Record<TipoModelo, { nome: string; arquivo: string; tema: Tema }> = {
+  propulsao: {
+    nome: "Propulsão", arquivo: "relatorio-propulsao.pptx",
+    tema: { primaria: "6900AF", paleta: ["6900AF", "B57BEE", "1FB5CC", "F2A900", "E0559B", "4C7BE0", "2FA36B"], fonte: "Saira", fonteFunil: "Montserrat", clara: "F1E6FA", escura: "4B0A86", media: "8A5BB5" },
+  },
+  proprio: {
+    nome: "Clientes próprios (mensal)", arquivo: "relatorio-proprio.pptx",
+    tema: { primaria: "1E3A8A", paleta: ["1E3A8A", "F59E0B", "3B82F6", "10B981", "EF4444", "8B5CF6", "14B8A6"], fonte: "Poppins", fonteFunil: "Poppins", clara: "EEF2FF", escura: "1E3A8A", media: "3B82F6" },
+  },
+  viccon: {
+    nome: "Viccon", arquivo: "relatorio-viccon.pptx",
+    tema: { primaria: "0F172A", paleta: ["0F172A", "14B8A6", "64748B", "F59E0B", "0EA5E9", "EF4444", "8B5CF6"], fonte: "Inter", fonteFunil: "Inter", clara: "F0FDFA", escura: "0F172A", media: "0D9488" },
+  },
+};
+
+/** Modelo de cada empresa: Viccon → Viccon; Propulsão → Propulsão; o resto (clientes próprios) → mensal. */
+export function modeloPadrao(empresa: string | null | undefined): TipoModelo {
+  const e = (empresa ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return e.includes("viccon") ? "viccon" : e.includes("propulsao") ? "propulsao" : "proprio";
+}
+
+// Tema do relatório que está sendo gerado (um por vez; volta ao da Propulsão no fim).
+let tema: Tema = MODELOS.propulsao.tema;
 
 let seq = 0;
 const novoId = (p: string) => `${p}_${Date.now().toString(36)}_${(seq++).toString(36)}`;
@@ -145,7 +193,7 @@ function texto(pagina: string, c: Caixa, conteudo: string, e: { tamanho: number;
     {
       updateTextStyle: {
         objectId: id, textRange: { type: "ALL" },
-        style: { fontFamily: FONTE, fontSize: { magnitude: e.tamanho, unit: "PT" }, bold: !!e.negrito, foregroundColor: { opaqueColor: cor(e.cor ?? "444444") } },
+        style: { fontFamily: tema.fonte, fontSize: { magnitude: e.tamanho, unit: "PT" }, bold: !!e.negrito, foregroundColor: { opaqueColor: cor(e.cor ?? "444444") } },
         fields: "fontFamily,fontSize,bold,foregroundColor",
       },
     },
@@ -173,7 +221,7 @@ function tabela(pagina: string, c: Caixa, cabecalho: string[], linhas: string[][
         updateTextStyle: {
           objectId: id, cellLocation: cell, textRange: { type: "ALL" },
           style: {
-            fontFamily: FONTE, fontSize: { magnitude: ehCabecalho ? 7 : 8, unit: "PT" }, bold: ehCabecalho || ehTotal,
+            fontFamily: tema.fonte, fontSize: { magnitude: ehCabecalho ? 7 : 8, unit: "PT" }, bold: ehCabecalho || ehTotal,
             foregroundColor: { opaqueColor: cor(ehCabecalho ? "FFFFFF" : "333333") },
           },
           fields: "fontFamily,fontSize,bold,foregroundColor",
@@ -192,9 +240,9 @@ function tabela(pagina: string, c: Caixa, cabecalho: string[], linhas: string[][
       fields: "tableCellBackgroundFill.solidFill.color,contentAlignment",
     },
   });
-  reqs.push(fundo(0, 1, ROXO));
+  reqs.push(fundo(0, 1, tema.primaria));
   if (linhas.length) reqs.push(fundo(1, linhas.length, "FFFFFF"));
-  if (opcoes.total) reqs.push(fundo(todas.length - 1, 1, "F1E6FA"));
+  if (opcoes.total) reqs.push(fundo(todas.length - 1, 1, tema.clara));
   reqs.push({
     updateTableBorderProperties: {
       objectId: id, tableRange: faixa(0, todas.length), borderPosition: "ALL",
@@ -230,10 +278,10 @@ function grafico(pagina: string, c: Caixa, titulo: string, categorias: string[],
       const v = s.valores[i];
       const x = inicio + j * barra;
       const alt = v ? (v / maximo) * area.h : 0;
-      if (alt > 0) reqs.push(...retangulo(pagina, { x, y: base - alt, w: barra * 0.92, h: alt }, PALETA[j % PALETA.length]));
+      if (alt > 0) reqs.push(...retangulo(pagina, { x, y: base - alt, w: barra * 0.92, h: alt }, tema.paleta[j % tema.paleta.length]));
       const larguraRotulo = Math.max(barra, 640_000);
       reqs.push(...texto(pagina, { x: x + barra * 0.46 - larguraRotulo / 2, y: base - alt - 230_000, w: larguraRotulo, h: 220_000 },
-        v == null ? "—" : formato(v), { tamanho: 8, negrito: true, cor: PALETA[j % PALETA.length] }));
+        v == null ? "—" : formato(v), { tamanho: 8, negrito: true, cor: tema.paleta[j % tema.paleta.length] }));
     });
     reqs.push(...texto(pagina, { x: area.x + i * grupo, y: base + 40_000, w: grupo, h: 240_000 }, cat, { tamanho: 9, cor: "444444" }));
   });
@@ -241,7 +289,7 @@ function grafico(pagina: string, c: Caixa, titulo: string, categorias: string[],
   // legenda à direita, como nos gráficos do Planilhas
   series.forEach((s, j) => {
     const y = c.y + c.h * 0.22 + j * 300_000;
-    reqs.push(...retangulo(pagina, { x: c.x + c.w * 0.8, y: y + 50_000, w: 130_000, h: 130_000 }, PALETA[j % PALETA.length]));
+    reqs.push(...retangulo(pagina, { x: c.x + c.w * 0.8, y: y + 50_000, w: 130_000, h: 130_000 }, tema.paleta[j % tema.paleta.length]));
     reqs.push(...texto(pagina, { x: c.x + c.w * 0.8 + 180_000, y, w: c.w * 0.18, h: 230_000 }, s.nome, { tamanho: 10, alinhar: "START" }));
   });
   return reqs;
@@ -250,7 +298,7 @@ function grafico(pagina: string, c: Caixa, titulo: string, categorias: string[],
 /** Caixa arredondada com duas linhas (rótulo e valor), no estilo do slide de pipeline. */
 function caixaFunil(pagina: string, c: Caixa, rotulo: string, valor: string, cheia: boolean): Req[] {
   const id = novoId("f");
-  const corTexto = cheia ? "FFFFFF" : "4B0A86";
+  const corTexto = cheia ? "FFFFFF" : tema.escura;
   const textoTodo = `${rotulo}\n${valor}`;
   return [
     { createShape: { objectId: id, shapeType: "ROUND_RECTANGLE", elementProperties: propriedades(pagina, c) } },
@@ -258,8 +306,8 @@ function caixaFunil(pagina: string, c: Caixa, rotulo: string, valor: string, che
       updateShapeProperties: {
         objectId: id,
         shapeProperties: {
-          shapeBackgroundFill: { solidFill: { color: cor(cheia ? ROXO : "FFFFFF") } },
-          outline: cheia ? { propertyState: "NOT_RENDERED" } : { outlineFill: { solidFill: { color: cor(ROXO) } }, weight: { magnitude: 2.25, unit: "PT" }, propertyState: "RENDERED" },
+          shapeBackgroundFill: { solidFill: { color: cor(cheia ? tema.primaria : "FFFFFF") } },
+          outline: cheia ? { propertyState: "NOT_RENDERED" } : { outlineFill: { solidFill: { color: cor(tema.primaria) } }, weight: { magnitude: 2.25, unit: "PT" }, propertyState: "RENDERED" },
           contentAlignment: "MIDDLE",
         },
         fields: cheia ? "shapeBackgroundFill.solidFill.color,outline.propertyState,contentAlignment"
@@ -270,7 +318,7 @@ function caixaFunil(pagina: string, c: Caixa, rotulo: string, valor: string, che
     {
       updateTextStyle: {
         objectId: id, textRange: { type: "ALL" },
-        style: { fontFamily: "Montserrat", fontSize: { magnitude: 11, unit: "PT" }, bold: false, foregroundColor: { opaqueColor: cor(corTexto) } },
+        style: { fontFamily: tema.fonteFunil, fontSize: { magnitude: 11, unit: "PT" }, bold: false, foregroundColor: { opaqueColor: cor(corTexto) } },
         fields: "fontFamily,fontSize,bold,foregroundColor",
       },
     },
@@ -306,9 +354,9 @@ function desenharFunil(
   const espessura = 28_575;
   if (n > 1) {
     const yIni = caixas[0].y + h / 2, yFim = caixas[n - 1].y + h / 2;
-    reqs.push(...retangulo(pagina, { x: xLinha, y: yIni, w: espessura, h: yFim - yIni + espessura }, ROXO));
-    reqs.push(...retangulo(pagina, { x: xLinha, y: yIni, w: caixas[0].x - xLinha, h: espessura }, ROXO));
-    reqs.push(...retangulo(pagina, { x: xLinha, y: yFim, w: caixas[n - 1].x - xLinha, h: espessura }, ROXO));
+    reqs.push(...retangulo(pagina, { x: xLinha, y: yIni, w: espessura, h: yFim - yIni + espessura }, tema.primaria));
+    reqs.push(...retangulo(pagina, { x: xLinha, y: yIni, w: caixas[0].x - xLinha, h: espessura }, tema.primaria));
+    reqs.push(...retangulo(pagina, { x: xLinha, y: yFim, w: caixas[n - 1].x - xLinha, h: espessura }, tema.primaria));
   }
   passos.forEach((p, i) => {
     reqs.push(...caixaFunil(pagina, caixas[i], p.nome, p.valor, true));
@@ -316,7 +364,7 @@ function desenharFunil(
     if (i > 0 && p.taxa) {
       // quando sai uma linha da caixa (valor das vendas ou valor somado do passo), a taxa fica acima dela
       const y = i === n - 1 || (valorPropostas && i === n - 2) ? caixas[i].y : caixas[i].y + h * 0.25;
-      reqs.push(...texto(pagina, { x: caixas[i].x + caixas[i].w + larg * 0.01, y, w: larg * 0.09, h: h * 0.45 }, `${p.taxa}`, { tamanho: 10, cor: "8A5BB5", alinhar: "START" }));
+      reqs.push(...texto(pagina, { x: caixas[i].x + caixas[i].w + larg * 0.01, y, w: larg * 0.09, h: h * 0.45 }, `${p.taxa}`, { tamanho: 10, cor: tema.media, alinhar: "START" }));
     }
   });
   const larguraValor = larg * 0.25;
@@ -325,13 +373,13 @@ function desenharFunil(
   if (valorPropostas && iPropostas > 0) {
     const cx = caixas[iPropostas];
     const x = larg * 0.66;
-    reqs.push(...retangulo(pagina, { x: cx.x + cx.w, y: cx.y + h / 2, w: x - (cx.x + cx.w), h: 12_700 }, ROXO));
+    reqs.push(...retangulo(pagina, { x: cx.x + cx.w, y: cx.y + h / 2, w: x - (cx.x + cx.w), h: 12_700 }, tema.primaria));
     reqs.push(...caixaFunil(pagina, { x, y: cx.y, w: larguraValor, h }, "Valor das propostas", valorPropostas, false));
   }
   reqs.push(...caixaFunil(pagina, { x: larg * 0.66, y: caixas[0].y, w: larguraValor, h }, "Valor investido", investido, false));
   const ultima = caixas[n - 1];
   const xVendas = Math.max(larg * 0.62, ultima.x + ultima.w + larg * 0.1);
-  reqs.push(...retangulo(pagina, { x: ultima.x + ultima.w, y: ultima.y + h / 2, w: xVendas - (ultima.x + ultima.w), h: 12_700 }, ROXO));
+  reqs.push(...retangulo(pagina, { x: ultima.x + ultima.w, y: ultima.y + h / 2, w: xVendas - (ultima.x + ultima.w), h: 12_700 }, tema.primaria));
   reqs.push(...caixaFunil(pagina, { x: xVendas, y: ultima.y, w: Math.min(larguraValor, larg * 0.96 - xVendas), h }, "Valor das vendas", valorVendas, false));
   return reqs;
 }
@@ -344,7 +392,63 @@ export type PedidoRelatorio = {
   agrupar: boolean; // junta públicos e anúncios de mesmo nome (duplicados para teste)
   motivosPerda?: boolean; // slide com os motivos de perda do CRM (opcional)
   vendas?: boolean;       // slide com o gráfico de vendas realizadas e valor das vendas (padrão: sim, se houver CRM)
+  modelo?: TipoModelo;    // sem: pelo da empresa do cliente
+  resumoIA?: boolean;     // slide "Destaques" escrito pela IA (modelos novos; padrão: sim)
 };
+
+/** Período anterior para comparar: o mês anterior (relatório de mês inteiro) ou os mesmos dias logo antes. */
+function periodoAnterior(desde: string, ate: string): { desde: string; ate: string } {
+  if (desde.endsWith("-01")) {
+    const ini = mesDe(desde, -1);
+    const fimMes = somarDias(desde, -1);
+    // mês em andamento: compara com os mesmos dias do mês anterior
+    const dias = Math.round((Date.parse(ate) - Date.parse(desde)) / 86_400_000);
+    return { desde: ini, ate: [somarDias(ini, dias), fimMes].sort()[0] };
+  }
+  const n = Math.round((Date.parse(ate) - Date.parse(desde)) / 86_400_000) + 1;
+  return { desde: somarDias(desde, -n), ate: somarDias(desde, -1) };
+}
+
+/** Texto do slide "Destaques" (para o cliente): 4 a 6 tópicos curtos escritos pela IA com os números do período. */
+async function destaquesIA(clienteId: string, atual: Periodo, anterior: Periodo) {
+  const { dadosDoPeriodo } = await import("./analise");
+  const { perguntarIA } = await import("./ia");
+  const dados = await dadosDoPeriodo(clienteId, atual, anterior);
+  const sistema = `Você escreve o slide "Destaques do período" de um relatório de tráfego pago que vai para o CLIENTE (dono da empresa).
+Escreva de 4 a 6 tópicos, um por linha, cada um começando com "• " e com no máximo 22 palavras.
+Linguagem simples e positiva-realista, sem jargão (explique CPL como "custo por contato/lead"), com números concretos do período e a comparação com o anterior.
+Inclua pelo menos um ponto de atenção e termine com um tópico sobre o foco do próximo período. Não invente números. Sem markdown, sem títulos.`;
+  const t = await perguntarIA(sistema, dados.texto, { temperatura: 0.4 });
+  return t.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => (l.startsWith("•") ? l : `• ${l.replace(/^[-*]\s*/, "")}`)).slice(0, 7).join("\n");
+}
+
+type Cartao = { rotulo: string; valor: string; variacao: number | null; melhorMaior: boolean | null; comparado: string };
+
+/** Cartões do resumo ({{tabela:resumo}}): até 4 por linha, com a variação colorida (verde melhorou, vermelho piorou). */
+function cartoesResumo(pagina: string, c: Caixa, cartoes: Cartao[]): Req[] {
+  const reqs: Req[] = [];
+  const porLinha = Math.min(4, cartoes.length) || 1;
+  const linhas = Math.ceil(cartoes.length / porLinha);
+  const gap = c.w * 0.025;
+  const w = (c.w - gap * (porLinha - 1)) / porLinha;
+  const h = Math.min((c.h - gap * (linhas - 1)) / linhas, 1_250_000);
+  cartoes.forEach((k, i) => {
+    const x = c.x + (i % porLinha) * (w + gap);
+    const y = c.y + Math.floor(i / porLinha) * (h + gap);
+    reqs.push(...retangulo(pagina, { x, y, w, h }, tema.clara));
+    reqs.push(...retangulo(pagina, { x, y, w: 45_000, h }, tema.primaria));
+    reqs.push(...texto(pagina, { x: x + w * 0.08, y: y + h * 0.1, w: w * 0.88, h: h * 0.24 }, k.rotulo, { tamanho: 10, cor: "6B7280", alinhar: "START" }));
+    reqs.push(...texto(pagina, { x: x + w * 0.08, y: y + h * 0.34, w: w * 0.88, h: h * 0.34 }, k.valor, { tamanho: 20, negrito: true, cor: tema.escura, alinhar: "START" }));
+    if (k.variacao != null && Number.isFinite(k.variacao)) {
+      const melhorou = k.melhorMaior == null ? null : (k.variacao >= 0) === k.melhorMaior;
+      const seta = k.variacao >= 0 ? "▲" : "▼";
+      const corVar = melhorou == null ? "6B7280" : melhorou ? "15803D" : "B91C1C";
+      reqs.push(...texto(pagina, { x: x + w * 0.08, y: y + h * 0.7, w: w * 0.88, h: h * 0.22 },
+        `${seta} ${Math.abs(k.variacao).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}% vs ${k.comparado}`, { tamanho: 9, cor: corVar, alinhar: "START" }));
+    }
+  });
+  return reqs;
+}
 
 /** Rótulo do período: "Outubro/2026" para mês fechado, senão "01/10 a 15/10/2026". */
 export function rotuloPeriodo(desde: string, ate: string) {
@@ -497,8 +601,19 @@ export async function acoesDoPeriodo(clienteId: string, desde: string, ate: stri
     .slice(-12);
 }
 
-/** Gera o relatório: copia o modelo, preenche e devolve o link da apresentação nova. */
+/** Gera o relatório: copia o modelo (o da empresa do cliente, ou o escolhido), preenche e devolve o link. */
 export async function gerarRelatorio(p: PedidoRelatorio) {
+  const { data: emp } = await db().from("clientes").select("empresa").eq("id", p.clienteId).maybeSingle();
+  const tipo = p.modelo ?? modeloPadrao(emp?.empresa as string | null);
+  tema = MODELOS[tipo].tema;
+  try {
+    return await preencherRelatorio(p, tipo);
+  } finally {
+    tema = MODELOS.propulsao.tema;
+  }
+}
+
+async function preencherRelatorio(p: PedidoRelatorio, tipo: TipoModelo) {
   const config = await configRelatorio();
   if (!config) throw new Error("Crie primeiro o modelo no Drive (botão logo acima).");
   const banco = db();
@@ -509,13 +624,20 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
   const cliente = clienteRaw as unknown as { id: string; nome: string; pasta_drive?: { id: string; nome: string } | null } | null;
   if (!cliente) throw new Error("Cliente não encontrado.");
   const atual = periodo(p.desde, p.ate);
-  const [meta, crm, google, { meses }, funil, acoes] = await Promise.all([
-    detalheCliente(p.clienteId, atual, atual),
-    detalheCrm(p.clienteId, atual, atual).catch(() => null),
-    detalheGoogle(p.clienteId, atual, atual).catch(() => null),
+  const ant = periodoAnterior(p.desde, p.ate);
+  const anteriorP = periodo(ant.desde, ant.ate);
+  const novo = tipo !== "propulsao";
+  const [meta, crm, google, { meses }, funil, acoes, destaques] = await Promise.all([
+    detalheCliente(p.clienteId, atual, anteriorP),
+    detalheCrm(p.clienteId, atual, anteriorP).catch(() => null),
+    detalheGoogle(p.clienteId, atual, anteriorP).catch(() => null),
     lerHistorico(p.clienteId),
     funilDoCliente(p.clienteId),
     acoesDoPeriodo(p.clienteId, p.desde, p.ate),
+    // sem IA (ou se falhar): o slide fica com um texto para você escrever
+    novo && p.resumoIA !== false
+      ? destaquesIA(p.clienteId, atual, anteriorP).catch((e) => `• (Não consegui escrever com a IA: ${e instanceof Error ? e.message.slice(0, 120) : e}. Escreva aqui os destaques do período.)`)
+      : Promise.resolve("• Escreva aqui os destaques do período."),
   ]);
   if (!meta) throw new Error("Cliente não encontrado.");
   const rotuloPer = rotuloPeriodo(p.desde, p.ate);
@@ -546,10 +668,14 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
   const { acesso } = await acessoDoToken(config.tokenId);
   // pasta do cliente escolhida no painel; sem ela, a pasta "Relatórios · Visão Geral"
   const pasta = (cliente.pasta_drive as { id: string } | null)?.id ?? config.pastaId;
-  const copia = await api<{ id: string }>(acesso, `${DRIVE}/files/${config.modeloId}/copy?fields=id&supportsAllDrives=true`, {
+  const copiar = (modeloId: string) => api<{ id: string }>(acesso, `${DRIVE}/files/${modeloId}/copy?fields=id&supportsAllDrives=true`, {
     method: "POST",
     body: JSON.stringify({ name: `Relatório ${cliente.nome} · ${rotuloPer}`, ...(pasta && { parents: [pasta] }) }),
-  }).catch((e) => {
+  });
+  const copia = await copiar(await idDoModelo(tipo, config, acesso))
+    // modelo novo apagado no Drive: sobe de novo e tenta mais uma vez
+    .catch(async (e) => (novo && /não encontrado/i.test(String(e)) ? copiar(await idDoModelo(tipo, config, acesso, true)) : Promise.reject(e)))
+    .catch((e) => {
     if (pasta !== config.pastaId && /not found|não encontrado|File not found|insufficient/i.test(String(e))) {
       throw new Error("Não consegui salvar na pasta escolhida para este cliente. Escolha a pasta de novo (botão “Escolher pasta”).");
     }
@@ -592,7 +718,9 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
   trocar("{{cliente}}", cliente.nome);
   trocar("{{periodo}}", rotuloPer);
   trocar("{{investimento}}", dinheiro(gasto));
-  if (slideFunil) {
+  if (slideFunil && novo && !temCrm) {
+    reqs.push({ deleteObject: { objectId: slideFunil.objectId } });
+  } else if (slideFunil) {
     // apaga as caixas do modelo (fica o título e as imagens, como o foguete) e desenha o funil do cliente
     for (const el of slideFunil.pageElements ?? []) {
       if (el.image || /PIPELINE|\{\{periodo\}\}/i.test(textoDe(el))) continue;
@@ -613,6 +741,7 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
       valorPropostas ? dinheiro(valorPropostas) : null));
   }
   trocar("{{acoes}}", [...acoes, "Próximos passos: "].join("\n"));
+  trocar("{{analise}}", destaques);
 
   /** Troca o marcador pelo conteúdo; sem conteúdo, apaga o slide inteiro. */
   const preencher = (chave: string, gerar: ((pagina: string, c: Caixa) => Req[]) | null) => {
@@ -761,6 +890,46 @@ export async function gerarRelatorio(p: PedidoRelatorio) {
         taxa(vendas, nomesPassos.length ? valorPasso(nomesPassos.at(-1)!) : leads)),
     },
   ], (v) => pct(v)) : null);
+  // ----- slides dos modelos novos -----
+  // resumo: cartões com os principais números e a variação contra o período anterior
+  const mesAnt = cobreMeses && p.desde.endsWith("-01") ? meses.find((m) => m.mes === mesDe(ant.desde)) ?? null : null;
+  const gastoAnt = mesAnt?.investimento ?? meta.anterior.gasto + (google?.anterior.gasto ?? 0);
+  const funilAnt = crm?.anterior?.funil;
+  const leadsAnt = mesAnt?.leads ?? (funilAnt ? funilAnt.leads : Math.round(meta.anterior.resultados + (google?.anterior.conversoes ?? 0)));
+  const vendasAnt = mesAnt?.vendas ?? funilAnt?.vendas ?? null;
+  const fatAnt = mesAnt?.faturamento ?? funilAnt?.faturamento ?? null;
+  const varPct = (a: number | null | undefined, b: number | null | undefined) => (a != null && b ? ((a - b) / b) * 100 : null);
+  const div = (a: number | null | undefined, b: number | null | undefined) => (a != null && b ? a / b : null);
+  const comparado = (() => {
+    if (p.desde.endsWith("-01") && ant.desde.endsWith("-01")) { const n = nomeMes(ant.desde, false); return n[0].toUpperCase() + n.slice(1); }
+    return "período anterior";
+  })();
+  const cpl = div(gasto, leads), cplAnt = div(gastoAnt, leadsAnt);
+  const cartoes: Cartao[] = [
+    { rotulo: "Investimento", valor: dinheiro(gasto), variacao: varPct(gasto, gastoAnt), melhorMaior: null, comparado },
+    { rotulo: funil.leads, valor: inteiro(leads), variacao: varPct(leads, leadsAnt), melhorMaior: true, comparado },
+    { rotulo: `Custo por ${funil.leads.toLowerCase().replace(/s$/, "")}`, valor: dinheiro(cpl), variacao: varPct(cpl, cplAnt), melhorMaior: false, comparado },
+    { rotulo: "CTR (Meta)", valor: pct(meta.atual.ctr), variacao: varPct(meta.atual.ctr, meta.anterior.ctr), melhorMaior: true, comparado },
+    ...(temCrm ? [
+      { rotulo: funil.vendas, valor: inteiro(vendas), variacao: varPct(vendas, vendasAnt), melhorMaior: true, comparado },
+      { rotulo: "Faturamento", valor: dinheiro(faturamento), variacao: varPct(faturamento, fatAnt), melhorMaior: true, comparado },
+      { rotulo: "Retorno (faturamento ÷ investimento)", valor: faturamento && gasto ? `${(faturamento / gasto).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}x` : "—", variacao: varPct(div(faturamento, gasto), div(fatAnt, gastoAnt)), melhorMaior: true, comparado },
+      { rotulo: `Taxa ${funil.leads.toLowerCase()} → ${funil.vendas.toLowerCase()}`, valor: pct(taxa(vendas, leads)), variacao: varPct(taxa(vendas, leads), taxa(vendasAnt, leadsAnt)), melhorMaior: true, comparado },
+    ] : [
+      { rotulo: "Cliques no link", valor: inteiro(meta.atual.cliques_link), variacao: varPct(meta.atual.cliques_link, meta.anterior.cliques_link), melhorMaior: true, comparado },
+      { rotulo: "CPM (custo por mil)", valor: dinheiro(meta.atual.cpm), variacao: varPct(meta.atual.cpm, meta.anterior.cpm), melhorMaior: false, comparado },
+      { rotulo: "Impressões", valor: inteiro(meta.atual.impressoes), variacao: varPct(meta.atual.impressoes, meta.anterior.impressoes), melhorMaior: true, comparado },
+      { rotulo: "Frequência", valor: meta.atual.frequencia ? meta.atual.frequencia.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) : "—", variacao: null, melhorMaior: null, comparado },
+    ]),
+  ];
+  preencher("tabela:resumo", (pg, c) => cartoesResumo(pg, c, cartoes));
+  preencher("grafico:resultados", (pg, c) => grafico(pg, c, `${funil.leads} por mês`, categorias, [
+    { nome: funil.leads, valores: valoresDe((m) => m.leads, leads) },
+  ], (v) => inteiro(v)));
+  preencher("grafico:custo", (pg, c) => grafico(pg, c, `Custo por ${funil.leads.toLowerCase().replace(/s$/, "")}`, categorias, [
+    { nome: "Custo", valores: valoresDe((m) => m.cpl, cpl) },
+  ], dinheiro));
+
   preencher("grafico:investimento", (pg, c) => grafico(pg, c, "Investimento em anúncios", categorias, [
     { nome: "Investimento", valores: valoresDe((m) => m.investimento, gasto) },
   ], moedaCurta));

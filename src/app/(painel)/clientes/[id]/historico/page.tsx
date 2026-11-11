@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
 import { chavePasso, conferirMes, funilDoCliente, lerHistorico, mesDe, nomeMes, nomesDosPassos, somarMeses, type MesConsolidado } from "@/lib/historico";
 import type { FunilCliente } from "@/lib/funil";
-import { configRelatorio, linkApresentacao, ORDEM_QUALIFICACAO, TITULO_QUALIFICACAO } from "@/lib/relatorio-slides";
+import { configRelatorio, linkApresentacao, MODELOS, modeloPadrao, ORDEM_QUALIFICACAO, outrosModelos, TITULO_QUALIFICACAO, type TipoModelo } from "@/lib/relatorio-slides";
 import { DIMENSOES_UTM } from "@/lib/consultas";
 import { hojeISO } from "@/lib/datas";
 import { Aviso, Voltar } from "@/components/ui";
@@ -27,8 +27,8 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   const { msg, ano, conferir } = (await searchParams) as { msg?: string; ano?: string; conferir?: string };
   const [{ data: cliente }, { meses, erro }, funil, { data: ultima }, config, { data: logins }, { data: gerados }] = await Promise.all([
     // pasta_drive vem do SQL 0017
-    db().from("clientes").select("id, nome, pasta_drive").eq("id", id).maybeSingle()
-      .then((r) => (r.error ? db().from("clientes").select("id, nome").eq("id", id).maybeSingle() : r)),
+    db().from("clientes").select("id, nome, empresa, pasta_drive").eq("id", id).maybeSingle()
+      .then((r) => (r.error ? db().from("clientes").select("id, nome, empresa").eq("id", id).maybeSingle() : r)),
     lerHistorico(id),
     funilDoCliente(id),
     db().from("historico_mensal").select("atualizado_em").eq("cliente_id", id).order("atualizado_em", { ascending: false }).limit(1),
@@ -37,6 +37,8 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
     db().from("relatorios_gerados").select("periodo, link, criado_em").eq("cliente_id", id).order("criado_em", { ascending: false }).limit(5),
   ]);
   if (!cliente) notFound();
+  const modeloDoCliente = modeloPadrao((cliente as { empresa?: string | null }).empresa);
+  const idsOutros = await outrosModelos().catch(() => ({} as Partial<Record<TipoModelo, string>>));
 
   const hoje = hojeISO();
   const anos = [...new Set(meses.map((m) => m.mes.slice(0, 4)))];
@@ -119,6 +121,12 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
                   <option value="livre">Outro período (datas ao lado)</option>
                 </select>
               </label>
+              <label className="flex flex-col gap-1 text-sm">
+                Modelo
+                <select name="modelo" defaultValue={modeloDoCliente} className={campo}>
+                  {(Object.keys(MODELOS) as TipoModelo[]).map((k) => <option key={k} value={k}>{MODELOS[k].nome}{k === modeloDoCliente ? " (padrão deste cliente)" : ""}</option>)}
+                </select>
+              </label>
               <label className="flex flex-col gap-1 text-sm">De<input type="date" name="de" className={campo} /></label>
               <label className="flex flex-col gap-1 text-sm">Até<input type="date" name="ate" className={campo} /></label>
               <fieldset className="flex flex-col gap-1 text-sm">
@@ -141,6 +149,10 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
                 Slide de vendas realizadas <span className="text-xs text-texto-3">(número e valor, mês a mês)</span>
               </label>
               <label className="flex items-center gap-2 self-center text-sm">
+                <input type="checkbox" name="resumo_ia" defaultChecked />
+                Destaques escritos pela IA <span className="text-xs text-texto-3">(modelos Próprio e Viccon)</span>
+              </label>
+              <label className="flex items-center gap-2 self-center text-sm">
                 <input type="checkbox" name="motivos_perda" />
                 Slide de motivos de perda <span className="text-xs text-texto-3">(do CRM)</span>
               </label>
@@ -149,7 +161,12 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
             <p className="text-xs text-texto-3">
               Para um período que não é um mês, escolha “Outro período” e preencha as datas. Os gráficos mostram até 6 meses do
               histórico. Slides sem dados (ex.: Google, para quem não tem) saem do relatório. Modelo no Drive de {config.email}:{" "}
-              <a href={linkApresentacao(config.modeloId)} target="_blank" rel="noreferrer" className="underline">editar o modelo ↗</a>
+              editar os modelos ↗{" "}
+              <a href={linkApresentacao(config.modeloId)} target="_blank" rel="noreferrer" className="underline">Propulsão</a>
+              {(["proprio", "viccon"] as const).map((k) => idsOutros[k] && (
+                <span key={k}> · <a href={linkApresentacao(idsOutros[k]!)} target="_blank" rel="noreferrer" className="underline">{MODELOS[k].nome}</a></span>
+              ))}
+              . Os modelos Próprio e Viccon vão para o Drive sozinhos no primeiro relatório de cada um. Qualificação e motivos de perda são do modelo da Propulsão.
             </p>
             {(gerados ?? []).length > 0 && (
               <ul className="space-y-1 text-sm">
