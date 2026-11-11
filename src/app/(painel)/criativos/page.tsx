@@ -29,7 +29,7 @@ const SELOS: Record<Selo, { rotulo: string; icone: string; classe: string; dica:
 
 type Busca = {
   p?: string; de?: string; ate?: string; empresa?: string; cliente?: string;
-  ordem?: string; formato?: string; status?: string; selo?: string; limite?: string; nicho?: string;
+  ordem?: string; formato?: string; status?: string; selo?: string; limite?: string; nicho?: string; analisados?: string;
 };
 
 export default async function Criativos({ searchParams }: PageProps<"/criativos">) {
@@ -64,7 +64,9 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
     .filter((c) => !busca.formato || c.formato === busca.formato)
     .filter((c) => busca.status !== "ativos" || (c.status && ATIVOS.includes(c.status)))
     .filter((c) => !selo || c.selos.includes(selo))
-    .sort((a, b) => ordem.f(a) - ordem.f(b));
+    // os já analisados pela IA vêm primeiro (dentro de cada grupo, a ordem escolhida); ?analisados=misturar desliga
+    .sort((a, b) => (busca.analisados === "misturar" ? 0 : Number(b.nota != null) - Number(a.nota != null)) || ordem.f(a) - ordem.f(b));
+  const nAnalisados = filtrados.filter((c) => c.nota != null).length;
   const limite = Math.max(POR_VEZ, Math.min(2000, Number(busca.limite) || POR_VEZ));
   const mostrados = filtrados.slice(0, limite);
   const semVideo = todos.some((c) => c.formato === "video") && !todos.some((c) => c.video);
@@ -78,7 +80,7 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
     return `/criativos?${q.toString()}`;
   };
   const extra = Object.fromEntries(
-    Object.entries({ empresa, cliente: cliente?.id, nicho, ordem: busca.ordem, formato: busca.formato, status: busca.status, selo: busca.selo })
+    Object.entries({ empresa, cliente: cliente?.id, nicho, ordem: busca.ordem, formato: busca.formato, status: busca.status, selo: busca.selo, analisados: busca.analisados })
       .filter(([, v]) => v),
   ) as Record<string, string>;
   const chip = (ativo: boolean) =>
@@ -100,7 +102,7 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
       {/* filtros */}
       <div className="space-y-2 text-sm">
         <form action="/criativos" className="flex flex-wrap items-center gap-2">
-          {Object.entries({ p: busca.p, de: busca.de, ate: busca.ate, ordem: busca.ordem, formato: busca.formato, status: busca.status, selo: busca.selo })
+          {Object.entries({ p: busca.p, de: busca.de, ate: busca.ate, ordem: busca.ordem, formato: busca.formato, status: busca.status, selo: busca.selo, analisados: busca.analisados })
             .filter(([, v]) => v).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
           {nichos.length > 0 && (
             <select name="nicho" defaultValue={nicho ?? ""} className="rounded-lg border border-borda bg-fundo px-2 py-1.5">
@@ -133,6 +135,10 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
           <span className="mx-1 border-l border-borda" />
           <Link href={link({ status: busca.status === "ativos" ? undefined : "ativos" })} className={chip(busca.status === "ativos")}>
             Só ativos
+          </Link>
+          <Link href={link({ analisados: busca.analisados === "misturar" ? undefined : "misturar" })} className={chip(busca.analisados !== "misturar")}
+            title="Os criativos que já têm análise da IA aparecem no começo da lista">
+            Analisados pela IA primeiro <span className="text-texto-3">({nAnalisados})</span>
           </Link>
         </div>
         <div className="flex flex-wrap gap-1">
