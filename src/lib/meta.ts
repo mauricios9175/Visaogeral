@@ -709,8 +709,13 @@ const STATUS_VISIVEIS = JSON.stringify(["ACTIVE", "PAUSED", "IN_PROCESS", "PENDI
 export async function itensRecentes(contaId: string, token: string, dias = 30): Promise<ItemRecente[]> {
   const desde = String(Math.floor(Date.now() / 1000) - dias * 86_400);
   const base = { updated_since: desde, effective_status: STATUS_VISIVEIS, limit: "200" };
-  type Obj = { id: string; name?: string; effective_status?: string; daily_budget?: string; lifetime_budget?: string; campaign?: { id: string; name?: string }; adset?: { id: string; name?: string } };
-  const pegar = (borda: string, campos: string) => get<{ data: Obj[] }>(montarUrl(`${contaId}/${borda}`, token, { ...base, fields: campos })).then((r) => r.data).catch(() => [] as Obj[]);
+  type Obj = { id: string; name?: string; effective_status?: string; created_time?: string; daily_budget?: string; lifetime_budget?: string; campaign?: { id: string; name?: string }; adset?: { id: string; name?: string } };
+  // só os novos de verdade: ativos (ainda sem gasto) ou criados nos últimos 7 dias (ex.: duplicados, que nascem pausados).
+  // Campanhas antigas pausadas que só foram editadas não entram (era o que enchia a tabela).
+  const limiteCriacao = Date.now() - 7 * 86_400_000;
+  const novo = (o: Obj) => ["ACTIVE", "IN_PROCESS", "PENDING_REVIEW", "PREAPPROVED"].includes(o.effective_status ?? "") || (!!o.created_time && Date.parse(o.created_time) >= limiteCriacao);
+  const pegar = (borda: string, campos: string) => get<{ data: Obj[] }>(montarUrl(`${contaId}/${borda}`, token, { ...base, fields: `${campos},created_time` }))
+    .then((r) => r.data.filter(novo)).catch(() => [] as Obj[]);
   const [camps, conjs, ads] = await Promise.all([
     pegar("campaigns", "id,name,effective_status,daily_budget,lifetime_budget"),
     pegar("adsets", "id,name,effective_status,daily_budget,lifetime_budget,campaign{id,name}"),

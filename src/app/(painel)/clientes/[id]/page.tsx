@@ -45,10 +45,11 @@ const NIVEIS = [
 
 const ATIVOS = ["ACTIVE", "IN_PROCESS", "PENDING_REVIEW", "PREAPPROVED"];
 
+// padrão: só os ativos (pausados e finalizados ficam escondidos, a um clique). Sem status conhecido: aparece.
 const FILTROS = [
+  { chave: "ativos", rotulo: "Ativos", aceita: (s: string | null) => !s || ATIVOS.includes(s) },
+  { chave: "pausados", rotulo: "Pausados e finalizados", aceita: (s: string | null) => !!s && !ATIVOS.includes(s) },
   { chave: "todos", rotulo: "Todos", aceita: () => true },
-  { chave: "ativos", rotulo: "Ativos", aceita: (s: string | null) => !!s && ATIVOS.includes(s) },
-  { chave: "pausados", rotulo: "Pausados", aceita: (s: string | null) => !s || !ATIVOS.includes(s) },
 ] as const;
 
 export default async function PaginaCliente({ params, searchParams }: PageProps<"/clientes/[id]">) {
@@ -116,6 +117,12 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
     (n === "campanhas" || !campanhaSel || l.campanhaId === campanhaSel.id) &&
     (n !== "anuncios" || !conjuntoSel || l.conjuntoId === conjuntoSel.id));
   const linhas = doRecorte(nivelAtual.chave);
+  // quantos do nível ficaram escondidos pelo filtro (para o aviso embaixo da tabela)
+  const escondidos = filtro.chave === "ativos"
+    ? d[nivelAtual.chave].filter((l) => !filtro.aceita(l.status) &&
+        (nivelAtual.chave === "campanhas" || !campanhaSel || l.campanhaId === campanhaSel.id) &&
+        (nivelAtual.chave !== "anuncios" || !conjuntoSel || l.conjuntoId === conjuntoSel.id))
+    : [];
   const recorte = `${campanhaSel ? `&campanha=${campanhaSel.id}` : ""}${conjuntoSel ? `&conjunto=${conjuntoSel.id}` : ""}`;
   const base = `/clientes/${id}`;
   // depois de uma ação rápida, volta para a mesma tela (mesmo período, nível e filtro)
@@ -315,6 +322,13 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
             : null}
           destinos={{ campanhas: d.campanhas.map((x) => ({ id: x.id, nome: x.nome, conta: x.conta })), conjuntos: d.conjuntos.map((x) => ({ id: x.id, nome: x.nome, conta: x.conta, pai: x.pai ?? "" })) }}
         />
+        {escondidos.length > 0 && (
+          <p className="border-t border-borda px-3 py-2 text-xs text-texto-3">
+            {escondidos.length} {nivelAtual.rotulo.toLowerCase()} pausados ou finalizados escondidos
+            {escondidos.some((l) => l.gasto > 0) && <> (gastaram {dinheiro(escondidos.reduce((t, l) => t + l.gasto, 0))} no período, já somado nos totais)</>}.{" "}
+            <Link href={`${base}?${atual.qs}&nivel=${nivelAtual.chave}&status=pausados${recorte}#tabela`} className="text-destaque underline">Mostrar</Link>
+          </p>
+        )}
       </div>
 
       {google && ("erro" in google ? <Aviso>Erro ao carregar o Google Ads: {google.erro}</Aviso> : <SecaoGoogle g={google} nav={{
