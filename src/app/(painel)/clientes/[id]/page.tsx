@@ -22,8 +22,11 @@ import { linkDoCliente } from "@/lib/portal";
 import { lerHistoricoSugestoes, lerParams } from "@/lib/sugestoes";
 import { PARAMS_PADRAO } from "@/lib/manual-ia";
 import { AcoesRapidas, type DestinosDuplicar } from "@/components/acoes-rapidas";
-import { db } from "@/lib/db";
+import { db, EMPRESA_PADRAO } from "@/lib/db";
 import { PuxarHistoricoMeta } from "@/components/puxar-historico";
+import { Tarefas } from "@/components/tarefas";
+import { listarTarefas } from "@/lib/tarefas";
+import { hojeISO } from "@/lib/datas";
 import { chaveDe, gastoPorNome, NIVEL_DA_UTM } from "@/lib/agrupar";
 
 
@@ -62,11 +65,13 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
     detalheGoogle(id, atual, anterior).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })),
     db().from("acoes_log").select("*").eq("cliente_id", id).order("criado_em", { ascending: false }).limit(30),
   ]);
-  const [paramsIA, historicoIA, tokenPortal, rascunhos] = await Promise.all([
+  const [paramsIA, historicoIA, tokenPortal, rascunhos, tarefas, { data: clientesAtivos }] = await Promise.all([
     lerParams(id).catch(() => PARAMS_PADRAO),
     lerHistoricoSugestoes(id).catch(() => []),
     linkDoCliente(id).catch(() => null),
     listarRascunhos(id).catch(() => []),
+    listarTarefas().catch(() => []),
+    db().from("clientes").select("id, nome, empresa").eq("ativo", true).order("nome"),
   ]);
   // ações feitas pelo painel depois da sugestão mais antiga guardada (para marcar "✓ feito")
   const desdeIA = historicoIA.at(-1)?.criado_em;
@@ -161,6 +166,17 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
         <SeletorPeriodo atual={atual} base={base} />
       </div>
       {busca.msg && <Aviso>{busca.msg}</Aviso>}
+
+      <details open={tarefas.some((t) => t.clienteId === id && !t.feita)} className="rounded-2xl border border-borda bg-superficie p-4">
+        <summary className="cursor-pointer text-sm font-semibold">
+          Tarefas deste cliente <span className="font-normal text-texto-3">({tarefas.filter((t) => t.clienteId === id && !t.feita).length} abertas)</span>
+          <Link href="/tarefas" className="ml-3 text-xs font-normal text-destaque underline">ver todas</Link>
+        </summary>
+        <div className="mt-3">
+          <Tarefas inicial={tarefas} hoje={hojeISO()} clienteFixo={id}
+            clientes={((clientesAtivos ?? []) as { id: string; nome: string; empresa: string | null }[]).map((x) => ({ id: x.id, nome: x.nome, empresa: x.empresa || EMPRESA_PADRAO }))} />
+        </div>
+      </details>
 
       <AnaliseIA clienteId={id} periodo={{ p: atual.chave, ...(atual.chave === "livre" ? { de: atual.desde, ate: atual.ate } : {}) }} rotuloPeriodo={atual.rotulo} />
       <SugestoesIA

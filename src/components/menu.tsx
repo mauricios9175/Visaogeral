@@ -15,6 +15,10 @@ export const ITENS: Item[] = [
     icone: icone(<><rect x="3" y="3" width="7" height="9" rx="2" /><rect x="14" y="3" width="7" height="5" rx="2" /><rect x="14" y="12" width="7" height="9" rx="2" /><rect x="3" y="16" width="7" height="5" rx="2" /></>),
   },
   {
+    href: "/tarefas", rotulo: "Tarefas", celular: true,
+    icone: icone(<><path d="M9 11l3 3 8-8" /><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9" /></>),
+  },
+  {
     href: "/alertas", rotulo: "Alertas", celular: true,
     icone: icone(<><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9L2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></>),
   },
@@ -45,7 +49,13 @@ function ativo(pathname: string, href: string) {
 export type ClienteMenu = { id: string; nome: string; empresa: string };
 
 /** Menu lateral (computador). `clientes`: ativos, para abrir direto por empresa. */
-export function MenuLateral({ sair, clientes }: { sair: () => Promise<void>; clientes: ClienteMenu[] }) {
+/** Contador de tarefas de hoje/atrasadas ao lado de "Tarefas". */
+function Selo({ n, href }: { n?: number; href: string }) {
+  if (href !== "/tarefas" || !n) return null;
+  return <span className="ml-auto rounded-full bg-destaque px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{n > 99 ? "99+" : n}</span>;
+}
+
+export function MenuLateral({ sair, clientes, pendentes }: { sair: () => Promise<void>; clientes: ClienteMenu[]; pendentes?: number }) {
   const pathname = usePathname();
   const atual = pathname.match(/^\/clientes\/([^/]+)/)?.[1];
   const empresas = [...new Set(clientes.map((c) => c.empresa))];
@@ -70,6 +80,7 @@ export function MenuLateral({ sair, clientes }: { sair: () => Promise<void>; cli
             >
               {i.icone}
               {i.rotulo}
+              <Selo n={pendentes} href={i.href} />
             </Link>
           );
         })}
@@ -111,7 +122,7 @@ export function MenuLateral({ sair, clientes }: { sair: () => Promise<void>; cli
 }
 
 /** Barra de cima e menu de baixo (celular), como num aplicativo. */
-export function MenuCelular() {
+export function MenuCelular({ pendentes }: { pendentes?: number }) {
   const pathname = usePathname();
   return (
     <>
@@ -122,14 +133,17 @@ export function MenuCelular() {
         <span className="font-extrabold tracking-tight">Visão Geral</span>
         <Link href="/configuracoes" className="ml-auto text-sm text-texto-2">Ajustes</Link>
       </header>
-      <nav aria-label="Menu" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-borda bg-lateral/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
+      <nav aria-label="Menu" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-borda bg-lateral/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
         {ITENS.filter((i) => i.celular).map((i) => {
           const sel = ativo(pathname, i.href);
           return (
             <Link
               key={i.href} href={i.href} aria-current={sel ? "page" : undefined}
-              className={`flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] ${sel ? "font-semibold text-texto [&_svg]:text-destaque" : "text-texto-3"}`}
+              className={`relative flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] ${sel ? "font-semibold text-texto [&_svg]:text-destaque" : "text-texto-3"}`}
             >
+              {i.href === "/tarefas" && !!pendentes && (
+                <span className="absolute left-1/2 top-1.5 ml-1.5 rounded-full bg-destaque px-1 py-px text-[9px] font-bold leading-none text-white">{pendentes > 99 ? "99+" : pendentes}</span>
+              )}
               {i.icone}
               {i.curto ?? i.rotulo}
             </Link>
