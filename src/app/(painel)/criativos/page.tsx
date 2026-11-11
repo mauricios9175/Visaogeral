@@ -6,6 +6,8 @@ import { decimal, dinheiro, inteiro, pct } from "@/lib/formato";
 import { AssistirVideo } from "@/components/midia-meta";
 import { AnalisarCriativo } from "@/components/analise-criativo";
 import { notasDosCriativos } from "@/lib/analise-criativo";
+import { VencedoresIA } from "@/components/vencedores";
+import { hojeISO } from "@/lib/datas";
 import { Aviso, SeletorPeriodo, SeloStatus, Voltar } from "@/components/ui";
 import { Miniatura } from "@/components/miniatura";
 
@@ -149,6 +151,7 @@ export default async function Criativos({ searchParams }: PageProps<"/criativos"
       </div>
 
       {erro && <Aviso>Erro ao carregar os criativos: {erro}</Aviso>}
+      {cliente && <VencedoresIA clienteId={cliente.id} hoje={hojeISO()} />}
       {semVideo && (
         <Aviso>
           As métricas de vídeo (gancho e retenção) aparecem depois de rodar o SQL 0010 no Supabase e clicar em
