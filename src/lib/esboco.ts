@@ -1,4 +1,5 @@
 import "server-only";
+import { briefingDoCliente } from "./ficha";
 import { db } from "./db";
 import { buscarInteresses } from "./meta-montar";
 import { tokenParaBusca } from "./token-busca";
@@ -81,7 +82,9 @@ async function contextoDo(clienteId: string | null, pedido: string) {
   if (!clienteId) return `Pedido do gestor (é um MODELO reutilizável, sem cliente específico): ${pedido}`;
   const { data: cliente } = await db().from("clientes").select("nome, nicho").eq("id", clienteId).maybeSingle();
   if (!cliente) throw new Error("Cliente não encontrado.");
-  return `Cliente: ${cliente.nome}${cliente.nicho ? ` (nicho cadastrado: ${cliente.nicho})` : ""}\nPedido do gestor: ${pedido}`;
+  const briefing = await briefingDoCliente(clienteId).catch(() => "");
+  return `Cliente: ${cliente.nome}${cliente.nicho ? ` (nicho cadastrado: ${cliente.nicho})` : ""}` +
+    (briefing ? `\nBriefing do cliente (escrito pelo gestor):\n${briefing.slice(0, 3000)}` : "") + `\nPedido do gestor: ${pedido}`;
 }
 
 const lerJson = <T>(bruto: string): T => {

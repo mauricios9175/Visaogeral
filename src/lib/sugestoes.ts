@@ -1,4 +1,5 @@
 import "server-only";
+import { briefingDoCliente } from "./ficha";
 import { db } from "./db";
 import { detalheCliente, detalheCrm, type LinhaTabela, type NumerosCrm } from "./consultas";
 import { acoesDoPeriodo } from "./relatorio-slides";
@@ -97,10 +98,11 @@ function linha(l: LinhaTabela, crm: NumerosCrm | undefined, repetidos: number) {
 
 /** Monta o texto de dados para a IA e o mapa id → item (para ligar as sugestões aos botões). */
 async function dados(clienteId: string, atual: Periodo, anterior: Periodo, params: ParamsIA) {
-  const [meta, crm, acoes] = await Promise.all([
+  const [meta, crm, acoes, briefing] = await Promise.all([
     detalheCliente(clienteId, atual, anterior),
     detalheCrm(clienteId, atual, anterior).catch(() => null),
     acoesDoPeriodo(clienteId, atual.desde, atual.ate).catch(() => [] as string[]),
+    briefingDoCliente(clienteId).catch(() => ""),
   ]);
   if (!meta) throw new Error("Cliente não encontrado.");
   const c = meta.cliente;
@@ -109,6 +111,7 @@ async function dados(clienteId: string, atual: Periodo, anterior: Periodo, param
   const mensal = c.orcamento_mensal ?? (a.gasto / dias) * 30;
   const L: string[] = [];
   L.push(`CLIENTE: ${c.nome}${c.nicho ? ` (nicho: ${c.nicho})` : ""}`);
+  if (briefing) L.push(`BRIEFING DO CLIENTE (escrito pelo gestor):\n${briefing.slice(0, 3000)}`);
   L.push(`PERÍODO ANALISADO: ${atual.desde} a ${atual.ate} (${dias} dias). Anterior: ${anterior.desde} a ${anterior.ate}.`);
   L.push(`FAIXA DE ORÇAMENTO: ~${dinheiro(mensal)}/mês (${c.orcamento_mensal ? "orçamento cadastrado" : "estimado pelo gasto do período"}).`);
   L.push("PARÂMETROS DO CLIENTE:");
@@ -167,17 +170,19 @@ async function dados(clienteId: string, atual: Periodo, anterior: Periodo, param
 
 /** Números do Google (campanhas, grupos, palavras e termos) cruzados com o CRM, para a IA. */
 async function dadosGoogle(clienteId: string, atual: Periodo, anterior: Periodo, params: ParamsIA) {
-  const [{ data: cliente }, google, crm, acoes] = await Promise.all([
+  const [{ data: cliente }, google, crm, acoes, briefing] = await Promise.all([
     db().from("clientes").select("nome, nicho, cpl_meta, orcamento_mensal").eq("id", clienteId).maybeSingle(),
     detalheGoogle(clienteId, atual, anterior),
     detalheCrm(clienteId, atual, anterior).catch(() => null),
     acoesDoPeriodo(clienteId, atual.desde, atual.ate).catch(() => [] as string[]),
+    briefingDoCliente(clienteId).catch(() => ""),
   ]);
   if (!cliente) throw new Error("Cliente não encontrado.");
   if (!google) throw new Error("Este cliente não tem conta do Google Ads vinculada.");
   const dias = diasEntre(atual.desde, atual.ate);
   const L: string[] = [];
   L.push(`CLIENTE: ${cliente.nome}${cliente.nicho ? ` (nicho: ${cliente.nicho})` : ""}`);
+  if (briefing) L.push(`BRIEFING DO CLIENTE (escrito pelo gestor):\n${briefing.slice(0, 3000)}`);
   L.push(`PERÍODO ANALISADO: ${atual.desde} a ${atual.ate} (${dias} dias). Anterior: ${anterior.desde} a ${anterior.ate}.`);
   L.push("PARÂMETROS DO CLIENTE:");
   L.push(`- CPA desejado: ${cliente.cpl_meta ? dinheiro(cliente.cpl_meta) : "NÃO CADASTRADO (avalie pela média da conta e avise)"}; tolerância ${params.tolerancia}%`);

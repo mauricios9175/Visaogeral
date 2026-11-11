@@ -1,4 +1,5 @@
 import "server-only";
+import { briefingDoCliente } from "./ficha";
 import { db } from "./db";
 import { detalheCliente, detalheCrm, ROTULO_TIPO, TIPOS_CONVERSAO, type Derivadas, type LinhaTabela } from "./consultas";
 import { detalheGoogle, type NumerosGoogle } from "./consultas-google";
@@ -108,16 +109,18 @@ const blocoGoogle = (g: NumerosGoogle) =>
 
 /** Os números do período em texto. Só números e nomes de campanhas: nenhum dado pessoal de lead. */
 export async function dadosDoPeriodo(clienteId: string, atual: Periodo, anterior: Periodo) {
-  const [meta, crm, google, acoes] = await Promise.all([
+  const [meta, crm, google, acoes, briefing] = await Promise.all([
     detalheCliente(clienteId, atual, anterior),
     detalheCrm(clienteId, atual, anterior).catch(() => null),
     detalheGoogle(clienteId, atual, anterior).catch(() => null),
     acoesDoPeriodo(clienteId, atual.desde, atual.ate).catch(() => [] as string[]),
+    briefingDoCliente(clienteId).catch(() => ""),
   ]);
   if (!meta) throw new Error("Cliente não encontrado.");
   const c = meta.cliente;
   const L: string[] = [];
   L.push(`CLIENTE: ${c.nome}${c.nicho ? ` (nicho: ${c.nicho})` : ""}`);
+  if (briefing) L.push(`BRIEFING DO CLIENTE (escrito pelo gestor):\n${briefing.slice(0, 3000)}`);
   L.push(`PERÍODO: ${atual.desde} a ${atual.ate} (${diasEntre(atual.desde, atual.ate)} dias). Comparação: ${anterior.desde} a ${anterior.ate}.`);
   const metas = [
     c.cpl_meta && `custo por resultado alvo ${dinheiro(c.cpl_meta)}`,

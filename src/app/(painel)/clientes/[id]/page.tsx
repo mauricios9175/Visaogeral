@@ -24,6 +24,8 @@ import { PARAMS_PADRAO } from "@/lib/manual-ia";
 import { AcoesRapidas, type DestinosDuplicar } from "@/components/acoes-rapidas";
 import { db, EMPRESA_PADRAO } from "@/lib/db";
 import { PuxarHistoricoMeta } from "@/components/puxar-historico";
+import { LinksFicha } from "@/components/ficha";
+import { lerFicha } from "@/lib/ficha";
 import { Tarefas } from "@/components/tarefas";
 import { listarTarefas } from "@/lib/tarefas";
 import { hojeISO } from "@/lib/datas";
@@ -65,13 +67,14 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
     detalheGoogle(id, atual, anterior).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })),
     db().from("acoes_log").select("*").eq("cliente_id", id).order("criado_em", { ascending: false }).limit(30),
   ]);
-  const [paramsIA, historicoIA, tokenPortal, rascunhos, tarefas, { data: clientesAtivos }] = await Promise.all([
+  const [paramsIA, historicoIA, tokenPortal, rascunhos, tarefas, { data: clientesAtivos }, ficha] = await Promise.all([
     lerParams(id).catch(() => PARAMS_PADRAO),
     lerHistoricoSugestoes(id).catch(() => []),
     linkDoCliente(id).catch(() => null),
     listarRascunhos(id).catch(() => []),
     listarTarefas().catch(() => []),
     db().from("clientes").select("id, nome, empresa").eq("ativo", true).order("nome"),
+    lerFicha(id).catch(() => null),
   ]);
   // ações feitas pelo painel depois da sugestão mais antiga guardada (para marcar "✓ feito")
   const desdeIA = historicoIA.at(-1)?.criado_em;
@@ -137,6 +140,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
                   {d.contas[0] && <> · atualizado {quandoFoi(d.contas[0].ultima_sync)}</>}
                 </span>
               </div>
+              <div className="mt-2"><LinksFicha links={ficha?.links ?? []} href={`${base}/ficha`} /></div>
             </div>
           </div>
         </div>
@@ -156,6 +160,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
 
       <nav aria-label="Seções do cliente" className="-mt-2 flex flex-wrap gap-1 border-b border-borda text-sm">
         <span className="border-b-2 border-destaque px-3.5 py-3 font-bold" aria-current="page">Resultados</span>
+        <Link href={`${base}/ficha`} className="px-3.5 py-3 text-texto-2 hover:text-texto">Ficha</Link>
         <Link href={`/criativos?cliente=${id}&${atual.qs}`} className="px-3.5 py-3 text-texto-2 hover:text-texto">Criativos</Link>
         <Link href={`${base}/historico`} className="px-3.5 py-3 text-texto-2 hover:text-texto">Histórico e relatório</Link>
         <Link href={`${base}/diagnostico`} className="px-3.5 py-3 text-texto-2 hover:text-texto">Diagnóstico</Link>
