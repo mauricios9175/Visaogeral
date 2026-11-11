@@ -8,8 +8,12 @@ type Item = {
   cardId: string; nome: string; lista: string; trello: string;
   informacoes: string; links: { rotulo: string; url: string }[];
   senhas: number; tarefa: { titulo: string; aguardando: boolean } | null;
-  clienteId: string; // "" = não importar
+  clienteId: string; // "" = não importar; NOVO = criar o cliente no painel
+  novo: { nome: string; empresa: string; ativo: boolean; churnEm: string | null };
 };
+
+const NOVO = "__novo__";
+const EMPRESAS_NOVO = ["Propulsão", "Viccon", "Clientes próprios"];
 
 const sem = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const LISTAS_IGNORADAS = /guia de introdu/i;
@@ -83,7 +87,7 @@ function textoDoTrello(desc: string) {
 }
 
 type CartaoTrello = {
-  id: string; name: string; desc: string; closed: boolean; idList: string; shortUrl: string; idChecklists: string[];
+  id: string; name: string; desc: string; closed: boolean; idList: string; shortUrl: string; idChecklists: string[]; dateLastActivity?: string;
   attachments?: { name?: string; url?: string; isUpload?: boolean }[];
 };
 type Quadro = {
@@ -101,8 +105,15 @@ export function lerQuadro(json: Quadro, clientes: ClienteImport[]): Item[] {
     const lista = listas.get(c.idList);
     if (c.closed || !lista || lista.closed || LISTAS_IGNORADAS.test(lista.name)) continue;
     const { texto, senhas } = textoDoTrello(c.desc ?? "");
-    const pendentes = (c.idChecklists ?? []).flatMap((id) => checklists.get(id)?.checkItems ?? []).filter((x) => x.state !== "complete").map((x) => x.name.trim());
-    const informacoes = [texto, pendentes.length ? `Pendências do checklist do Trello:\n${pendentes.map((p) => `- ${p}`).join("\n")}` : ""].filter(Boolean).join("\n\n");
+    // checklists: o que está pendente e o que já foi marcado (vira histórico do que foi feito)
+    const itensCk = (c.idChecklists ?? []).flatMap((id) => checklists.get(id)?.checkItems ?? []);
+    const pendentes = itensCk.filter((x) => x.state !== "complete").map((x) => x.name.trim());
+    const feitos = itensCk.filter((x) => x.state === "complete").map((x) => x.name.trim());
+    const informacoes = [
+      texto,
+      pendentes.length ? `Pendências do checklist do Trello:\n${pendentes.map((p) => `- ${p}`).join("\n")}` : "",
+      feitos.length ? `Já feito (checklist do Trello):\n${feitos.map((p) => `✓ ${p}`).join("\n")}` : "",
+    ].filter(Boolean).join("\n\n");
     const urls = [
       ...(c.attachments ?? []).filter((a) => a.url && !a.isUpload).map((a) => a.url!),
       ...[...(c.desc ?? "").matchAll(/https?:\/\/[^\s)"\]]+/g)].map((m) => m[0].replace(/\\_/g, "_")),
@@ -112,9 +123,15 @@ export function lerQuadro(json: Quadro, clientes: ClienteImport[]): Item[] {
     const nomeLista = sem(lista.name);
     const tarefa = nomeLista.includes("falta informacao") ? { titulo: "Aguardando informações do cliente (veio do Trello)", aguardando: true }
       : nomeLista.includes("coisas a fazer") ? { titulo: "Ver pendências (veio do Trello)", aguardando: false } : null;
+    const achado = casar(c.name, clientes);
+    const lixo = /lixo/.test(nomeLista);
+    const temConteudo = !!informacoes || links.length > 0;
+    // cliente que ainda não está no painel: os do "Lixo" (ex-clientes) entram como inativos, com o que tinha no cartão
+    const empresa = /viccon/i.test(c.name) || /viccon/.test(nomeLista) ? "Viccon" : /propulsao/.test(nomeLista) ? "Propulsão" : "Clientes próprios";
     itens.push({
       cardId: c.id, nome: c.name, lista: lista.name, trello: c.shortUrl, informacoes, links, senhas, tarefa,
-      clienteId: casar(c.name, clientes),
+      clienteId: achado || (lixo && temConteudo ? NOVO : ""),
+      novo: { nome: limparNome(c.name) || c.name, empresa, ativo: !lixo, churnEm: lixo ? (c.dateLastActivity ?? "").slice(0, 10) || null : null },
     });
   }
   return itens;
@@ -148,20 +165,22 @@ export function ImportarTrello({ clientes }: { clientes: ClienteImport[] }) {
     setErro(null);
     try {
       // em partes, para não estourar o tempo do servidor
-      let fichas = 0, tarefas = 0;
+      let fichas = 0, tarefas = 0, criados = 0;
       for (let i = 0; i < escolhidos.length; i += 15) {
         setEstado(`Importando ${Math.min(i + 15, escolhidos.length)} de ${escolhidos.length}…`);
         const parte = escolhidos.slice(i, i + 15).map((x) => ({
-          clienteId: x.clienteId, informacoes: x.informacoes, links: x.links, trello: x.trello,
-          ...(comTarefas && x.tarefa && clientes.find((c) => c.id === x.clienteId)?.ativo ? { tarefa: x.tarefa } : {}),
+          ...(x.clienteId === NOVO ? { novoCliente: x.novo } : { clienteId: x.clienteId }),
+          informacoes: x.informacoes, links: x.links, trello: x.trello, cartao: x.cardId,
+          ...(comTarefas && x.tarefa && (x.clienteId === NOVO ? x.novo.ativo : clientes.find((c) => c.id === x.clienteId)?.ativo) ? { tarefa: x.tarefa } : {}),
         }));
         const r = await fetch("/api/ficha", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "importar", itens: parte }) });
         const j = await r.json().catch(() => ({ erro: `erro ${r.status}` }));
         if (!r.ok || j.erro) throw new Error(j.erro ?? `erro ${r.status}`);
         fichas += j.fichas;
         tarefas += j.tarefas;
+        criados += j.criados ?? 0;
       }
-      setEstado(`Pronto: ${fichas} ficha(s) atualizadas${tarefas ? ` e ${tarefas} tarefa(s) criadas` : ""}. Se importar de novo, o que já está na ficha não se repete.`);
+      setEstado(`Pronto: ${fichas} ficha(s) atualizadas${criados ? `, ${criados} cliente(s) criados` : ""}${tarefas ? ` e ${tarefas} tarefa(s) criadas` : ""}. Se importar de novo, nada se repete (clientes de mesmo nome são reaproveitados).`);
     } catch (e) {
       setErro(e instanceof Error ? e.message : String(e));
       setEstado(null);
@@ -188,7 +207,11 @@ export function ImportarTrello({ clientes }: { clientes: ClienteImport[] }) {
         <>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-borda bg-superficie p-4 text-sm">
             <div className="space-y-1">
-              <p><b>{itens.length}</b> cartões abertos · <b>{escolhidos.length}</b> ligados a um cliente do painel. Confira o cliente de cada um abaixo (os sem cliente não entram).</p>
+              <p>
+                <b>{itens.length}</b> cartões abertos · <b>{escolhidos.filter((x) => x.clienteId !== NOVO).length}</b> ligados a clientes do painel
+                {escolhidos.some((x) => x.clienteId === NOVO) && <> · <b>{escolhidos.filter((x) => x.clienteId === NOVO).length}</b> viram cliente novo (os do Lixo, como inativos)</>}.
+                Confira abaixo; os marcados “Não importar” ficam de fora.
+              </p>
               <label className="flex items-center gap-2 text-texto-2">
                 <input type="checkbox" checked={comTarefas} onChange={(e) => setComTarefas(e.target.checked)} />
                 Criar tarefa para os cartões de “Falta informação” (aguardando o cliente) e de “Coisas a fazer”
@@ -215,10 +238,26 @@ export function ImportarTrello({ clientes }: { clientes: ClienteImport[] }) {
                     <select value={x.clienteId} onChange={(e) => setItens((xs) => xs!.map((y) => (y.cardId === x.cardId ? { ...y, clienteId: e.target.value } : y)))}
                       className="max-w-[60vw] rounded-lg border border-borda bg-fundo px-2 py-1 text-xs">
                       <option value="">Não importar</option>
+                      <option value={NOVO}>+ Criar cliente “{x.novo.nome}”</option>
                       <optgroup label="Clientes ativos">{ativos.map((c) => <option key={c.id} value={c.id}>{c.nome} · {c.empresa}</option>)}</optgroup>
                       {inativos.length > 0 && <optgroup label="Inativos (churn)">{inativos.map((c) => <option key={c.id} value={c.id}>{c.nome} · {c.empresa}</option>)}</optgroup>}
                     </select>
                   </div>
+                  {x.clienteId === NOVO && (
+                    <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-texto-2">
+                      <span>Novo cliente:</span>
+                      <input value={x.novo.nome} onChange={(e) => setItens((xs) => xs!.map((y) => (y.cardId === x.cardId ? { ...y, novo: { ...y.novo, nome: e.target.value } } : y)))}
+                        className="rounded-lg border border-borda bg-fundo px-2 py-1" />
+                      <select value={x.novo.empresa} onChange={(e) => setItens((xs) => xs!.map((y) => (y.cardId === x.cardId ? { ...y, novo: { ...y.novo, empresa: e.target.value } } : y)))}
+                        className="rounded-lg border border-borda bg-fundo px-2 py-1">
+                        {EMPRESAS_NOVO.map((e) => <option key={e} value={e}>{e}</option>)}
+                      </select>
+                      <label className="flex items-center gap-1.5">
+                        <input type="checkbox" checked={x.novo.ativo} onChange={(e) => setItens((xs) => xs!.map((y) => (y.cardId === x.cardId ? { ...y, novo: { ...y.novo, ativo: e.target.checked } } : y)))} />
+                        ativo (desmarcado = ex-cliente)
+                      </label>
+                    </div>
+                  )}
                   {aberto === x.cardId && (
                     <div className="mt-2 space-y-2 border-t border-borda pt-2 text-xs text-texto-2">
                       {x.informacoes && <pre className="max-h-60 overflow-auto whitespace-pre-wrap font-sans">{x.informacoes}</pre>}

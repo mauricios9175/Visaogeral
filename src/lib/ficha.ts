@@ -76,8 +76,10 @@ export async function salvarFicha(clienteId: string, f: Partial<Ficha>): Promise
 /** Junta o que veio do Trello com o que já está na ficha (não apaga nada; texto igual não repete). */
 export async function juntarNaFicha(clienteId: string, vindo: { informacoes: string; links: LinkFicha[]; trello?: string }) {
   const atual = await lerFicha(clienteId);
-  const info = vindo.informacoes.trim();
-  const informacoes = !info || atual.informacoes.includes(info) ? atual.informacoes
+  // só os blocos (parágrafos) que ainda não estão na ficha: importar de novo não repete o que já veio
+  const blocos = vindo.informacoes.split(/\n{2,}/).map((b) => b.trim()).filter((b) => b && !atual.informacoes.includes(b));
+  const info = blocos.join("\n\n");
+  const informacoes = !info ? atual.informacoes
     : [atual.informacoes.trim(), atual.informacoes.trim() ? `— Do Trello —\n${info}` : info].filter(Boolean).join("\n\n");
   return salvarFicha(clienteId, { informacoes, links: [...atual.links, ...vindo.links], trello: vindo.trello ?? atual.trello });
 }

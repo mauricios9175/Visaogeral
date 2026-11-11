@@ -310,7 +310,7 @@ function LinhaTarefa({ t, hoje, cliente, clientes, mostrarCliente, mudar, exclui
             {t.aguardando && !t.feita && <span className="rounded-md bg-atencao-bg px-1.5 py-0.5 text-atencao">aguardando cliente</span>}
             {t.nota && <span className="text-texto-3" title={t.nota}>📝</span>}
             {t.link && !t.feita && <Link href={t.link} className="text-destaque underline">abrir</Link>}
-            {t.origem && <span className="text-texto-3">· sugerida pelo Dash</span>}
+            {t.origem && <span className="text-texto-3">· {t.origem.startsWith("trello:") ? "veio do Trello" : "sugerida pelo Dash"}</span>}
           </div>
         </div>
         {!t.feita && t.data <= hoje && !aberta && (
