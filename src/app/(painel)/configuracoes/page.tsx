@@ -263,7 +263,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
         <p className="text-xs text-texto-3">
           Empresa = para quem você atende o cliente (ex.: Propulsão, Viccon, Clientes próprios). Para criar uma empresa
           nova, é só digitar o nome dela no cliente.
-          {" "}Veio do Trello? <a href="/configuracoes/importar-trello" className="text-destaque underline">Importar os cartões para a ficha de cada cliente</a>.
+          {" "}Layout, cores e relatório de cada empresa: <a href="/configuracoes/empresas" className="text-destaque underline">Empresas e relatórios</a>.          {" "}Veio do Trello? <a href="/configuracoes/importar-trello" className="text-destaque underline">Importar os cartões para a ficha de cada cliente</a>.
         </p>
         <datalist id="empresas">
           {empresas.map((e) => <option key={e} value={e} />)}

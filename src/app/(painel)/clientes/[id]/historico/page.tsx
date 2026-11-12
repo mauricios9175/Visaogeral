@@ -5,7 +5,9 @@ import { db } from "@/lib/db";
 import { dinheiro, inteiro, pct, quandoFoi } from "@/lib/formato";
 import { chavePasso, conferirMes, funilDoCliente, lerHistorico, mesDe, nomeMes, nomesDosPassos, somarMeses, type MesConsolidado } from "@/lib/historico";
 import type { FunilCliente } from "@/lib/funil";
-import { configRelatorio, linkApresentacao, MODELOS, modeloPadrao, ORDEM_QUALIFICACAO, outrosModelos, TITULO_QUALIFICACAO, type TipoModelo } from "@/lib/relatorio-slides";
+import { configRelatorio, linkApresentacao, ORDEM_QUALIFICACAO, TITULO_QUALIFICACAO } from "@/lib/relatorio-slides";
+import { chaveEmpresa, LAYOUTS, listarEmpresas } from "@/lib/empresas";
+import { EMPRESA_PADRAO } from "@/lib/db";
 import { DIMENSOES_UTM } from "@/lib/consultas";
 import { hojeISO } from "@/lib/datas";
 import { Aviso, Voltar } from "@/components/ui";
@@ -37,8 +39,9 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
     db().from("relatorios_gerados").select("periodo, link, criado_em").eq("cliente_id", id).order("criado_em", { ascending: false }).limit(5),
   ]);
   if (!cliente) notFound();
-  const modeloDoCliente = modeloPadrao((cliente as { empresa?: string | null }).empresa);
-  const idsOutros = await outrosModelos().catch(() => ({} as Partial<Record<TipoModelo, string>>));
+  const empresaDoCliente = (cliente as { empresa?: string | null }).empresa || EMPRESA_PADRAO;
+  const empresas = await listarEmpresas().catch(() => []);
+  const daEmpresa = empresas.find((e) => chaveEmpresa(e.nome) === chaveEmpresa(empresaDoCliente));
 
   const hoje = hojeISO();
   const anos = [...new Set(meses.map((m) => m.mes.slice(0, 4)))];
@@ -90,8 +93,8 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
         {!config ? (
           <>
             <p className="text-sm text-texto-2">
-              Primeiro passo (uma vez só): o painel coloca o modelo da Propulsão no seu Google Drive. Depois, cada relatório
-              é uma cópia dele já preenchida, que você edita à vontade. Mudanças de design feitas no modelo valem para os
+              Primeiro passo (uma vez só): o painel cria no seu Google Drive a pasta dos relatórios e o primeiro modelo. Depois, cada relatório
+              é uma cópia do modelo da empresa do cliente, já preenchida, que você edita à vontade. Mudanças de design feitas no modelo valem para os
               próximos relatórios (só não apague os textos entre {"{{ }}"}).
             </p>
             {(logins ?? []).length === 0 ? (
@@ -123,8 +126,8 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 Modelo
-                <select name="modelo" defaultValue={modeloDoCliente} className={campo}>
-                  {(Object.keys(MODELOS) as TipoModelo[]).map((k) => <option key={k} value={k}>{MODELOS[k].nome}{k === modeloDoCliente ? " (padrão deste cliente)" : ""}</option>)}
+                <select name="modelo" defaultValue={daEmpresa?.nome ?? ""} className={campo}>
+                  {empresas.map((e) => <option key={e.nome} value={e.nome}>{e.nome} · {LAYOUTS[e.layout].nome}{e.nome === daEmpresa?.nome ? " (deste cliente)" : ""}</option>)}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-sm">De<input type="date" name="de" className={campo} /></label>
@@ -150,7 +153,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
               </label>
               <label className="flex items-center gap-2 self-center text-sm">
                 <input type="checkbox" name="resumo_ia" defaultChecked />
-                Destaques escritos pela IA <span className="text-xs text-texto-3">(modelos Próprio e Viccon)</span>
+                Destaques escritos pela IA <span className="text-xs text-texto-3">(layouts Mensal e Simples)</span>
               </label>
               <label className="flex items-center gap-2 self-center text-sm">
                 <input type="checkbox" name="motivos_perda" />
@@ -161,12 +164,10 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
             <p className="text-xs text-texto-3">
               Para um período que não é um mês, escolha “Outro período” e preencha as datas. Os gráficos mostram até 6 meses do
               histórico. Slides sem dados (ex.: Google, para quem não tem) saem do relatório. Modelo no Drive de {config.email}:{" "}
-              editar os modelos ↗{" "}
-              <a href={linkApresentacao(config.modeloId)} target="_blank" rel="noreferrer" className="underline">Propulsão</a>
-              {(["proprio", "viccon"] as const).map((k) => idsOutros[k] && (
-                <span key={k}> · <a href={linkApresentacao(idsOutros[k]!)} target="_blank" rel="noreferrer" className="underline">{MODELOS[k].nome}</a></span>
-              ))}
-              . Os modelos Próprio e Viccon vão para o Drive sozinhos no primeiro relatório de cada um. Qualificação e motivos de perda são do modelo da Propulsão.
+              {daEmpresa?.modeloId && <><a href={linkApresentacao(daEmpresa.modeloId)} target="_blank" rel="noreferrer" className="underline">editar o modelo de {daEmpresa.nome} ↗</a>. </>}
+              Layout, cores e fonte de cada empresa ficam em{" "}
+              <Link href="/configuracoes/empresas" className="underline">Configurações → Empresas e relatórios</Link>.
+              Qualificação por UTM e motivos de perda aparecem no layout Completo.
             </p>
             {(gerados ?? []).length > 0 && (
               <ul className="space-y-1 text-sm">

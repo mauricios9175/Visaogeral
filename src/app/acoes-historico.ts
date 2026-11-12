@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { CAMPOS_AJUSTAVEIS, gravarHistorico, mesDe } from "@/lib/historico";
 import { hojeISO, somarDias } from "@/lib/datas";
-import { criarModeloNoDrive, gerarRelatorio, linkApresentacao, MODELOS, ORDEM_QUALIFICACAO, type TipoModelo } from "@/lib/relatorio-slides";
+import { criarModeloNoDrive, gerarRelatorio, linkApresentacao, ORDEM_QUALIFICACAO } from "@/lib/relatorio-slides";
 
 function voltar(clienteId: string, msg: string): never {
   revalidatePath(`/clientes/${clienteId}/historico`);
@@ -78,7 +78,7 @@ export async function gerarRelatorioSlides(form: FormData) {
     const modelo = String(form.get("modelo") ?? "");
     const r = await gerarRelatorio({
       clienteId, desde, ate, qualificacoes, agrupar: form.get("agrupar") === "on", motivosPerda: form.get("motivos_perda") === "on", vendas: form.get("vendas") === "on",
-      ...(modelo in MODELOS ? { modelo: modelo as TipoModelo } : {}), resumoIA: form.get("resumo_ia") === "on",
+      ...(modelo ? { empresaModelo: modelo } : {}), resumoIA: form.get("resumo_ia") === "on",
     });
     msg = `Relatório de ${r.periodo} pronto: ${r.link}`;
   } catch (e) {

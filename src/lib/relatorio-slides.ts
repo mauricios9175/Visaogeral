@@ -13,6 +13,7 @@ import { dinheiro, inteiro, pct } from "./formato";
 import { agruparPorNome, chaveDe, gastoPorNome, NIVEL_DA_UTM, nomeDoAnuncio, nomeDoPublico } from "./agrupar";
 import type { NumerosFunil } from "./funil";
 import { hojeISO, somarDias, type Periodo } from "./datas";
+import { configEmpresa, corDoModelo, guardarModeloEmpresa, LAYOUTS, temaDaEmpresa, type ConfigEmpresa, type LayoutRelatorio, type TemaRelatorio } from "./empresas";
 
 // Relatório do cliente no Google Slides: o painel copia o modelo da Propulsão (no Drive do usuário)
 // e troca os marcadores {{...}} por números, tabelas e gráficos desenhados no próprio slide (editáveis).
@@ -55,10 +56,10 @@ async function acessoDoToken(tokenId: string) {
 }
 
 /** Sobe um arquivo de modelo (PowerPoint) para o Drive, convertido em Google Slides. */
-async function subirModelo(acesso: string, tipo: TipoModelo, pastaId: string | null) {
-  const pptx = await readFile(path.join(process.cwd(), "modelos", MODELOS[tipo].arquivo));
+async function subirModelo(acesso: string, layout: LayoutRelatorio, nome: string, pastaId: string | null) {
+  const pptx = await readFile(path.join(process.cwd(), "modelos", LAYOUTS[layout].arquivo));
   const limite = `limite${Date.now()}`;
-  const meta = JSON.stringify({ name: `Modelo de relatório · ${MODELOS[tipo].nome}`, mimeType: "application/vnd.google-apps.presentation", ...(pastaId && { parents: [pastaId] }) });
+  const meta = JSON.stringify({ name: `Modelo de relatório · ${nome}`, mimeType: "application/vnd.google-apps.presentation", ...(pastaId && { parents: [pastaId] }) });
   const corpo = Buffer.concat([
     Buffer.from(`--${limite}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n`),
     Buffer.from(`--${limite}\r\nContent-Type: application/vnd.openxmlformats-officedocument.presentationml.presentation\r\n\r\n`),
@@ -80,28 +81,109 @@ export async function criarModeloNoDrive(tokenId: string) {
     method: "POST",
     body: JSON.stringify({ name: "Relatórios · Visão Geral", mimeType: "application/vnd.google-apps.folder" }),
   });
-  const modeloId = await subirModelo(acesso, "propulsao", pasta.id);
+  const modeloId = await subirModelo(acesso, "completo", "Propulsão", pasta.id);
   const valor: ConfigRelatorio = { modeloId, pastaId: pasta.id, tokenId, email };
   const { error } = await db().from("configuracoes").upsert({ chave: "relatorio_slides", valor, atualizado_em: new Date().toISOString() });
   if (error) throw new Error(`${error.message} (rode o SQL 0016 no Supabase)`);
   return valor;
 }
 
-/** Ids dos modelos dos clientes próprios e da Viccon no Drive (o da Propulsão fica em relatorio_slides). */
-export async function outrosModelos(): Promise<Partial<Record<TipoModelo, string>>> {
-  const { data } = await db().from("configuracoes").select("valor").eq("chave", "relatorio_modelos").maybeSingle();
-  return (data?.valor as Partial<Record<TipoModelo, string>> | undefined) ?? {};
+// ---------- Pintar o modelo com as cores e a fonte da empresa ----------
+
+type Rgb = { red?: number; green?: number; blue?: number };
+const paraHex = (c?: Rgb) => c ? [c.red ?? 0, c.green ?? 0, c.blue ?? 0].map((v) => Math.round(v * 255).toString(16).padStart(2, "0")).join("").toUpperCase() : null;
+
+function hsl(hex: string) {
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+  if (!d) return { h: 0, s: 0, l };
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  const h = max === r ? ((g - b) / d + (g < b ? 6 : 0)) * 60 : max === g ? ((b - r) / d + 2) * 60 : ((r - g) / d + 4) * 60;
+  return { h, s, l };
+}
+function deHsl(h: number, s: number, l: number) {
+  const k = (n: number) => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [f(0), f(8), f(4)].map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+const corRgb = (hex: string) => ({ rgbColor: { red: parseInt(hex.slice(0, 2), 16) / 255, green: parseInt(hex.slice(2, 4), 16) / 255, blue: parseInt(hex.slice(4, 6), 16) / 255 } });
+
+/** Troca uma cor do modelo pela equivalente nas cores novas (tons da cor principal viram tons da nova, idem destaque). */
+function trocarCor(atual: string, de: { primaria: string; destaque: string }, para: { primaria: string; destaque: string }): string | null {
+  const x = hsl(atual);
+  if (x.s < 0.25 || x.l > 0.96 || x.l < 0.04) return null; // cinzas, branco e preto ficam
+  const perto = (base: string) => { const b = hsl(base); const dh = Math.min(Math.abs(x.h - b.h), 360 - Math.abs(x.h - b.h)); return dh <= 30 ? b : null; };
+  const alvo = perto(de.primaria) ? [de.primaria, para.primaria] : perto(de.destaque) ? [de.destaque, para.destaque] : null;
+  if (!alvo) return null;
+  const b = hsl(alvo[0]), n = hsl(alvo[1]);
+  // mantém a diferença de claridade em relação à cor-base (um roxo escuro vira um azul escuro, um fundo claro vira claro)
+  return deHsl(n.h, Math.min(1, n.s * (x.s / Math.max(b.s, 0.01))), Math.max(0.08, Math.min(0.97, n.l + Math.max(-0.25, Math.min(0.25, x.l - b.l)))));
 }
 
-/** Id do modelo do tipo no Drive; o dos clientes próprios e o da Viccon são criados na primeira vez (mesma pasta e login). */
-async function idDoModelo(tipo: TipoModelo, config: ConfigRelatorio, acesso: string, recriar = false) {
-  if (tipo === "propulsao") return config.modeloId;
-  const outros = await outrosModelos();
-  if (outros[tipo] && !recriar) return outros[tipo]!;
-  const id = await subirModelo(acesso, tipo, config.pastaId);
-  const { error } = await db().from("configuracoes").upsert({ chave: "relatorio_modelos", valor: { ...outros, [tipo]: id }, atualizado_em: new Date().toISOString() });
-  if (error) throw new Error(error.message);
+/** Repinta o modelo no Drive: fundos, formas, linhas e textos nas cores da empresa; troca a fonte do layout pela escolhida. */
+async function pintarModelo(acesso: string, id: string, de: { primaria: string; destaque: string; fonte: string }, para: { primaria: string; destaque: string; fonte: string }) {
+  if (de.primaria === para.primaria && de.destaque === para.destaque && de.fonte === para.fonte) return;
+  type Texto = { textElements?: { startIndex?: number; endIndex?: number; textRun?: { style?: { foregroundColor?: { opaqueColor?: { rgbColor?: Rgb } }; fontFamily?: string } } }[] };
+  type El = {
+    objectId: string;
+    shape?: { shapeProperties?: { shapeBackgroundFill?: { solidFill?: { color?: { rgbColor?: Rgb } } }; outline?: { outlineFill?: { solidFill?: { color?: { rgbColor?: Rgb } } } } }; text?: Texto };
+    line?: { lineProperties?: { lineFill?: { solidFill?: { color?: { rgbColor?: Rgb } } } } };
+  };
+  const ap = await api<{ slides: { objectId: string; pageProperties?: { pageBackgroundFill?: { solidFill?: { color?: { rgbColor?: Rgb } } } }; pageElements?: El[] }[] }>(acesso, `${SLIDES}/${id}`);
+  const reqs: Req[] = [];
+  const nova = (rgb?: Rgb) => { const h = paraHex(rgb); return h ? trocarCor(h, de, para) : null; };
+  for (const sl of ap.slides) {
+    const fundo = nova(sl.pageProperties?.pageBackgroundFill?.solidFill?.color?.rgbColor);
+    if (fundo) reqs.push({ updatePageProperties: { objectId: sl.objectId, pageProperties: { pageBackgroundFill: { solidFill: { color: corRgb(fundo) } } }, fields: "pageBackgroundFill.solidFill.color" } });
+    for (const el of sl.pageElements ?? []) {
+      const f = nova(el.shape?.shapeProperties?.shapeBackgroundFill?.solidFill?.color?.rgbColor);
+      if (f) reqs.push({ updateShapeProperties: { objectId: el.objectId, shapeProperties: { shapeBackgroundFill: { solidFill: { color: corRgb(f) } } }, fields: "shapeBackgroundFill.solidFill.color" } });
+      const o = nova(el.shape?.shapeProperties?.outline?.outlineFill?.solidFill?.color?.rgbColor);
+      if (o) reqs.push({ updateShapeProperties: { objectId: el.objectId, shapeProperties: { outline: { outlineFill: { solidFill: { color: corRgb(o) } } } }, fields: "outline.outlineFill.solidFill.color" } });
+      const l = nova(el.line?.lineProperties?.lineFill?.solidFill?.color?.rgbColor);
+      if (l) reqs.push({ updateLineProperties: { objectId: el.objectId, lineProperties: { lineFill: { solidFill: { color: corRgb(l) } } }, fields: "lineFill.solidFill.color" } });
+      for (const t of el.shape?.text?.textElements ?? []) {
+        const st = t.textRun?.style;
+        if (!st || t.startIndex == null && t.endIndex == null) continue;
+        const faixa = { type: "FIXED_RANGE", startIndex: t.startIndex ?? 0, endIndex: t.endIndex };
+        const c = nova(st.foregroundColor?.opaqueColor?.rgbColor);
+        if (c) reqs.push({ updateTextStyle: { objectId: el.objectId, textRange: faixa, style: { foregroundColor: { opaqueColor: corRgb(c) } }, fields: "foregroundColor" } });
+        if (de.fonte !== para.fonte && st.fontFamily === de.fonte) {
+          reqs.push({ updateTextStyle: { objectId: el.objectId, textRange: faixa, style: { fontFamily: para.fonte }, fields: "fontFamily" } });
+        }
+      }
+    }
+  }
+  for (let i = 0; i < reqs.length; i += 400) {
+    await api(acesso, `${SLIDES}/${id}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: reqs.slice(i, i + 400) }) });
+  }
+}
+
+/**
+ * Modelo da empresa no Drive: criado no primeiro relatório (a partir do layout escolhido, já nas cores dela);
+ * se as cores ou a fonte mudaram, é repintado; se foi apagado, é criado de novo.
+ */
+async function idDoModeloEmpresa(cfg: ConfigEmpresa, config: ConfigRelatorio, acesso: string, recriar = false) {
+  const base = LAYOUTS[cfg.layout].base;
+  const alvo = { primaria: cfg.primaria, destaque: cfg.destaque, fonte: cfg.fonte };
+  if (cfg.modeloId && !recriar) {
+    if (cfg.modeloCores !== corDoModelo(cfg)) {
+      // repinta a partir das cores com que foi pintado da última vez
+      const [, p1, d1, f1] = (cfg.modeloCores ?? corDoModelo({ ...base, layout: cfg.layout })).split("|");
+      await pintarModelo(acesso, cfg.modeloId, { primaria: p1, destaque: d1, fonte: f1 }, alvo);
+      await guardarModeloEmpresa(cfg.nome, cfg.modeloId, corDoModelo(cfg));
+    }
+    return cfg.modeloId;
+  }
+  const id = await subirModelo(acesso, cfg.layout, cfg.nome, config.pastaId);
+  await pintarModelo(acesso, id, base, alvo);
+  await guardarModeloEmpresa(cfg.nome, id, corDoModelo(cfg));
   return id;
+}
+
+/** Link do modelo de uma empresa (se já existe). */
+export async function modeloDaEmpresa(nome: string | null | undefined) {
+  return (await configEmpresa(nome)).modeloId ?? null;
 }
 
 /** Dados para o seletor de pastas do Google (Google Picker) no navegador. */
@@ -138,35 +220,9 @@ const propriedades = (pagina: string, c: Caixa) => ({
   transform: { scaleX: 1, scaleY: 1, translateX: Math.round(c.x), translateY: Math.round(c.y), unit: "EMU" },
 });
 
-// ---------- Modelos (Propulsão, clientes próprios, Viccon) e as cores de cada um ----------
-
-export type TipoModelo = "propulsao" | "proprio" | "viccon";
-
-type Tema = { primaria: string; paleta: string[]; fonte: string; fonteFunil: string; clara: string; escura: string; media: string };
-
-export const MODELOS: Record<TipoModelo, { nome: string; arquivo: string; tema: Tema }> = {
-  propulsao: {
-    nome: "Propulsão", arquivo: "relatorio-propulsao.pptx",
-    tema: { primaria: "6900AF", paleta: ["6900AF", "B57BEE", "1FB5CC", "F2A900", "E0559B", "4C7BE0", "2FA36B"], fonte: "Saira", fonteFunil: "Montserrat", clara: "F1E6FA", escura: "4B0A86", media: "8A5BB5" },
-  },
-  proprio: {
-    nome: "Clientes próprios (mensal)", arquivo: "relatorio-proprio.pptx",
-    tema: { primaria: "1E3A8A", paleta: ["1E3A8A", "F59E0B", "3B82F6", "10B981", "EF4444", "8B5CF6", "14B8A6"], fonte: "Poppins", fonteFunil: "Poppins", clara: "EEF2FF", escura: "1E3A8A", media: "3B82F6" },
-  },
-  viccon: {
-    nome: "Viccon", arquivo: "relatorio-viccon.pptx",
-    tema: { primaria: "0F172A", paleta: ["0F172A", "14B8A6", "64748B", "F59E0B", "0EA5E9", "EF4444", "8B5CF6"], fonte: "Inter", fonteFunil: "Inter", clara: "F0FDFA", escura: "0F172A", media: "0D9488" },
-  },
-};
-
-/** Modelo de cada empresa: Viccon → Viccon; Propulsão → Propulsão; o resto (clientes próprios) → mensal. */
-export function modeloPadrao(empresa: string | null | undefined): TipoModelo {
-  const e = (empresa ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  return e.includes("viccon") ? "viccon" : e.includes("propulsao") ? "propulsao" : "proprio";
-}
-
-// Tema do relatório que está sendo gerado (um por vez; volta ao da Propulsão no fim).
-let tema: Tema = MODELOS.propulsao.tema;
+// Cores do relatório que está sendo gerado (as da empresa; um por vez, volta ao padrão no fim).
+const TEMA_PADRAO = temaDaEmpresa({ ...LAYOUTS.completo.base, layout: "completo" });
+let tema: TemaRelatorio = TEMA_PADRAO;
 
 let seq = 0;
 const novoId = (p: string) => `${p}_${Date.now().toString(36)}_${(seq++).toString(36)}`;
@@ -392,7 +448,7 @@ export type PedidoRelatorio = {
   agrupar: boolean; // junta públicos e anúncios de mesmo nome (duplicados para teste)
   motivosPerda?: boolean; // slide com os motivos de perda do CRM (opcional)
   vendas?: boolean;       // slide com o gráfico de vendas realizadas e valor das vendas (padrão: sim, se houver CRM)
-  modelo?: TipoModelo;    // sem: pelo da empresa do cliente
+  empresaModelo?: string; // usar o modelo desta empresa (sem: o da empresa do cliente)
   resumoIA?: boolean;     // slide "Destaques" escrito pela IA (modelos novos; padrão: sim)
 };
 
@@ -604,16 +660,16 @@ export async function acoesDoPeriodo(clienteId: string, desde: string, ate: stri
 /** Gera o relatório: copia o modelo (o da empresa do cliente, ou o escolhido), preenche e devolve o link. */
 export async function gerarRelatorio(p: PedidoRelatorio) {
   const { data: emp } = await db().from("clientes").select("empresa").eq("id", p.clienteId).maybeSingle();
-  const tipo = p.modelo ?? modeloPadrao(emp?.empresa as string | null);
-  tema = MODELOS[tipo].tema;
+  const cfg = await configEmpresa(p.empresaModelo || (emp?.empresa as string | null));
+  tema = temaDaEmpresa(cfg);
   try {
-    return await preencherRelatorio(p, tipo);
+    return await preencherRelatorio(p, cfg);
   } finally {
-    tema = MODELOS.propulsao.tema;
+    tema = TEMA_PADRAO;
   }
 }
 
-async function preencherRelatorio(p: PedidoRelatorio, tipo: TipoModelo) {
+async function preencherRelatorio(p: PedidoRelatorio, cfg: ConfigEmpresa) {
   const config = await configRelatorio();
   if (!config) throw new Error("Crie primeiro o modelo no Drive (botão logo acima).");
   const banco = db();
@@ -626,7 +682,7 @@ async function preencherRelatorio(p: PedidoRelatorio, tipo: TipoModelo) {
   const atual = periodo(p.desde, p.ate);
   const ant = periodoAnterior(p.desde, p.ate);
   const anteriorP = periodo(ant.desde, ant.ate);
-  const novo = tipo !== "propulsao";
+  const novo = cfg.layout !== "completo";
   const [meta, crm, google, { meses }, funil, acoes, destaques] = await Promise.all([
     detalheCliente(p.clienteId, atual, anteriorP),
     detalheCrm(p.clienteId, atual, anteriorP).catch(() => null),
@@ -672,9 +728,9 @@ async function preencherRelatorio(p: PedidoRelatorio, tipo: TipoModelo) {
     method: "POST",
     body: JSON.stringify({ name: `Relatório ${cliente.nome} · ${rotuloPer}`, ...(pasta && { parents: [pasta] }) }),
   });
-  const copia = await copiar(await idDoModelo(tipo, config, acesso))
-    // modelo novo apagado no Drive: sobe de novo e tenta mais uma vez
-    .catch(async (e) => (novo && /não encontrado/i.test(String(e)) ? copiar(await idDoModelo(tipo, config, acesso, true)) : Promise.reject(e)))
+  const copia = await copiar(await idDoModeloEmpresa(cfg, config, acesso))
+    // modelo apagado no Drive: sobe de novo (nas cores da empresa) e tenta mais uma vez
+    .catch(async (e) => (/não encontrado/i.test(String(e)) ? copiar(await idDoModeloEmpresa(cfg, config, acesso, true)) : Promise.reject(e)))
     .catch((e) => {
     if (pasta !== config.pastaId && /not found|não encontrado|File not found|insufficient/i.test(String(e))) {
       throw new Error("Não consegui salvar na pasta escolhida para este cliente. Escolha a pasta de novo (botão “Escolher pasta”).");

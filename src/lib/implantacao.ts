@@ -2,6 +2,7 @@ import "server-only";
 import { db, EMPRESA_PADRAO } from "./db";
 import { hojeISO, somarDias } from "./datas";
 import { lerFicha } from "./ficha";
+import { configEmpresa } from "./empresas";
 import { linkDoCliente } from "./portal";
 
 // Checklist de implantação de cada cliente. A maior parte o painel confere sozinho (conta vinculada, CRM,
@@ -121,7 +122,7 @@ export async function checklistDoCliente(clienteId: string): Promise<{ itens: It
   auto("briefing", "Briefing preenchido na ficha", (ficha?.briefing.trim().length ?? 0) >= 40, undefined, `${base}/ficha`);
   auto("links", "Links na ficha (Instagram, site, Drive…)", (ficha?.links.length ?? 0) > 0, ficha?.links.length ? `${ficha.links.length} link(s)` : undefined, `${base}/ficha`);
   auto("portal", "Link do cliente (portal) criado", !!portal, undefined, base);
-  if (!/viccon/i.test(cliente.empresa || EMPRESA_PADRAO)) {
+  if ((await configEmpresa(cliente.empresa || EMPRESA_PADRAO).catch(() => null))?.relatorioMensal !== false) {
     auto("relatorio", "Primeiro relatório gerado", (relatorios ?? 0) > 0, undefined, `${base}/historico#relatorio`);
   }
 

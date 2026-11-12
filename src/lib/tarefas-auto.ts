@@ -3,6 +3,7 @@ import { db, EMPRESA_PADRAO } from "./db";
 import { hojeISO, somarDias } from "./datas";
 import { alertasContas } from "./consultas";
 import { lerDescartadas, type Tarefa } from "./tarefas";
+import { chaveEmpresa, listarEmpresas } from "./empresas";
 import type { ResultadoSugestoes } from "./sugestoes";
 
 // Tarefas que o Dash sugere sozinho: você aceita (vira tarefa) ou descarta. Cada sugestão tem uma chave com a
@@ -28,8 +29,6 @@ function semanaDe(iso: string) {
   return somarDias(iso, -((dia + 6) % 7));
 }
 
-/** Empresas que não recebem relatório mensal (a Viccon não tem). */
-const semRelatorio = (empresa: string) => /viccon/i.test(empresa);
 
 export async function sugestoesDeTarefa(tarefas: Tarefa[]): Promise<SugestaoTarefa[]> {
   const hoje = hojeISO();
@@ -82,6 +81,9 @@ export async function sugestoesDeTarefa(tarefas: Tarefa[]): Promise<SugestaoTare
     const [a, m] = hoje.split("-").map(Number);
     const mesPassado = MESES[(m + 10) % 12];
     const comRelatorio = new Set(((relatorios ?? []) as { cliente_id: string }[]).map((r) => r.cliente_id));
+    // empresas sem relatório mensal (configurado em Empresas e relatórios) ficam de fora
+    const semMensal = new Set((await listarEmpresas().catch(() => [])).filter((e) => !e.relatorioMensal).map((e) => chaveEmpresa(e.nome)));
+    const semRelatorio = (empresa: string) => semMensal.has(chaveEmpresa(empresa));
     for (const c of clientes) {
       if (semRelatorio(c.empresa) || comRelatorio.has(c.id)) continue;
       // cliente que começou neste mês ainda não tem mês passado
