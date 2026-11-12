@@ -13,7 +13,7 @@ import { dinheiro, inteiro, pct } from "./formato";
 import { agruparPorNome, chaveDe, gastoPorNome, NIVEL_DA_UTM, nomeDoAnuncio, nomeDoPublico } from "./agrupar";
 import type { NumerosFunil } from "./funil";
 import { hojeISO, somarDias, type Periodo } from "./datas";
-import { configEmpresa, corDoModelo, guardarModeloEmpresa, LAYOUTS, temaDaEmpresa, type ConfigEmpresa, type LayoutRelatorio, type TemaRelatorio } from "./empresas";
+import { configEmpresa, corDoModelo, guardarModeloEmpresa, LAYOUTS, linkDoLogo, temaDaEmpresa, type ConfigEmpresa, type LayoutRelatorio, type TemaRelatorio } from "./empresas";
 
 // Relatório do cliente no Google Slides: o painel copia o modelo da Propulsão (no Drive do usuário)
 // e troca os marcadores {{...}} por números, tabelas e gráficos desenhados no próprio slide (editáveis).
@@ -770,6 +770,27 @@ async function preencherRelatorio(p: PedidoRelatorio, cfg: ConfigEmpresa) {
   }
 
   const reqs: Req[] = [];
+  // logo da empresa: na capa e (se escolhido) no canto de cada slide; antes de tudo, para as cópias de slide já virem com ele
+  if (cfg.logo) {
+    const url = await linkDoLogo(cfg.logo, 3600);
+    if (url) {
+      const prop = cfg.logo.largura / Math.max(cfg.logo.altura, 1);
+      const tamanho = (alturaMax: number, larguraMax: number) => {
+        let h = alturaMax, w = h * prop;
+        if (w > larguraMax) { w = larguraMax; h = w / prop; }
+        return { w, h };
+      };
+      apresentacao.slides.forEach((sl, i) => {
+        if (i > 0 && cfg.logo!.onde !== "todos") return;
+        const capa = i === 0;
+        const { w, h } = capa ? tamanho(alturaSlide * 0.13, larguraSlide * 0.3) : tamanho(alturaSlide * 0.065, larguraSlide * 0.16);
+        // capa: no alto (à direita no layout completo, à esquerda nos outros); demais: canto (no alto no completo, embaixo nos outros)
+        const x = capa && cfg.layout !== "completo" ? larguraSlide * 0.077 : larguraSlide - w - larguraSlide * 0.035;
+        const y = capa ? alturaSlide * (cfg.layout === "completo" ? 0.06 : 0.14) : cfg.layout === "completo" ? alturaSlide * 0.035 : alturaSlide - h - alturaSlide * 0.04;
+        reqs.push({ createImage: { objectId: novoId("logo"), url, elementProperties: propriedades(sl.objectId, { x, y, w, h }) } });
+      });
+    }
+  }
   const trocar = (de: string, para: string) => reqs.push({ replaceAllText: { containsText: { text: de, matchCase: true }, replaceText: para } });
   trocar("{{cliente}}", cliente.nome);
   trocar("{{periodo}}", rotuloPer);

@@ -1,19 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import type { ConfigEmpresa, LayoutRelatorio } from "@/lib/empresas";
+import type { ConfigEmpresa, LayoutRelatorio, LogoEmpresa } from "@/lib/empresas";
+import { enviarImagem } from "./enviar-midia";
 
-type Empresa = ConfigEmpresa & { clientes: number; ativos: number };
+type Empresa = ConfigEmpresa & { clientes: number; ativos: number; logoUrl?: string | null };
 type Layout = { chave: string; nome: string; descricao: string };
 
 const link = (id: string) => `https://docs.google.com/presentation/d/${id}/edit`;
 
 /** Miniatura do relatório nas cores escolhidas (capa + um cartão do resumo + barras). */
-function Previa({ e }: { e: Pick<ConfigEmpresa, "primaria" | "destaque" | "fonte" | "nome"> }) {
+function Previa({ e, logo }: { e: Pick<ConfigEmpresa, "primaria" | "destaque" | "fonte" | "nome">; logo?: string | null }) {
   const p = `#${e.primaria}`, d = `#${e.destaque}`;
   return (
     <div className="flex gap-2" style={{ fontFamily: `"${e.fonte}", sans-serif` }} aria-hidden>
-      <div className="flex h-[72px] w-[128px] flex-col justify-center rounded-md px-2.5 text-white" style={{ background: p, borderBottom: `5px solid ${d}` }}>
+      <div className="relative flex h-[72px] w-[128px] flex-col justify-center rounded-md px-2.5 text-white" style={{ background: p, borderBottom: `5px solid ${d}` }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {logo && <img src={logo} alt="" className="absolute right-1.5 top-1.5 max-h-4 max-w-[40px] object-contain" />}
         <span className="text-[7px] font-bold uppercase" style={{ color: d }}>Relatório mensal</span>
         <span className="truncate text-[12px] font-bold">Cliente</span>
         <span className="text-[8px] opacity-80">Outubro/2026</span>
@@ -31,6 +34,37 @@ function Previa({ e }: { e: Pick<ConfigEmpresa, "primaria" | "destaque" | "fonte
 function CartaoEmpresa({ e, layouts, fontes, aoSalvar }: { e: Empresa; layouts: Layout[]; fontes: string[]; aoSalvar: (lista: Empresa[]) => void }) {
   const [f, setF] = useState(e);
   const [estado, setEstado] = useState<string | null>(null);
+  const [logoPrevia, setLogoPrevia] = useState<string | null>(e.logoUrl ?? null);
+  const [enviando, setEnviando] = useState(false);
+
+  /** Salva só o logo (na hora em que é escolhido, removido ou muda onde aparece). */
+  async function salvarLogo(logo: LogoEmpresa | null) {
+    const r = await fetch("/api/empresas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nomeAtual: e.nome, empresa: { logo } }) });
+    const j = await r.json().catch(() => ({ erro: `erro ${r.status}` }));
+    if (!r.ok || j.erro) throw new Error(j.erro ?? `erro ${r.status}`);
+    return j.empresas as Empresa[];
+  }
+
+  async function escolherLogo(arq: File | undefined) {
+    if (!arq) return;
+    if (!/^image\/(png|jpeg)$/.test(arq.type)) { setEstado("Use o logo em PNG (de preferência com fundo transparente) ou JPG."); return; }
+    setEnviando(true);
+    setEstado(null);
+    try {
+      // tamanho real da imagem (para o logo não ficar esticado no slide)
+      const url = URL.createObjectURL(arq);
+      const img = new Image();
+      await new Promise((ok, erro) => { img.onload = ok; img.onerror = erro; img.src = url; });
+      const { caminho } = await enviarImagem(arq, `logo-${crypto.randomUUID().slice(0, 12)}`);
+      await salvarLogo({ caminho, largura: img.naturalWidth, altura: img.naturalHeight, onde: e.logo?.onde ?? "todos" });
+      setLogoPrevia(url);
+      setEstado("Logo salvo ✓ Vai nos próximos relatórios desta empresa.");
+    } catch (err) {
+      setEstado(`Não salvou o logo: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setEnviando(false);
+    }
+  }
   const mudou = JSON.stringify([f.nome, f.layout, f.relatorioMensal, f.primaria, f.destaque, f.fonte]) !== JSON.stringify([e.nome, e.layout, e.relatorioMensal, e.primaria, e.destaque, e.fonte]);
 
   async function salvar() {
@@ -38,7 +72,7 @@ function CartaoEmpresa({ e, layouts, fontes, aoSalvar }: { e: Empresa; layouts: 
     if (f.layout !== e.layout && e.modeloId && !confirm("Trocar o layout cria um modelo novo no Drive no próximo relatório (o atual continua lá, mas deixa de ser usado). Continuar?")) return;
     setEstado("Salvando…");
     try {
-      const r = await fetch("/api/empresas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nomeAtual: e.nome, empresa: f }) });
+      const r = await fetch("/api/empresas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nomeAtual: e.nome, empresa: { ...f, logo: undefined, logoUrl: undefined } }) });
       const j = await r.json().catch(() => ({ erro: `erro ${r.status}` }));
       if (!r.ok || j.erro) throw new Error(j.erro ?? `erro ${r.status}`);
       aoSalvar(j.empresas);
@@ -57,7 +91,7 @@ function CartaoEmpresa({ e, layouts, fontes, aoSalvar }: { e: Empresa; layouts: 
             className="w-full max-w-sm rounded-lg border border-transparent bg-transparent px-1 text-lg font-bold hover:border-borda focus:border-destaque focus:outline-none" />
           <p className="px-1 text-xs text-texto-3">{e.ativos} cliente(s) ativo(s){e.clientes > e.ativos ? ` · ${e.clientes - e.ativos} inativo(s)` : ""}</p>
         </div>
-        <Previa e={f} />
+        <Previa e={f} logo={logoPrevia} />
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
@@ -85,6 +119,33 @@ function CartaoEmpresa({ e, layouts, fontes, aoSalvar }: { e: Empresa; layouts: 
           <input type="checkbox" checked={f.relatorioMensal} onChange={(x) => setF({ ...f, relatorioMensal: x.target.checked })} />
           Recebe relatório todo mês <span className="text-xs text-texto-3">(lembrete nas tarefas e no checklist)</span>
         </label>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-borda bg-fundo p-3 text-sm">
+        <span className="text-xs text-texto-3">Logo</span>
+        {logoPrevia
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={logoPrevia} alt="Logo" className="h-10 max-w-[120px] rounded bg-[repeating-conic-gradient(#ddd_0_25%,#fff_0_50%)] bg-[length:12px_12px] object-contain p-1" />
+          : <span className="text-xs text-texto-3">sem logo</span>}
+        <label className="cursor-pointer rounded-lg border border-borda px-3 py-1.5 text-xs hover:border-destaque">
+          {enviando ? "Enviando…" : logoPrevia ? "Trocar" : "Enviar logo"}
+          <input type="file" accept="image/png,image/jpeg" className="hidden" disabled={enviando} onChange={(x) => escolherLogo(x.target.files?.[0])} />
+        </label>
+        {e.logo && (
+          <>
+            <select value={e.logo.onde} onChange={async (x) => {
+              try { aoSalvar(await salvarLogo({ ...e.logo!, onde: x.target.value as LogoEmpresa["onde"] })); } catch (err) { setEstado(String(err)); }
+            }} className="rounded-lg border border-borda bg-superficie px-2 py-1 text-xs">
+              <option value="todos">Na capa e no canto de todos os slides</option>
+              <option value="capa">Só na capa</option>
+            </select>
+            <button type="button" onClick={async () => {
+              if (!confirm("Tirar o logo desta empresa?")) return;
+              try { aoSalvar(await salvarLogo(null)); setLogoPrevia(null); } catch (err) { setEstado(String(err)); }
+            }} className="text-xs text-texto-3 underline hover:text-critico">tirar</button>
+          </>
+        )}
+        <span className="basis-full text-xs text-texto-3">PNG com fundo transparente fica melhor. Na capa ele vai sobre a cor principal: use uma versão clara do logo se a cor for escura.</span>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 text-sm">

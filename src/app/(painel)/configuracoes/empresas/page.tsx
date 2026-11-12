@@ -1,11 +1,13 @@
 import { connection } from "next/server";
 import { Voltar } from "@/components/ui";
 import { EditorEmpresas } from "@/components/empresas";
-import { FONTES, LAYOUTS, listarEmpresas } from "@/lib/empresas";
+import { FONTES, LAYOUTS, linkDoLogo, listarEmpresas } from "@/lib/empresas";
 
 export default async function PaginaEmpresas() {
   await connection();
-  const empresas = await listarEmpresas();
+  const lista = await listarEmpresas();
+  // link temporário do logo de cada uma, para mostrar na tela
+  const empresas = await Promise.all(lista.map(async (e) => ({ ...e, logoUrl: await linkDoLogo(e.logo, 6 * 3600) })));
   return (
     <div className="mx-auto max-w-4xl space-y-5">
       <header className="space-y-2">

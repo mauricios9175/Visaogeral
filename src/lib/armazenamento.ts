@@ -56,3 +56,9 @@ export async function guardarParte(caminho: string, parte: Blob) {
   const { error } = await db().storage.from(BUCKET).upload(caminho, parte, { upsert: true, contentType: "application/octet-stream" });
   if (error) throw new Error(`Storage: ${error.message}`);
 }
+
+/** Move um arquivo dentro do bucket (ex.: o logo enviado vai de montagens/ para logos/, onde fica guardado). */
+export async function mover(de: string, para: string) {
+  const { error } = await db().storage.from(BUCKET).move(de, para);
+  if (error) throw new Error(`Não consegui guardar o arquivo: ${error.message}`);
+}

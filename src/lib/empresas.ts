@@ -1,5 +1,6 @@
 import "server-only";
 import { db, EMPRESA_PADRAO } from "./db";
+import { apagar, linkTemporario, mover } from "./armazenamento";
 
 // Empresas (para quem você atende o cliente: agências parceiras e os seus clientes próprios), cada uma com o seu
 // relatório: o layout, as cores, a fonte, se recebe relatório mensal e o modelo dela no Google Drive.
@@ -37,7 +38,10 @@ export type ConfigEmpresa = {
   fonte: string;
   modeloId?: string;            // o modelo desta empresa no Google Drive (criado no primeiro relatório)
   modeloCores?: string;         // cores/fonte com que o modelo do Drive foi pintado (para repintar se mudarem)
+  logo?: LogoEmpresa | null;    // logo da empresa (vai na capa e, se quiser, no canto de todos os slides)
 };
+
+export type LogoEmpresa = { caminho: string; largura: number; altura: number; onde: "capa" | "todos" };
 
 const sem = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 export const chaveEmpresa = (nome: string) => sem(nome).replace(/\s+/g, " ");
@@ -126,6 +130,7 @@ export async function salvarEmpresa(nomeAtual: string, e: Partial<ConfigEmpresa>
     relatorioMensal: e.relatorioMensal ?? atual.relatorioMensal,
     primaria: hex(e.primaria, atual.primaria), destaque: hex(e.destaque, atual.destaque),
     fonte: e.fonte && FONTES.includes(e.fonte) ? e.fonte : atual.fonte,
+    logo: await logoNovo(nome, atual.logo ?? null, e.logo),
     // layout novo = arquivo novo no Drive
     ...(layout === atual.layout && atual.modeloId ? { modeloId: atual.modeloId, modeloCores: atual.modeloCores } : {}),
   };
@@ -144,6 +149,33 @@ export async function salvarEmpresa(nomeAtual: string, e: Partial<ConfigEmpresa>
   salvo[kNova] = nova;
   await gravar(salvo);
   return nova;
+}
+
+/**
+ * Logo: o arquivo enviado pelo navegador (em montagens/) vai para logos/, onde fica guardado; o antigo é apagado.
+ * `undefined` = não mexe; `null` = tira o logo.
+ */
+async function logoNovo(nome: string, atual: LogoEmpresa | null, vindo: LogoEmpresa | null | undefined): Promise<LogoEmpresa | null> {
+  if (vindo === undefined) return atual;
+  if (vindo === null) {
+    if (atual) await apagar([atual.caminho]);
+    return null;
+  }
+  const onde = vindo.onde === "capa" ? "capa" : "todos";
+  const largura = Math.max(1, Math.round(Number(vindo.largura) || 1)), altura = Math.max(1, Math.round(Number(vindo.altura) || 1));
+  // só mudou onde aparece
+  if (atual && vindo.caminho === atual.caminho) return { ...atual, onde };
+  if (!/^montagens\/[\w./-]+\.(png|jpe?g)$/i.test(vindo.caminho)) throw new Error("Use o logo em PNG ou JPG.");
+  const ext = vindo.caminho.split(".").pop()!.toLowerCase();
+  const destino = `logos/${chaveEmpresa(nome).replace(/[^a-z0-9]+/g, "-")}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+  await mover(vindo.caminho, destino);
+  if (atual) await apagar([atual.caminho]);
+  return { caminho: destino, largura, altura, onde };
+}
+
+/** Link temporário do logo (para mostrar na tela e para o Google Slides baixar a imagem). */
+export async function linkDoLogo(logo: LogoEmpresa | null | undefined, segundos = 3600) {
+  return logo ? linkTemporario(logo.caminho, segundos).catch(() => null) : null;
 }
 
 /** Guarda o id (e as cores) do modelo da empresa no Drive. */
