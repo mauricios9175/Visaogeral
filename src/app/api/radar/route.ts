@@ -21,7 +21,8 @@ export async function POST(request: NextRequest) {
   try {
     switch (c.op) {
       case "gerar":
-        return NextResponse.json({ radar: await gerarRadar() });
+        // "continuar": termina o de hoje (o que faltou); senão recomeça do zero
+        return NextResponse.json({ radar: await gerarRadar({ recomecar: !c.continuar, orcamentoMs: 230_000 }) });
       case "palavras":
         return NextResponse.json({ palavras: await salvarPalavras(String(c.nicho ?? ""), Array.isArray(c.palavras) ? c.palavras.map(String) : []) });
       case "analisar": {

@@ -32,7 +32,7 @@ export type NichoRadar = {
   pesquisa: PesquisaNicho | null;
 };
 
-export type Radar = { data: string; criadoEm: string; nichos: NichoRadar[] };
+export type Radar = { data: string; criadoEm: string; nichos: NichoRadar[]; pendentes?: string[] }; // pendentes: nichos que faltam montar hoje
 
 const sem = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 
@@ -114,8 +114,19 @@ async function melhoresDoNicho(clientes: Set<string>, todos: Criativo[]): Promis
   });
 }
 
-/** Monta o radar do dia (todos os nichos dos clientes ativos) e guarda. */
-export async function gerarRadar(): Promise<Radar> {
+/**
+ * Monta o radar do dia em partes (para caber no tempo do servidor): cada chamada faz os nichos que couberem e guarda;
+ * a próxima continua de onde parou. `seNecessario`: se o de hoje já está completo, não faz nada (o agendador chama
+ * várias vezes ao dia; a primeira depois da meia-noite monta).
+ */
+export async function gerarRadar(opcoes: { seNecessario?: boolean; recomecar?: boolean; orcamentoMs?: number } = {}): Promise<Radar & { feitoAgora: number }> {
+  const inicio = Date.now();
+  const orcamento = opcoes.orcamentoMs ?? 200_000;
+  const hoje = hojeISO();
+  const salvo = await lerRadar();
+  const deHoje = salvo?.data === hoje && !opcoes.recomecar;
+  if (opcoes.seNecessario && deHoje && !salvo!.pendentes?.length) return { ...salvo!, feitoAgora: 0 };
+
   const { data } = await db().from("clientes").select("id, nome, nicho").eq("ativo", true);
   const porNicho = new Map<string, { nicho: string; clientes: { id: string; nome: string }[] }>();
   for (const c of (data ?? []) as { id: string; nome: string; nicho: string | null }[]) {
@@ -125,13 +136,16 @@ export async function gerarRadar(): Promise<Radar> {
     g.clientes.push({ id: c.id, nome: c.nome });
     porNicho.set(k, g);
   }
-  const { atual } = resolverPeriodo({ p: "30" });
-  const todos = porNicho.size ? await listarCriativos(atual, {}) : [];
   const grupos = [...porNicho.values()].sort((a, b) => b.clientes.length - a.clientes.length || a.nicho.localeCompare(b.nicho, "pt-BR"));
-  // 3 nichos por vez (pesquisa e palavras usam a IA na primeira vez de cada nicho)
-  const nichos: NichoRadar[] = [];
-  for (let i = 0; i < grupos.length; i += 3) {
-    nichos.push(...(await Promise.all(grupos.slice(i, i + 3).map(async (g) => {
+  // continua o de hoje (os nichos já feitos ficam); senão começa do zero, mantendo o de ontem na tela até terminar
+  const feitos = new Map((deHoje ? salvo!.nichos : []).map((n) => [sem(n.nicho), n]));
+  const faltam = grupos.filter((g) => !feitos.has(sem(g.nicho)));
+  const { atual } = resolverPeriodo({ p: "30" });
+  const todos = faltam.length ? await listarCriativos(atual, {}) : [];
+  let feitoAgora = 0;
+  // 3 nichos por vez (pesquisa e termos usam a IA na primeira vez de cada nicho); para quando o tempo acabar
+  for (let i = 0; i < faltam.length && Date.now() - inicio < orcamento; i += 3) {
+    const lote = await Promise.all(faltam.slice(i, i + 3).map(async (g): Promise<NichoRadar> => {
       const [palavras, melhores, pesquisa] = await Promise.all([
         palavrasDoNicho(g.nicho).catch(() => [g.nicho]),
         melhoresDoNicho(new Set(g.clientes.map((c) => c.id)), todos).catch(() => []),
@@ -141,12 +155,21 @@ export async function gerarRadar(): Promise<Radar> {
         nicho: g.nicho, clientes: g.clientes, palavras, melhores, pesquisa,
         buscas: palavras.map((p) => ({ palavra: p, url: linkBiblioteca(p), video: linkBiblioteca(p, "video") })),
       };
-    }))));
+    }));
+    for (const n of lote) feitos.set(sem(n.nicho), n);
+    feitoAgora += lote.length;
   }
-  const radar: Radar = { data: hojeISO(), criadoEm: new Date().toISOString(), nichos };
+  const nichos = grupos.map((g) => feitos.get(sem(g.nicho))).filter((n): n is NichoRadar => !!n);
+  const pendentes = grupos.filter((g) => !feitos.has(sem(g.nicho))).map((g) => g.nicho);
+  // enquanto o de hoje não tem nada, os nichos de ontem continuam aparecendo
+  const radar: Radar = {
+    data: hoje, criadoEm: new Date().toISOString(),
+    nichos: nichos.length ? nichos : salvo?.nichos ?? [],
+    ...(pendentes.length ? { pendentes } : {}),
+  };
   const { error } = await db().from("configuracoes").upsert({ chave: "radar_atual", valor: radar, atualizado_em: radar.criadoEm });
   if (error) throw new Error(error.message);
-  return radar;
+  return { ...radar, feitoAgora };
 }
 
 // ---------- "Analisar este anúncio" (o que você achou na Biblioteca, no feed ou num concorrente) ----------

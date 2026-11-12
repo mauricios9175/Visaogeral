@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AnuncioSalvo, NichoRadar, Radar } from "@/lib/radar";
 import { enviarImagem } from "./enviar-midia";
 
@@ -26,13 +26,17 @@ export function RadarCriativos({ inicial, salvosIniciais, clientes, hoje }: {
   const [erro, setErro] = useState<string | null>(null);
   const nicho = radar?.nichos.find((n) => n.nicho === sel) ?? radar?.nichos[0] ?? null;
 
-  async function atualizar() {
+  /** Monta o radar (em partes, até terminar). `continuar`: completa o de hoje; sem: recomeça do zero. */
+  async function atualizar(continuar = false) {
     setGerando(true);
     setErro(null);
     try {
-      const j = await chamar({ op: "gerar" });
-      setRadar(j.radar);
-      if (!j.radar.nichos.some((n: NichoRadar) => n.nicho === sel)) setSel(j.radar.nichos[0]?.nicho ?? "");
+      for (let i = 0; i < 6; i++) {
+        const j = await chamar({ op: "gerar", continuar: continuar || i > 0 });
+        setRadar(j.radar);
+        setSel((s) => (j.radar.nichos.some((n: NichoRadar) => n.nicho === s) ? s : j.radar.nichos[0]?.nicho ?? ""));
+        if (!j.radar.pendentes?.length) break;
+      }
     } catch (e) {
       setErro(e instanceof Error ? e.message : String(e));
     } finally {
@@ -40,14 +44,22 @@ export function RadarCriativos({ inicial, salvosIniciais, clientes, hoje }: {
     }
   }
 
+  // abriu a tela e o radar não é de hoje (ou ficou pela metade): monta sozinho, sem precisar clicar
+  useEffect(() => {
+    if (inicial && inicial.data === hoje && !inicial.pendentes?.length) return;
+    const t = setTimeout(() => void atualizar(true), 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-texto-3">
           {radar ? <>Atualizado {radar.data === hoje ? "hoje" : `em ${radar.data.split("-").reverse().join("/")}`} às {new Date(radar.criadoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}. O radar se atualiza sozinho toda madrugada.</> : "O radar ainda não foi montado."}
         </p>
-        <button type="button" onClick={atualizar} disabled={gerando} className="rounded-[10px] border border-borda px-4 py-2 text-sm font-semibold hover:border-destaque disabled:opacity-60">
-          {gerando ? "Montando… (até 2 min na 1ª vez)" : "Atualizar agora"}
+        <button type="button" onClick={() => atualizar(false)} disabled={gerando} className="rounded-[10px] border border-borda px-4 py-2 text-sm font-semibold hover:border-destaque disabled:opacity-60">
+          {gerando ? `Montando o radar de hoje…${radar?.pendentes?.length ? ` (faltam ${radar.pendentes.length} nichos)` : ""}` : "Atualizar agora"}
         </button>
       </div>
       {erro && <p className="text-sm text-critico">{erro}</p>}

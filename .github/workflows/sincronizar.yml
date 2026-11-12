@@ -17,7 +17,7 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - name: Sincronizar Meta Ads
         env:
@@ -66,6 +66,21 @@ jobs:
             -H "Authorization: Bearer $CRON_SECRET" \
             "$APP_URL/api/cron/sync?modo=crm&dias=$DIAS"
 
+      # Radar de criativos: a primeira execução depois da meia-noite monta o do dia (em partes); as outras só conferem.
+      # Fica aqui (e não só na madrugada) porque o GitHub às vezes pula o horário agendado.
+      - name: Radar de criativos
+        if: always()
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          for i in 1 2 3; do
+            R=$(curl -sS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/sync?modo=radar&seNecessario=1") || break
+            echo "$R"
+            echo "$R" | grep -q '"restantes":0' && break
+          done
+          true
+
       # Histórico mensal (substitui a planilha): de madrugada, depois do CRM.
       - name: Atualizar histórico mensal
         if: always() && (github.event.schedule == '17 6 * * *' || github.event_name == 'workflow_dispatch')
@@ -97,15 +112,6 @@ jobs:
             echo "$R" | grep -q '"restantes":0' && break
           done
 
-      # Radar de criativos do dia (fica pronto antes de amanhecer)
-      - name: Radar de criativos
-        if: always()
-        env:
-          APP_URL: ${{ secrets.APP_URL }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        run: |
-          curl -sS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/sync?modo=radar" || true
-
       # Análise dos criativos com IA (os novos e os que ainda não têm), maiores gastos primeiro
       - name: Análise dos criativos
         if: always()
@@ -119,3 +125,4 @@ jobs:
             echo "$R" | grep -q '"restantes":0' && break
             echo "$R" | grep -qi 'limite' && break
           done
+          true

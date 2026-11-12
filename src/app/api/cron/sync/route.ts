@@ -33,7 +33,11 @@ export async function GET(request: NextRequest) {
   if (modo === "avisos") return NextResponse.json(await enviarAvisos());
   if (modo === "sugestoes") return NextResponse.json(await rodadaAutomaticaSugestoes());
   if (modo === "criativos") return NextResponse.json(await analisarCriativosPendentes());
-  if (modo === "radar") { const r = await gerarRadar(); return NextResponse.json({ nichos: r.nichos.length, data: r.data }); }
+  if (modo === "radar") {
+    // seNecessario=1: só monta se o radar de hoje ainda não está pronto (o agendador chama a cada execução)
+    const r = await gerarRadar({ seNecessario: request.nextUrl.searchParams.get("seNecessario") === "1" });
+    return NextResponse.json({ data: r.data, nichos: r.nichos.length, feitoAgora: r.feitoAgora, restantes: r.pendentes?.length ?? 0 });
+  }
   if (modo === "google") {
     const dias = Math.min(Number(request.nextUrl.searchParams.get("dias")) || 2, 90);
     return NextResponse.json(await sincronizarGoogle(dias));
