@@ -7,6 +7,8 @@ import { lerManual } from "@/lib/sugestoes";
 import { MANUAL_GOOGLE_PADRAO, MANUAL_PADRAO } from "@/lib/manual-ia";
 import { diasAte, dinheiro, quandoFoi } from "@/lib/formato";
 import { AvisosCelular } from "@/components/avisos-celular";
+import { ConfigBomDia } from "@/components/bom-dia";
+import { lerConfigBomDia } from "@/lib/bom-dia";
 import { Aviso } from "@/components/ui";
 import { BotaoChurn, BotaoEnviar } from "@/components/botao";
 import {
@@ -32,6 +34,7 @@ const botaoPrimario = "rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium te
 export default async function Configuracoes({ searchParams }: PageProps<"/configuracoes">) {
   const iaStatus = await statusIA().catch(() => []);
   const agendas = await contasAgenda().catch(() => []);
+  const bomDia = await lerConfigBomDia().catch(() => ({ ligado: true, hora: 8 }));
   const [manualIA, manualGoogle] = await Promise.all([
     lerManual("meta").catch(() => MANUAL_PADRAO),
     lerManual("google").catch(() => MANUAL_GOOGLE_PADRAO),
@@ -187,6 +190,7 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
           </p>
         </div>
         <AvisosCelular />
+        <ConfigBomDia inicial={bomDia} />
       </section>
 
       {!!execucoes?.length && (

@@ -63,6 +63,9 @@ export async function enviarAvisos() {
   const banco = db();
   const { count } = await banco.from("push_inscricoes").select("endpoint", { count: "exact", head: true });
   if (!count) return { avisos: 0, motivo: "nenhum aparelho inscrito" };
+  // bom dia (uma vez por dia, de manhã): vem antes dos alertas
+  const { enviarBomDia } = await import("./bom-dia");
+  const bomDia = await enviarBomDia().catch((e) => ({ enviado: false, motivo: e instanceof Error ? e.message : String(e) }));
   const [contas, desempenho] = await Promise.all([alertasContas().catch(() => []), calcularAlertas().catch(() => [])]);
   const candidatos = [
     ...contas.map((a) => ({ chave: `conta|${a.clienteId}|${a.contaNome}|${a.mensagem.slice(0, 40)}`, cliente: a.clienteNome, texto: a.mensagem, url: `/clientes/${a.clienteId}`, critico: a.nivel === "critico" })),
@@ -74,7 +77,7 @@ export async function enviarAvisos() {
   const { data: ja } = await banco.from("push_enviados").select("chave").in("chave", chavesDoDia);
   const enviados = new Set((ja ?? []).map((x) => x.chave as string));
   const novos = candidatos.map((c, i) => ({ ...c, chaveDia: chavesDoDia[i] })).filter((c) => !enviados.has(c.chaveDia));
-  if (!novos.length) return { avisos: 0 };
+  if (!novos.length) return { avisos: 0, bomDia };
 
   // até 4 avisos separados; mais que isso, um resumo só (para não encher o celular)
   const lista = novos.sort((a, b) => Number(b.critico) - Number(a.critico));
@@ -91,5 +94,5 @@ export async function enviarAvisos() {
   await banco.from("push_enviados").upsert(lista.map((a) => ({ chave: a.chaveDia })));
   // limpa o que tem mais de 7 dias
   await banco.from("push_enviados").delete().lt("enviado_em", new Date(Date.now() - 7 * 86_400_000).toISOString()).then(() => null, () => null);
-  return { avisos: lista.length };
+  return { avisos: lista.length, bomDia };
 }
