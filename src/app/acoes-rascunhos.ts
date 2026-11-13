@@ -26,7 +26,7 @@ export async function publicarRascunho(clienteId: string, id: string): Promise<R
   const fd = new FormData();
   fd.set("payload", JSON.stringify({
     clienteId, conta: r.conta, modeloId: `zero:${r.objetivo}`, objetivo: r.objetivo, pagina: r.pagina, instagram: r.instagram,
-    formulario: r.formulario, pixel: r.pixel, criativos: r.criativos.filter((x) => (!x.videoId && !x.hash) || x.conta === r.conta),
+    formulario: r.formulario, pixel: r.pixel, criativos: r.criativos.filter((x) => (!x.videoId && !x.hash) || x.conta === r.conta || x.deOutraConta),
     config: r.destino ? { ...c, orcamentoEm: r.destino.orcamentoNaCampanha ? "campanha" : "conjunto" } : c,
     destino: r.destino ? { campanha: r.destino.campanhaId, conjunto: r.destino.conjunto?.id } : null,
     ...(r.formulario === "novo" && { formularioNovo: r.formularioNovo }),

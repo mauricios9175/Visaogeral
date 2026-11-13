@@ -139,6 +139,8 @@ function Duplicar(p: PropsAcoes & { duplicar: NonNullable<PropsAcoes["duplicar"]
         )}
         <p className="text-texto-3">Abre um rascunho com tudo copiado (nomes, público, textos, mídia). Você edita e só depois publica: nada de “ - cópia” no nome nem nas UTMs.</p>
         <button className={`${btn} w-full border-destaque font-semibold text-destaque`}>Abrir rascunho</button>
+        <a href={`/copiar-meta?${new URLSearchParams({ conta: p.contaId, nivel: p.nivel, id: p.objetoId, nome: p.nome, voltar: p.voltar })}`}
+          className="block text-center text-[11px] text-texto-3 underline hover:text-destaque">Copiar para outra conta / outro cliente…</a>
       </form>
       <details className="mt-1 w-72">
         <summary className="cursor-pointer text-[11px] text-texto-3 hover:text-texto">Cópia rápida direto no Meta</summary>

@@ -7,6 +7,7 @@ import { lerDestinoMeta, montarNoMeta, type DestinoMeta } from "@/lib/meta-monta
 import { linkGerenciador } from "@/lib/meta";
 import { tokenDaConta } from "@/lib/sync";
 import { apagar } from "@/lib/armazenamento";
+import { copiarMidia } from "@/lib/meta-copiar";
 import { excluirRascunho } from "@/lib/rascunhos";
 
 export type ResultadoMontagem = { ok: boolean; mensagem: string; detalhes: string[]; link: string | null };
@@ -14,7 +15,10 @@ export type ResultadoMontagem = { ok: boolean; mensagem: string; detalhes: strin
 type Payload = {
   clienteId: string; conta: string; modeloId: string; objetivo: ObjetivoMeta; config: ConfigMeta;
   pagina: string; instagram: string; formulario: string; pixel: string;
-  criativos: { caminho: string; nome: string; tipo: string; videoId?: string; hash?: string }[];
+  criativos: {
+    caminho: string; nome: string; tipo: string; videoId?: string; hash?: string; conta?: string; deOutraConta?: boolean;
+    nomeAnuncio?: string; texto?: string; titulo?: string; descricao?: string;
+  }[];
   manterSemAnuncios?: boolean;
   formularioNovo?: Partial<ConfigFormulario>; // formulário criado na própria montagem (formulario = "novo")
   salvarComoModelo?: string;                  // nome para salvar esse formulário também como modelo
@@ -75,6 +79,15 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
       .then(() => null, () => null);
   }
   const registro = { plataforma: "meta", cliente_id: cliente.id, conta_id: conta.id, nivel: destino?.conjunto ? "conjunto" : "campanha", acao: "montar" };
+  // criativos copiados de outra conta: imagem/vídeo vão para esta conta antes (um que falhar sai, com aviso)
+  const avisosCopia: string[] = [];
+  if (p.criativos.some((c) => c.conta && c.conta !== conta.id)) {
+    const levados = await Promise.all(p.criativos.map((c) => copiarMidia(c, conta.id, token).catch((e) => {
+      avisosCopia.push(e instanceof Error ? e.message : String(e));
+      return null;
+    })));
+    p.criativos = levados.filter((c): c is NonNullable<typeof c> => !!c);
+  }
   try {
     const r = await montarNoMeta({
       contaId: conta.id, token, clienteNome: cliente.nome, objetivo: p.objetivo, config,
@@ -105,6 +118,7 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
         detalhes: [
           ...(r.formularioCriado ? [`Formulário novo criado na página (id ${r.formularioCriado}).`] : []),
           ...r.falhas.map((f) => `⚠ ${f}`),
+          ...avisosCopia.map((f) => `⚠ ${f}`),
         ],
         link: linkGerenciador(conta.id, destino.conjunto ? "conjunto" : "campanha", destino.conjunto?.id ?? destino.campanhaId),
       };
@@ -120,6 +134,7 @@ export async function montarCampanhaMeta(_: ResultadoMontagem | null, form: Form
       detalhes: [
         ...(r.formularioCriado ? [`Formulário novo criado na página (id ${r.formularioCriado}).`] : []),
         ...r.falhas.map((f) => `⚠ ${f}`),
+        ...avisosCopia.map((f) => `⚠ ${f}`),
       ],
       link: linkGerenciador(conta.id, "campanha", r.campanhaId),
     };

@@ -13,6 +13,7 @@ export type CriativoRascunho = {
   caminho: string; nome: string; tipo: string; tamanho: number; videoId?: string; hash?: string; conta?: string; miniatura?: string | null;
   // copy própria do anúncio (na cópia de um conjunto com vários anúncios, cada um mantém a sua)
   nomeAnuncio?: string; texto?: string; titulo?: string; descricao?: string;
+  deOutraConta?: boolean; // veio de outra conta (cópia entre contas): a mídia é levada para a conta do rascunho ao publicar
 };
 
 export type DestinoRascunho = {
@@ -85,15 +86,23 @@ async function idsFilhos(id: string, borda: "adsets" | "ads", token: string, max
  * Lê no Meta a campanha, o conjunto ou o anúncio e monta o rascunho para editar antes de publicar.
  * `destino`: anúncio → conjunto de destino; conjunto → campanha de destino ou "nova"; campanha → sempre nova.
  */
-export async function rascunhoDeMeta(clienteId: string, contaId: string, token: string, nivel: Nivel, id: string, destino?: string | null): Promise<Rascunho> {
+export async function rascunhoDeMeta(
+  clienteId: string, contaId: string, token: string, nivel: Nivel, id: string, destino?: string | null,
+  /** copiar para outra conta (de outro cliente ou do mesmo): o rascunho fica no cliente/conta de destino, em campanha nova */
+  paraOutraConta?: { clienteId: string; conta: string; mesmoCliente: boolean } | null,
+): Promise<Rascunho> {
   const avisos: string[] = [];
+  const outra = paraOutraConta ?? null;
   const pais = await getMeta<{ campaign_id?: string; adset_id?: string; name?: string }>(montarUrl(id, token, { fields: nivel === "campanha" ? "name" : "name,campaign_id" + (nivel === "anuncio" ? ",adset_id" : "") }));
   const campanhaId = nivel === "campanha" ? id : pais.campaign_id!;
   const camp = (await lerParaEditar("campanha", campanhaId, token)) as EdicaoCampanha;
 
   // conjuntos a copiar e anúncios de referência (os do 1º conjunto)
-  const conjuntosIds = nivel === "campanha" ? await idsFilhos(id, "adsets", token, 10) : nivel === "conjunto" ? [id] : [];
+  // outra conta: o anúncio vai com o conjunto dele (lá não existe conjunto para recebê-lo)
+  const conjuntosIds = nivel === "campanha" ? await idsFilhos(id, "adsets", token, 10) : nivel === "conjunto" ? [id] : outra ? [pais.adset_id!] : [];
   const anunciosIds = nivel === "anuncio" ? [id] : conjuntosIds[0] ? await idsFilhos(conjuntosIds[0], "ads", token, 10) : [];
+  // públicos personalizados e semelhantes são da conta de origem: não existem na de destino
+  const PUBLICOS = ["custom_audiences", "excluded_custom_audiences"];
   const conjuntos = (await Promise.all(conjuntosIds.map((c) => lerParaEditar("conjunto", c, token)))) as EdicaoConjunto[];
   const anuncios = (await Promise.all(anunciosIds.map((a) => lerParaEditar("anuncio", a, token).catch(() => null)))).filter(Boolean) as EdicaoAnuncio[];
 
@@ -111,8 +120,10 @@ export async function rascunhoDeMeta(clienteId: string, contaId: string, token: 
     if (a.criativo.tipo === "post") { avisos.push(`“${a.nome}” usa uma publicação da página: suba a mídia de novo para ele.`); continue; }
     if (m.tipo === "varias") avisos.push(`“${a.nome}” tem várias mídias: veio só a primeira.`);
     const copy = { nomeAnuncio: a.nome, texto: a.criativo.textos[0] ?? "", titulo: a.criativo.titulos[0] ?? "", descricao: a.criativo.descricoes[0] ?? "" };
-    if (m.videoId) criativos.push({ caminho: "", nome: a.nome, tipo: "video/mp4", tamanho: 0, videoId: m.videoId, conta: contaId, miniatura: m.miniatura, ...copy });
-    else if (m.imagemHash) criativos.push({ caminho: "", nome: a.nome, tipo: "image/jpeg", tamanho: 0, hash: m.imagemHash, conta: contaId, miniatura: m.miniatura, ...copy });
+    // outra conta: a mídia fica marcada para ser levada para a conta de destino na hora de publicar
+    const daOrigem = outra ? { deOutraConta: true } : {};
+    if (m.videoId) criativos.push({ caminho: "", nome: a.nome, tipo: "video/mp4", tamanho: 0, videoId: m.videoId, conta: contaId, miniatura: m.miniatura, ...copy, ...daOrigem });
+    else if (m.imagemHash) criativos.push({ caminho: "", nome: a.nome, tipo: "image/jpeg", tamanho: 0, hash: m.imagemHash, conta: contaId, miniatura: m.miniatura, ...copy, ...daOrigem });
     else { avisos.push(`Não achei a mídia de “${a.nome}”: escolha de novo.`); continue; }
     usados.push(a);
   }
@@ -122,11 +133,20 @@ export async function rascunhoDeMeta(clienteId: string, contaId: string, token: 
   const textos = usados.slice(0, 1).map((a) => a.criativo.textos[0] ?? "");
   const titulos = usados.slice(0, 1).map((a) => a.criativo.titulos[0] ?? "");
 
-  const conjuntosMeta: ConjuntoMeta[] = conjuntos.map((c) => ({
-    ...c.publico, nome: c.nome,
-    orcamentoDiario: c.orcamento?.tipo === "dia" ? c.orcamento.valor : CONJUNTO_PADRAO.orcamentoDiario,
+  let tirouPublicos = false;
+  const conjuntosMeta: ConjuntoMeta[] = conjuntos.map((c) => {
+    if (!outra || !c.publico.extras) return c.publico;
+    const extras = { ...c.publico.extras };
+    for (const k of PUBLICOS) if (extras[k]) { delete extras[k]; tirouPublicos = true; }
+    const mantidos = (c.publico.mantidos ?? []).filter((m) => !/públicos personalizados|exclusão de públicos/.test(m));
+    return { ...c.publico, extras, mantidos };
+  }).map((publico, i) => ({
+    ...publico, nome: conjuntos[i].nome,
+    orcamentoDiario: conjuntos[i].orcamento?.tipo === "dia" ? conjuntos[i].orcamento!.valor : CONJUNTO_PADRAO.orcamentoDiario,
   }));
-  if (conjuntos.some((c) => c.mantidos.length)) avisos.push(`Vai igual ao original (não dá para editar aqui, mas não se perde): ${[...new Set(conjuntos.flatMap((c) => c.mantidos))].join(", ")}.`);
+  if (tirouPublicos) avisos.push("Públicos personalizados e semelhantes são da conta de origem: ficaram de fora. Escolha os da conta de destino no Gerenciador depois de publicar.");
+  const mantidosTodos = [...new Set(conjuntosMeta.flatMap((c) => c.mantidos ?? []))];
+  if (mantidosTodos.length) avisos.push(`Vai igual ao original (não dá para editar aqui, mas não se perde): ${mantidosTodos.join(", ")}.`);
   if (conjuntos.length > 1 && conjuntos.some((c) => JSON.stringify(c.locais) !== JSON.stringify(conjuntos[0].locais))) {
     avisos.push("Os conjuntos tinham locais diferentes: no rascunho, todos ficam com os locais do primeiro.");
   }
@@ -147,9 +167,12 @@ export async function rascunhoDeMeta(clienteId: string, contaId: string, token: 
     whatsapp: ref?.whatsapp ?? WHATSAPP_PADRAO,
   });
 
-  // destino: onde publicar
+  // destino: onde publicar (outra conta: sempre campanha nova)
   let destinoR: DestinoRascunho = null;
-  if (nivel === "anuncio") {
+  if (outra) {
+    avisos.push("Imagens e vídeos vão ser copiados para a conta de destino na hora de publicar (vídeos podem levar alguns minutos).");
+    if (!outra.mesmoCliente) avisos.push("Página, Instagram, formulário e pixel são do outro cliente: escolha os deste cliente abaixo.");
+  } else if (nivel === "anuncio") {
     const alvo = destino || pais.adset_id!;
     const d = await lerDestinoMeta(token, { conjunto: alvo });
     destinoR = { conta: contaId, campanhaId: d.campanhaId, campanhaNome: d.campanhaNome, orcamentoNaCampanha: d.orcamentoNaCampanha, objetivo: d.objetivo, conjunto: d.conjunto };
@@ -160,12 +183,14 @@ export async function rascunhoDeMeta(clienteId: string, contaId: string, token: 
 
   const nomeOrigem = nivel === "campanha" ? camp.nome : nivel === "conjunto" ? conjuntos[0]?.nome : usados[0]?.nome ?? pais.name;
   const agora = new Date().toISOString();
+  const trocaDeCliente = !!outra && !outra.mesmoCliente;
   return {
-    id: crypto.randomUUID(), clienteId,
+    id: crypto.randomUUID(), clienteId: outra?.clienteId ?? clienteId,
     titulo: `${nomeOrigem ?? "Rascunho"}`,
-    origem: `Cópia ${nivel === "campanha" ? "da campanha" : nivel === "conjunto" ? "do conjunto" : "do anúncio"} “${nomeOrigem ?? id}”`,
-    criadoEm: agora, atualizadoEm: agora, objetivo, conta: contaId, destino: destinoR, config,
-    pagina: ref?.paginaId ?? "", instagram: ref?.instagramId ?? "", formulario: ref?.formularioId ?? "", pixel: adset.promoted_object?.pixel_id ?? "",
+    origem: `Cópia ${nivel === "campanha" ? "da campanha" : nivel === "conjunto" ? "do conjunto" : "do anúncio"} “${nomeOrigem ?? id}”${outra ? " (de outra conta)" : ""}`,
+    criadoEm: agora, atualizadoEm: agora, objetivo, conta: outra?.conta ?? contaId, destino: destinoR, config,
+    pagina: trocaDeCliente ? "" : ref?.paginaId ?? "", instagram: trocaDeCliente ? "" : ref?.instagramId ?? "",
+    formulario: trocaDeCliente ? "" : ref?.formularioId ?? "", pixel: trocaDeCliente ? "" : adset.promoted_object?.pixel_id ?? "",
     criativos, avisos,
   };
 }

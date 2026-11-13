@@ -16,6 +16,7 @@ export type Criativo = {
   caminho: string; nome: string; tipo: string; tamanho: number; videoId?: string; conta?: string; hash?: string; miniatura?: string | null;
   // copy própria deste anúncio (sem ela, vale a do modelo, lá embaixo)
   nomeAnuncio?: string; texto?: string; titulo?: string; descricao?: string;
+  deOutraConta?: boolean; // cópia de outra conta: a mídia é levada para a conta escolhida ao publicar
 };
 
 const temCopy = (c: Criativo) => [c.nomeAnuncio, c.texto, c.titulo, c.descricao].some((x) => x?.trim());
@@ -234,7 +235,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
   }
 
   // vídeo enviado ao Meta fica na conta para onde foi; se trocou de conta, ele não serve
-  const criativosDaConta = criativos.filter((c) => (!c.videoId && !c.hash) || c.conta === conta);
+  const criativosDaConta = criativos.filter((c) => (!c.videoId && !c.hash) || c.conta === conta || c.deOutraConta);
   // sem criativo: cria só a campanha e os conjuntos (o anúncio é subido depois no Gerenciador)
   const semCriativo = !criativosDaConta.length && !soAnuncios;
   const payload = {
@@ -410,7 +411,9 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
                 )}
                 <span className="min-w-0 flex-1 truncate">
                   {c.nome}
-                  {(c.videoId || c.hash) && c.conta !== conta && <span className="ml-2 text-xs text-critico">é de outra conta: remova e escolha de novo</span>}
+                  {(c.videoId || c.hash) && c.conta !== conta && (c.deOutraConta
+                    ? <span className="ml-2 text-xs text-texto-3">vem de outra conta: o painel copia para esta ao publicar</span>
+                    : <span className="ml-2 text-xs text-critico">é de outra conta: remova e escolha de novo</span>)}
                 </span>
                 <span className="text-xs text-texto-3">{c.tamanho ? tamanho(c.tamanho) : ""}</span>
                 <button type="button" onClick={() => setCopyAberta((a) => (a === i ? null : i))}

@@ -9,14 +9,16 @@ import { tokenDaConta } from "@/lib/sync";
 import { redirect } from "next/navigation";
 import { getMeta, montarUrl } from "@/lib/meta";
 import { lerRascunho, rascunhoDeMeta, salvarRascunho, type Rascunho } from "@/lib/rascunhos";
+import { contaDoItem } from "@/lib/meta-copiar";
 import type { ContaAnuncio } from "@/lib/db";
 
 export const maxDuration = 300;
 
 export default async function Montar({ params, searchParams }: PageProps<"/clientes/[id]/montar">) {
   const { id } = await params;
-  const { pedido, campanha, conjunto, duplicar, destino: destinoDuplicar, rascunho: rascunhoId } = (await searchParams) as {
+  const { pedido, campanha, conjunto, duplicar, destino: destinoDuplicar, rascunho: rascunhoId, copiar, contaDestino } = (await searchParams) as {
     pedido?: string; campanha?: string; conjunto?: string; duplicar?: string; destino?: string; rascunho?: string;
+    copiar?: string; contaDestino?: string;
   };
   const banco = db();
   const [{ data: cliente }, { data: contas }, { data: modelos }] = await Promise.all([
@@ -47,6 +49,20 @@ export default async function Montar({ params, searchParams }: PageProps<"/clien
     }
     if (novo) redirect(`/clientes/${id}/montar?rascunho=${novo.id}`);
     erroDuplicar ??= "Não achei esse item nas contas deste cliente.";
+  }
+  // "Copiar para outra conta" (?copiar=act_origem:conjunto:123&contaDestino=act_destino): rascunho neste cliente, na conta escolhida
+  const cop = /^(act_\d+):(campanha|conjunto|anuncio):(\d+)$/.exec(copiar ?? "");
+  if (cop && /^act_\d+$/.test(contaDestino ?? "") && (contas ?? []).some((c) => c.id === contaDestino)) {
+    let novo: Rascunho | null = null;
+    try {
+      const origem = await contaDoItem(cop[3], cop[1]);
+      const { data: dono } = await banco.from("contas_anuncio").select("cliente_id").eq("id", origem.conta).maybeSingle();
+      novo = await salvarRascunho(await rascunhoDeMeta(dono?.cliente_id ?? id, origem.conta, origem.token, cop[2] as "campanha" | "conjunto" | "anuncio", cop[3], null,
+        { clienteId: id, conta: contaDestino!, mesmoCliente: dono?.cliente_id === id }));
+    } catch (e) {
+      erroDuplicar = e instanceof Error ? e.message : String(e);
+    }
+    if (novo) redirect(`/clientes/${id}/montar?rascunho=${novo.id}`);
   }
   const rascunho = rascunhoId ? await lerRascunho(id, rascunhoId).catch(() => null) : null;
 
