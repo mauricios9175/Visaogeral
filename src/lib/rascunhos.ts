@@ -3,6 +3,7 @@ import { db } from "./db";
 import { getMeta, montarUrl } from "./meta";
 import { lerParaEditar, type EdicaoAnuncio, type EdicaoCampanha, type EdicaoConjunto } from "./meta-editar";
 import { lerDestinoMeta } from "./meta-montar";
+import { lerFormularioParaCopiar } from "./meta-copiar";
 import { CONJUNTO_PADRAO, normalizarConfig, WHATSAPP_PADRAO, type ConfigFormulario, type ConfigMeta, type ConjuntoMeta, type ObjetivoMeta } from "./modelos";
 
 // Rascunhos de campanha no painel (como no Gerenciador): o "Duplicar" copia do Meta para cá, você edita tudo
@@ -171,7 +172,7 @@ export async function rascunhoDeMeta(
   let destinoR: DestinoRascunho = null;
   if (outra) {
     avisos.push("Imagens e vídeos vão ser copiados para a conta de destino na hora de publicar (vídeos podem levar alguns minutos).");
-    if (!outra.mesmoCliente) avisos.push("Página, Instagram, formulário e pixel são do outro cliente: escolha os deste cliente abaixo.");
+    if (!outra.mesmoCliente) avisos.push("Página, Instagram e pixel são do outro cliente: escolha os deste cliente abaixo.");
   } else if (nivel === "anuncio") {
     const alvo = destino || pais.adset_id!;
     const d = await lerDestinoMeta(token, { conjunto: alvo });
@@ -184,13 +185,25 @@ export async function rascunhoDeMeta(
   const nomeOrigem = nivel === "campanha" ? camp.nome : nivel === "conjunto" ? conjuntos[0]?.nome : usados[0]?.nome ?? pais.name;
   const agora = new Date().toISOString();
   const trocaDeCliente = !!outra && !outra.mesmoCliente;
+  // formulário: na cópia para outro cliente, vem igual ao de origem para ser criado na página dele ao publicar
+  let formularioNovo: ConfigFormulario | null = null;
+  if (trocaDeCliente && objetivo === "formulario" && ref?.formularioId && ref.paginaId) {
+    try {
+      const lido = await lerFormularioParaCopiar(ref.formularioId, ref.paginaId, token);
+      formularioNovo = lido.config;
+      avisos.push("O formulário veio copiado (perguntas, introdução e agradecimento) e vai ser criado na página deste cliente ao publicar.", ...lido.avisos);
+    } catch (e) {
+      avisos.push(`Não consegui ler o formulário de origem (${e instanceof Error ? e.message : e}): escolha ou crie um formulário abaixo.`);
+    }
+  }
   return {
     id: crypto.randomUUID(), clienteId: outra?.clienteId ?? clienteId,
     titulo: `${nomeOrigem ?? "Rascunho"}`,
     origem: `Cópia ${nivel === "campanha" ? "da campanha" : nivel === "conjunto" ? "do conjunto" : "do anúncio"} “${nomeOrigem ?? id}”${outra ? " (de outra conta)" : ""}`,
     criadoEm: agora, atualizadoEm: agora, objetivo, conta: outra?.conta ?? contaId, destino: destinoR, config,
     pagina: trocaDeCliente ? "" : ref?.paginaId ?? "", instagram: trocaDeCliente ? "" : ref?.instagramId ?? "",
-    formulario: trocaDeCliente ? "" : ref?.formularioId ?? "", pixel: trocaDeCliente ? "" : adset.promoted_object?.pixel_id ?? "",
+    formulario: trocaDeCliente ? (formularioNovo ? "novo" : "") : ref?.formularioId ?? "", pixel: trocaDeCliente ? "" : adset.promoted_object?.pixel_id ?? "",
+    ...(formularioNovo ? { formularioNovo } : {}),
     criativos, avisos,
   };
 }

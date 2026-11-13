@@ -1,7 +1,8 @@
 import "server-only";
 import { db, type ContaAnuncio } from "./db";
 import { getMeta, montarUrl, postMeta } from "./meta";
-import { fonteDoVideo } from "./meta-montar";
+import { fonteDoVideo, tokenDaPagina } from "./meta-montar";
+import { normalizarFormulario, type ConfigFormulario, type PerguntaForm } from "./modelos";
 import { tokenDaConta } from "./sync";
 
 // Copiar para outra conta do Meta (de outro cliente ou outra conta do mesmo cliente):
@@ -60,4 +61,57 @@ export async function contaDoItem(itemId: string, contaSugerida?: string | null)
     } catch { /* tenta a próxima */ }
   }
   throw new Error("Não achei esse item em nenhuma conta do painel.");
+}
+
+// ---------- Formulário instantâneo: lê o do anúncio de origem para criar igual na página de destino ----------
+
+type FormMeta = {
+  name?: string; locale?: string; is_optimized_for_quality?: boolean; question_page_custom_headline?: string;
+  questions?: { type?: string; label?: string; options?: { value?: string }[] }[];
+  context_card?: { title?: string; content?: string[] };
+  thank_you_page?: { title?: string; body?: string; button_type?: string; button_text?: string; website_url?: string };
+  privacy_policy_url?: string; legal_content?: { privacy_policy?: { url?: string; link_text?: string } };
+  tracking_parameters?: Record<string, string> | { key?: string; value?: string }[];
+};
+
+const TIPOS_PADRAO = new Set(["FULL_NAME", "PHONE", "EMAIL", "CITY", "STATE", "ZIP", "DOB", "JOB_TITLE", "COMPANY_NAME"]);
+
+/**
+ * Lê o formulário no Meta (perguntas, introdução, agradecimento, política, parâmetros) e devolve no formato da
+ * montagem, para ser criado de novo na página de destino. Perguntas de tipos que o painel não monta viram
+ * perguntas abertas com o mesmo texto (e entram na lista de avisos).
+ */
+export async function lerFormularioParaCopiar(formId: string, paginaId: string, token: string): Promise<{ config: ConfigFormulario; avisos: string[] }> {
+  const tokenPagina = await tokenDaPagina(paginaId, token).catch(() => token);
+  const campos = "name,locale,is_optimized_for_quality,question_page_custom_headline,questions,context_card,thank_you_page,privacy_policy_url,legal_content{privacy_policy},tracking_parameters";
+  const f = await getMeta<FormMeta>(montarUrl(formId, tokenPagina, { fields: campos }))
+    .catch(() => getMeta<FormMeta>(montarUrl(formId, tokenPagina, { fields: campos.replace(",legal_content{privacy_policy}", "") })));
+  const avisos: string[] = [];
+  const perguntas: PerguntaForm[] = (f.questions ?? []).map((q) => {
+    const tipo = String(q.type ?? "").toUpperCase();
+    if (TIPOS_PADRAO.has(tipo)) return { tipo: tipo as PerguntaForm["tipo"], rotulo: "", opcoes: [] };
+    if (tipo !== "CUSTOM") avisos.push(`Pergunta “${q.label ?? tipo.toLowerCase()}” (${tipo.toLowerCase()}) virou pergunta aberta: confira no formulário.`);
+    return { tipo: "CUSTOM", rotulo: q.label ?? tipo.toLowerCase(), opcoes: (q.options ?? []).map((o) => o.value ?? "").filter(Boolean) };
+  });
+  const params = Array.isArray(f.tracking_parameters)
+    ? f.tracking_parameters.map((p) => ({ chave: p.key ?? "", valor: p.value ?? "" }))
+    : Object.entries(f.tracking_parameters ?? {}).map(([chave, valor]) => ({ chave, valor: String(valor) }));
+  const ty = f.thank_you_page ?? {};
+  const config = normalizarFormulario({
+    nome: f.name ?? "Formulário {cliente} - {data}",
+    tipo: f.is_optimized_for_quality ? "intencao" : "volume",
+    introTitulo: f.context_card?.title ?? "", introTexto: (f.context_card?.content ?? []).join("\n"),
+    tituloPerguntas: f.question_page_custom_headline ?? "",
+    perguntas: perguntas.length ? perguntas : undefined,
+    // a política é do outro cliente: fica em branco (o painel usa a da página de destino ou o site dela)
+    politicaUrl: "", politicaTexto: f.legal_content?.privacy_policy?.link_text ?? "",
+    agradecimentoTitulo: ty.title ?? "", agradecimentoTexto: ty.body ?? "",
+    botaoTexto: ty.button_text ?? "", botaoUrl: ty.button_type === "VIEW_WEBSITE" ? ty.website_url ?? "" : "",
+    idioma: f.locale ?? "PT_BR",
+    parametros: params.filter((p) => p.chave),
+  });
+  if (f.legal_content?.privacy_policy?.url || f.privacy_policy_url) {
+    avisos.push("A política de privacidade não vem (é a do outro cliente): o painel usa a da página deste cliente; se quiser, informe o link no formulário.");
+  }
+  return { config, avisos };
 }

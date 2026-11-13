@@ -262,7 +262,7 @@ async function diagnosticoPagina(paginaId: string, token: string) {
 }
 
 /** O Meta exige o token da própria página para listar e criar formulários. */
-async function tokenDaPagina(paginaId: string, token: string) {
+export async function tokenDaPagina(paginaId: string, token: string) {
   const direto = await getMeta<{ access_token?: string }>(montarUrl(paginaId, token, { fields: "access_token" }))
     .then((r) => r.access_token, () => undefined);
   if (direto) return direto;
