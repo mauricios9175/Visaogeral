@@ -486,9 +486,11 @@ export function segmentacao(c: ConfigMeta, p: ConjuntoMeta) {
       ...(regioes.length && { regions: regioes }),
       ...(paises.length && { countries: paises }),
     },
-    // com o público Advantage+ ligado, o Meta exige idade máxima 65 e mínima de até 25 (a idade vira sugestão)
-    age_min: p.advantage ? Math.min(p.idadeMin, 25) : p.idadeMin,
+    // com o público Advantage+ ligado, o Meta exige idade máxima 65 e mínima de até 25 (controle); a faixa escolhida
+    // vai como sugestão de idade (age_range), igual ao Gerenciador
+    age_min: p.advantage ? Math.min(p.idadeControle ?? p.idadeMin, 25) : p.idadeMin,
     age_max: p.advantage ? 65 : p.idadeMax,
+    ...(p.advantage && { age_range: [Math.max(18, p.idadeMin), Math.min(65, p.idadeMax)] }),
     ...(GENEROS[p.generos] && { genders: GENEROS[p.generos] }),
     // tipos diferentes no mesmo bloco = "OU" (a pessoa precisa bater com pelo menos um item), como no Gerenciador
     ...(p.interesses.length && { flexible_spec: [agruparPorTipo(p.interesses)] }),

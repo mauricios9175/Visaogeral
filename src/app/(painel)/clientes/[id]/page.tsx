@@ -58,14 +58,19 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
     p?: string; de?: string; ate?: string; nivel?: string; status?: string; utm?: string; msg?: string;
     campanha?: string; conjunto?: string;
     gnivel?: string; gcampanha?: string; ggrupo?: string; // navegação no Google
+    mconta?: string; // Meta: só uma conta de anúncio (clientes com mais de uma)
   };
   const dimensao = (DIMENSOES_UTM.find((x) => x.chave === busca.utm) ?? DIMENSOES_UTM[0]).chave;
   const { nivel } = busca;
   const filtro = FILTROS.find((f) => f.chave === busca.status) ?? FILTROS[0];
   const { atual, anterior } = resolverPeriodo(busca);
+  const mconta = /^act_\d+$/.test(busca.mconta ?? "") ? busca.mconta! : null;
+  const qsPeriodo = atual.qs; // só o período (para os links que trocam de conta)
+  // a conta escolhida vai junto em todos os links da tela (navegação, filtros, ações)
+  if (mconta) atual.qs = `${atual.qs}&mconta=${mconta}`;
   // O CRM não pode derrubar a tela do cliente: se falhar, mostra o erro só na seção dele.
   const [d, crm, google, { data: historico }] = await Promise.all([
-    detalheCliente(id, atual, anterior, { recentes: true }).catch((e: unknown) => ({ erroGeral: e instanceof Error ? e.message : String(e) })),
+    detalheCliente(id, atual, anterior, { recentes: true, conta: mconta }).catch((e: unknown) => ({ erroGeral: e instanceof Error ? e.message : String(e) })),
     detalheCrm(id, atual, anterior).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })),
     detalheGoogle(id, atual, anterior).catch((e: unknown) => ({ erro: e instanceof Error ? e.message : String(e) })),
     db().from("acoes_log").select("*").eq("cliente_id", id).order("criado_em", { ascending: false }).limit(30),
@@ -129,8 +134,12 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
   const voltar = `${base}?${atual.qs}&nivel=${nivelAtual.chave}&status=${filtro.chave}${recorte}${busca.utm ? `&utm=${busca.utm}` : ""}`;
   // O CRM compara com o investimento total em anúncios (Meta + Google)
   const g = google && !("erro" in google) ? google : null;
-  const gastoTotal = a.gasto + (g?.atual.gasto ?? 0);
-  const gastoTotalAnterior = b.gasto + (g?.anterior.gasto ?? 0);
+  // o CRM é do cliente inteiro: compara com o investimento de todas as contas, mesmo com uma conta escolhida
+  const gastoMetaTodas = d.porConta.reduce((t, x) => t + x.atual.gasto, 0);
+  const gastoMetaTodasAnt = d.porConta.reduce((t, x) => t + x.anterior.gasto, 0);
+  const gastoTotal = gastoMetaTodas + (g?.atual.gasto ?? 0);
+  const gastoTotalAnterior = gastoMetaTodasAnt + (g?.anterior.gasto ?? 0);
+  const contasComDados = d.contas.filter((x) => x.ativa_sync !== false || d.porConta.some((p) => p.contaId === x.id && p.atual.gasto > 0));
 
   return (
     <div className="space-y-6">
@@ -185,7 +194,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
       </nav>
 
       <div className="flex justify-end">
-        <SeletorPeriodo atual={atual} base={base} />
+        <SeletorPeriodo atual={{ ...atual, qs: qsPeriodo }} base={base} extra={mconta ? { mconta } : {}} />
       </div>
       {busca.msg && <Aviso>{busca.msg}</Aviso>}
 
@@ -219,7 +228,11 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
         onde: r.destino?.conjunto ? `no conjunto “${r.destino.conjunto.nome}”` : r.destino ? `na campanha “${r.destino.campanhaNome}”` : "campanha nova",
       }))} />
 
-      <h2 className="text-lg font-bold">Meta Ads</h2>
+      <h2 id="meta" className="text-lg font-bold">Meta Ads{d.contaFiltrada && <span className="text-sm font-medium text-texto-3"> · {d.contas.find((x) => x.id === d.contaFiltrada)?.nome}</span>}</h2>
+      {contasComDados.length > 1 && (
+        <ContasDoCliente contas={contasComDados} porConta={d.porConta} selecionada={d.contaFiltrada} cplMeta={c.cpl_meta}
+          link={(conta) => `${base}?${qsPeriodo}${conta ? `&mconta=${conta}` : ""}#meta`} />
+      )}
       <PuxarHistoricoMeta contas={contasSync.map((x) => ({ id: x.id, nome: x.nome }))} desde={atual.desde} ate={atual.ate} primeiroDia={primeiroDia} />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi rotulo="Investido" valor={dinheiro(a.gasto)} serie={d.serie.map((x) => x.gasto)}><Variacao atual={a.gasto} anterior={b.gasto} neutro /></Kpi>
@@ -1011,5 +1024,40 @@ function MotivosPerda({ m }: { m: DetalheCrm["motivosPerda"] }) {
         </ul>
       )}
     </section>
+  );
+}
+
+/** Clientes com mais de uma conta de anúncio: os números de cada uma e o filtro (clicar mostra só aquela conta). */
+function ContasDoCliente({ contas, porConta, selecionada, cplMeta, link }: {
+  contas: { id: string; nome: string }[];
+  porConta: { contaId: string; atual: { gasto: number; resultados: number; cpr: number | null; ctr: number | null }; anterior: { gasto: number; resultados: number; cpr: number | null } }[];
+  selecionada: string | null; cplMeta: number | null; link: (conta: string | null) => string;
+}) {
+  const total = porConta.reduce((t, x) => ({ gasto: t.gasto + x.atual.gasto, resultados: t.resultados + x.atual.resultados }), { gasto: 0, resultados: 0 });
+  const cartao = (ativo: boolean) => `min-w-[190px] flex-1 rounded-xl border p-3 text-sm ${ativo ? "border-destaque bg-destaque-bg/40" : "border-borda bg-superficie hover:border-destaque/60"}`;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap gap-2">
+        <Link href={link(null)} className={cartao(!selecionada)}>
+          <div className="font-semibold">Todas as contas</div>
+          <div className="text-xs text-texto-3">{dinheiro(total.gasto)} · {inteiro(total.resultados)} result. · {dinheiro(total.resultados ? total.gasto / total.resultados : null)}/result.</div>
+        </Link>
+        {contas.map((c) => {
+          const n = porConta.find((x) => x.contaId === c.id);
+          const caro = cplMeta != null && n?.atual.cpr != null && n.atual.cpr > cplMeta;
+          return (
+            <Link key={c.id} href={link(c.id)} className={cartao(selecionada === c.id)}>
+              <div className="truncate font-semibold" title={c.nome}>{c.nome}</div>
+              <div className="text-xs text-texto-3">
+                {dinheiro(n?.atual.gasto ?? 0)} · {inteiro(n?.atual.resultados ?? 0)} result. ·{" "}
+                <span className={caro ? "text-critico" : ""}>{dinheiro(n?.atual.cpr ?? null)}/result.</span>
+                {n?.atual.ctr != null && <> · CTR {pct(n.atual.ctr)}</>}
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+      <p className="text-xs text-texto-3">Clique numa conta para ver só ela (números, gráficos e tabelas). O CRM continua mostrando o cliente inteiro.</p>
+    </div>
   );
 }

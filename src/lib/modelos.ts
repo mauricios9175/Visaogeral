@@ -41,6 +41,8 @@ export type ConjuntoMeta = {
   idadeMax: number;
   generos: "todos" | "homens" | "mulheres";
   advantage: boolean;     // público Advantage+ (o Meta pode ampliar além dos interesses)
+  /** Advantage+: idade mínima "de verdade" (controle, até 25); a faixa idadeMin–idadeMax vira a sugestão (age_range) */
+  idadeControle?: number;
   interesses: Interesse[];
   /**
    * Partes da segmentação que o painel não edita, copiadas do conjunto original (exclusões de locais, públicos

@@ -12,7 +12,7 @@ import { criarFormulario } from "./meta-montar";
 // O que o painel não sabe editar (públicos personalizados, exclusões, posicionamentos…) é mantido como está.
 
 type Targeting = Record<string, unknown> & {
-  age_min?: number; age_max?: number; genders?: number[];
+  age_min?: number; age_max?: number; genders?: number[]; age_range?: number[];
   geo_locations?: Record<string, unknown> & {
     cities?: { key: string; name?: string; region?: string; radius?: number; distance_unit?: string }[];
     regions?: { key: string; name?: string }[];
@@ -96,7 +96,11 @@ function lerPublico(t: Targeting) {
   const generos: ConjuntoMeta["generos"] = t.genders?.length === 1 ? (t.genders[0] === 1 ? "homens" : "mulheres") : "todos";
   const publico: ConjuntoMeta = {
     ...CONJUNTO_PADRAO, nome: "", orcamentoDiario: 0,
-    idadeMin: t.age_min ?? 18, idadeMax: t.age_max ?? 65, generos,
+    // Advantage+: a faixa que você vê no Gerenciador é a sugestão (age_range); age_min/age_max são o controle (18–65)
+    ...(t.targeting_automation?.advantage_audience === 1 && Array.isArray(t.age_range) && t.age_range.length === 2
+      ? { idadeMin: Number(t.age_range[0]), idadeMax: Number(t.age_range[1]), idadeControle: t.age_min ?? 18 }
+      : { idadeMin: t.age_min ?? 18, idadeMax: t.age_max ?? 65 }),
+    generos,
     advantage: t.targeting_automation?.advantage_audience === 1, interesses,
     ...(Object.keys(extras).length ? { extras } : {}),
     ...(Object.keys(geoExtra).length ? { geoExtra } : {}),

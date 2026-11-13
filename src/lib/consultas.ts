@@ -260,21 +260,25 @@ async function itensRecentesDoCliente(contas: ContaAnuncio[]) {
 }
 
 /** Tudo que a tela do cliente precisa: totais, série diária e tabelas por nível. */
-export async function detalheCliente(clienteId: string, atual: Periodo, anterior: Periodo, opcoes: { recentes?: boolean } = {}) {
+export async function detalheCliente(clienteId: string, atual: Periodo, anterior: Periodo, opcoes: { recentes?: boolean; conta?: string | null } = {}) {
   const banco = db();
   const { data: cliente } = await banco.from("clientes").select("*").eq("id", clienteId).maybeSingle();
   if (!cliente) return null;
   const { data: contas } = await banco.from("contas_anuncio").select("*").eq("cliente_id", clienteId);
-  const ids = ((contas ?? []) as ContaAnuncio[]).map((c) => c.id);
+  // ?conta=…: só uma conta de anúncio do cliente (clientes com mais de uma conta)
+  const todasIds = ((contas ?? []) as ContaAnuncio[]).map((c) => c.id);
+  const ids = opcoes.conta && todasIds.includes(opcoes.conta) ? [opcoes.conta] : todasIds;
 
-  const brutas = ids.length
+  const brutas = todasIds.length
     ? await buscarTudo<LinhaAnuncio>((de, ate) =>
         banco.from("metricas_diarias").select("*")
-          .in("conta_id", ids).gte("data", anterior.desde).lte("data", atual.ate)
+          .in("conta_id", todasIds).gte("data", anterior.desde).lte("data", atual.ate)
           .order("data").range(de, ate),
       )
     : [];
-  const linhas = brutas.map(comTipos);
+  const linhasTodas = brutas.map(comTipos);
+  // com uma conta escolhida, os números e as tabelas são só dela (o resumo por conta usa todas)
+  const linhas = linhasTodas.filter((l) => ids.includes(l.conta_id));
   // Status é informativo: se a tabela ainda não existir ou falhar, a tela abre sem os selos.
   const lerStatus = (colunas: string) => buscarTudo<InfoStatus & { id: string }>((de, ate) =>
     banco.from("status_meta").select(colunas).in("conta_id", ids).range(de, ate),
@@ -305,7 +309,7 @@ export async function detalheCliente(clienteId: string, atual: Periodo, anterior
   const anuncios = agrupar(doAtual, (l) => [l.ad_id, l.ad_nome, l.adset_nome], status);
   // criados/duplicados há pouco e ainda sem gasto: não estão nos insights; vêm do Meta, com os números zerados
   if (opcoes.recentes && atual.ate >= somarDiasISO(hojeISO(), -1)) {
-    const recentes = await itensRecentesDoCliente((contas ?? []) as ContaAnuncio[]);
+    const recentes = await itensRecentesDoCliente(((contas ?? []) as ContaAnuncio[]).filter((c) => ids.includes(c.id)));
     const ja = new Set([...campanhas, ...conjuntos, ...anuncios].map((x) => x.id));
     const zerado = derivar({ ...ZERO });
     for (const r of recentes) {
@@ -319,9 +323,17 @@ export async function detalheCliente(clienteId: string, atual: Periodo, anterior
       (r.nivel === "campanha" ? campanhas : r.nivel === "conjunto" ? conjuntos : anuncios).push(linha);
     }
   }
+  // números de cada conta (para o resumo por conta, quando o cliente tem mais de uma)
+  const porConta = todasIds.map((contaId) => ({
+    contaId,
+    atual: derivar(linhasTodas.filter((l) => l.conta_id === contaId && l.data >= atual.desde).reduce(somar, { ...ZERO })),
+    anterior: derivar(linhasTodas.filter((l) => l.conta_id === contaId && l.data <= anterior.ate).reduce(somar, { ...ZERO })),
+  }));
   return {
     cliente: cliente as Cliente,
     contas: (contas ?? []) as ContaAnuncio[],
+    contaFiltrada: ids.length === 1 && todasIds.length > 1 ? ids[0] : null,
+    porConta,
     atual: derivar(doAtual.reduce(somar, { ...ZERO })),
     anterior: derivar(doAnterior.reduce(somar, { ...ZERO })),
     serie,

@@ -292,8 +292,8 @@ export function CartaoConjunto({ indice, conjunto, conta, comOrcamento, podeRemo
       </div>
       {conjunto.advantage && (
         <p className={dica}>
-          Com o Advantage+, o Meta trata idade e interesses como sugestão e exige faixa até 65 anos (mínima de no máximo 25).
-          Para travar idade e interesses, desligue.
+          Com o Advantage+, a idade acima vai como <b>sugestão de idade</b> (igual ao Gerenciador) e o Meta pode ir além dela;
+          o limite real fica {conjunto.idadeControle ?? Math.min(conjunto.idadeMin, 25)}–65 anos. Para travar idade e interesses, desligue.
         </p>
       )}
       <div className="space-y-1">
