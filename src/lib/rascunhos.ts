@@ -9,7 +9,11 @@ import { CONJUNTO_PADRAO, normalizarConfig, WHATSAPP_PADRAO, type ConfigFormular
 // (nomes, públicos, textos, mídia) e só no fim publica. Assim tudo nasce com o nome certo, sem " - cópia".
 // Guardados em configuracoes ("rascunhos:<cliente>"), sem precisar de SQL.
 
-export type CriativoRascunho = { caminho: string; nome: string; tipo: string; tamanho: number; videoId?: string; hash?: string; conta?: string; miniatura?: string | null };
+export type CriativoRascunho = {
+  caminho: string; nome: string; tipo: string; tamanho: number; videoId?: string; hash?: string; conta?: string; miniatura?: string | null;
+  // copy própria do anúncio (na cópia de um conjunto com vários anúncios, cada um mantém a sua)
+  nomeAnuncio?: string; texto?: string; titulo?: string; descricao?: string;
+};
 
 export type DestinoRascunho = {
   conta: string; campanhaId: string; campanhaNome: string; orcamentoNaCampanha: boolean;
@@ -106,22 +110,23 @@ export async function rascunhoDeMeta(clienteId: string, contaId: string, token: 
     const m = a.criativo.midia;
     if (a.criativo.tipo === "post") { avisos.push(`“${a.nome}” usa uma publicação da página: suba a mídia de novo para ele.`); continue; }
     if (m.tipo === "varias") avisos.push(`“${a.nome}” tem várias mídias: veio só a primeira.`);
-    if (m.videoId) criativos.push({ caminho: "", nome: a.nome, tipo: "video/mp4", tamanho: 0, videoId: m.videoId, conta: contaId, miniatura: m.miniatura });
-    else if (m.imagemHash) criativos.push({ caminho: "", nome: a.nome, tipo: "image/jpeg", tamanho: 0, hash: m.imagemHash, conta: contaId, miniatura: m.miniatura });
+    const copy = { nomeAnuncio: a.nome, texto: a.criativo.textos[0] ?? "", titulo: a.criativo.titulos[0] ?? "", descricao: a.criativo.descricoes[0] ?? "" };
+    if (m.videoId) criativos.push({ caminho: "", nome: a.nome, tipo: "video/mp4", tamanho: 0, videoId: m.videoId, conta: contaId, miniatura: m.miniatura, ...copy });
+    else if (m.imagemHash) criativos.push({ caminho: "", nome: a.nome, tipo: "image/jpeg", tamanho: 0, hash: m.imagemHash, conta: contaId, miniatura: m.miniatura, ...copy });
     else { avisos.push(`Não achei a mídia de “${a.nome}”: escolha de novo.`); continue; }
     usados.push(a);
   }
   const ref = usados[0]?.criativo ?? anuncios[0]?.criativo;
   // textos: um por anúncio, na mesma ordem dos criativos (a montagem usa o texto i no criativo i)
-  const textos = usados.map((a) => a.criativo.textos[0] ?? "").slice(0, 5);
-  const titulos = usados.map((a) => a.criativo.titulos[0] ?? "").slice(0, 5);
-  if (usados.length > 5) avisos.push("Mais de 5 anúncios: a partir do 6º, os textos se repetem a partir do 1º.");
+  // cada anúncio leva a sua copy no criativo; o texto "do modelo" fica com o do 1º (vale para criativos novos que você incluir)
+  const textos = usados.slice(0, 1).map((a) => a.criativo.textos[0] ?? "");
+  const titulos = usados.slice(0, 1).map((a) => a.criativo.titulos[0] ?? "");
 
   const conjuntosMeta: ConjuntoMeta[] = conjuntos.map((c) => ({
     ...c.publico, nome: c.nome,
     orcamentoDiario: c.orcamento?.tipo === "dia" ? c.orcamento.valor : CONJUNTO_PADRAO.orcamentoDiario,
   }));
-  if (conjuntos.some((c) => c.mantidos.length)) avisos.push(`Fica de fora da cópia (o painel não monta): ${[...new Set(conjuntos.flatMap((c) => c.mantidos))].join(", ")}.`);
+  if (conjuntos.some((c) => c.mantidos.length)) avisos.push(`Vai igual ao original (não dá para editar aqui, mas não se perde): ${[...new Set(conjuntos.flatMap((c) => c.mantidos))].join(", ")}.`);
   if (conjuntos.length > 1 && conjuntos.some((c) => JSON.stringify(c.locais) !== JSON.stringify(conjuntos[0].locais))) {
     avisos.push("Os conjuntos tinham locais diferentes: no rascunho, todos ficam com os locais do primeiro.");
   }

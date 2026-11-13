@@ -477,11 +477,14 @@ export function segmentacao(c: ConfigMeta, p: ConjuntoMeta) {
   const regioes = c.locais.filter((l) => l.tipo === "region").map((l) => ({ key: l.key }));
   const paises = c.locais.filter((l) => l.tipo === "country").map((l) => l.key);
   return {
+    // extras do conjunto copiado (exclusões de locais, públicos personalizados, posicionamentos…): do jeito que estavam
+    ...(p.extras ?? {}),
     geo_locations: {
+      location_types: ["home", "recent"],
+      ...(p.geoExtra ?? {}),
       ...(cidades.length && { cities: cidades }),
       ...(regioes.length && { regions: regioes }),
       ...(paises.length && { countries: paises }),
-      location_types: ["home", "recent"],
     },
     // com o público Advantage+ ligado, o Meta exige idade máxima 65 e mínima de até 25 (a idade vira sugestão)
     age_min: p.advantage ? Math.min(p.idadeMin, 25) : p.idadeMin,
@@ -496,7 +499,8 @@ export function segmentacao(c: ConfigMeta, p: ConjuntoMeta) {
 export type DadosMontagem = {
   contaId: string; token: string; clienteNome: string; objetivo: ObjetivoMeta; config: ConfigMeta;
   paginaId: string; instagramId: string | null; formularioId: string | null; pixelId: string | null;
-  criativos: { caminho: string; nome: string; tipo: string; videoId?: string; hash?: string }[];
+  /** cada criativo pode ter a copy própria (nome do anúncio, texto, título, descrição); sem ela, vale a do modelo */
+  criativos: { caminho: string; nome: string; tipo: string; videoId?: string; hash?: string; nomeAnuncio?: string; texto?: string; titulo?: string; descricao?: string }[];
   /** objetivo formulário: em vez de um formulário existente, cria um novo na página a partir deste modelo */
   modeloFormulario?: ConfigFormulario | null;
   /** se nenhum anúncio puder ser criado, manter campanha, conjuntos e formulário (pausados) em vez de desfazer */
@@ -619,7 +623,8 @@ export async function montarNoMeta(d: DadosMontagem) {
         const midia = !ehVideo ? { hash: cr.hash ?? await subirImagem(d.contaId, d.token, cr.caminho) }
           : cr.videoId ? await esperarVideo(cr.videoId, d.token, cr.nome)
           : await subirVideo(d.contaId, d.token, cr.caminho, cr.nome);
-        const nomeCriativo = aplicarNome(c.nomeAnuncio, { ...nomeBase, conjunto: "" }).replace(/\s*-\s*$/, "");
+        const padraoNome = cr.nomeAnuncio?.trim() || c.nomeAnuncio;
+        const nomeCriativo = aplicarNome(padraoNome, { ...nomeBase, conjunto: "" }).replace(/\s*-\s*$/, "");
         const link =
           d.objetivo === "site" ? c.url
           : d.objetivo === "mensagens" ? "https://api.whatsapp.com/send"
@@ -629,8 +634,9 @@ export async function montarNoMeta(d: DadosMontagem) {
           d.objetivo === "formulario" ? { type: c.cta, value: { link, lead_gen_form_id: d.formularioId } }
           : d.objetivo === "mensagens" ? (ehVideo ? { type: "WHATSAPP_MESSAGE" } : { type: "WHATSAPP_MESSAGE", value: { app_destination: "WHATSAPP" } })
           : { type: c.cta, value: { link } };
-        const texto = textos.length ? textos[i % textos.length] : "";
-        const titulo = titulos.length ? titulos[i % titulos.length] : "";
+        const texto = cr.texto?.trim() ? cr.texto : textos.length ? textos[i % textos.length] : "";
+        const titulo = cr.titulo?.trim() ? cr.titulo : titulos.length ? titulos[i % titulos.length] : "";
+        const descricao = cr.descricao?.trim() ? cr.descricao : c.descricao;
         const story = ehVideo
           ? { page_id: d.paginaId, video_data: {
               video_id: (midia as { id: string }).id, image_url: (midia as { miniatura: string }).miniatura,
@@ -638,7 +644,7 @@ export async function montarNoMeta(d: DadosMontagem) {
             } }
           : { page_id: d.paginaId, link_data: {
               image_hash: (midia as { hash: string }).hash, link, message: texto, name: titulo,
-              ...(c.descricao && { description: c.descricao }), call_to_action: cta,
+              ...(descricao && { description: descricao }), call_to_action: cta,
             } };
         if (d.instagramId) Object.assign(story, { instagram_user_id: d.instagramId });
         // WhatsApp: modelo de mensagem (saudação + mensagem pré-preenchida ou perguntas rápidas)
@@ -653,7 +659,7 @@ export async function montarNoMeta(d: DadosMontagem) {
         for (const cj of conjuntos) {
           try {
             await postMeta(`${d.contaId}/ads`, d.token, {
-              name: aplicarNome(c.nomeAnuncio, { ...nomeBase, conjunto: cj.nome }),
+              name: aplicarNome(padraoNome, { ...nomeBase, conjunto: cj.nome }),
               adset_id: cj.id, status: "PAUSED", creative: JSON.stringify({ creative_id: criativo.id }),
             });
             anuncios++;

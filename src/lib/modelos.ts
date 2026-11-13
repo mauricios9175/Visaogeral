@@ -42,6 +42,13 @@ export type ConjuntoMeta = {
   generos: "todos" | "homens" | "mulheres";
   advantage: boolean;     // público Advantage+ (o Meta pode ampliar além dos interesses)
   interesses: Interesse[];
+  /**
+   * Partes da segmentação que o painel não edita, copiadas do conjunto original (exclusões de locais, públicos
+   * personalizados, posicionamentos, idiomas…): vão do jeito que estavam. `geoExtra` fica dentro de geo_locations.
+   */
+  extras?: Record<string, unknown>;
+  geoExtra?: Record<string, unknown>;
+  mantidos?: string[]; // o que veio nos extras, em português (para mostrar na tela)
 };
 
 export type ConfigMeta = {

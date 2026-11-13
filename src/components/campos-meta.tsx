@@ -250,6 +250,11 @@ export function CartaoConjunto({ indice, conjunto, conta, comOrcamento, podeRemo
   const set = <K extends keyof ConjuntoMeta>(k: K, v: ConjuntoMeta[K]) => onChange({ ...conjunto, [k]: v });
   return (
     <div className="space-y-3 rounded-lg border border-borda bg-fundo p-3">
+      {!!conjunto.mantidos?.length && (
+        <p className="rounded-md bg-superficie-2 px-2 py-1 text-xs text-texto-2">
+          Vai igual ao original (copiado do conjunto, não editável aqui): <b>{conjunto.mantidos.join(", ")}</b>.
+        </p>
+      )}
       <div className="flex flex-wrap items-end gap-2">
         <span className="pb-2 text-xs font-medium text-texto-3">#{indice + 1}</span>
         <label className={`${rotulo} min-w-48 flex-1`}>Nome do conjunto

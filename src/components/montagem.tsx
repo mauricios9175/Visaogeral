@@ -12,7 +12,30 @@ import { CamposFormulario } from "./editor-formulario";
 type Opcao = { id: string; nome: string; arquivado?: boolean };
 type Ativos = { paginas: Opcao[]; instagram: Opcao[]; pixels: Opcao[]; erro?: string };
 /** Criativo enviado: imagem fica no Storage (caminho); vídeo vai direto para o Meta da conta (videoId). */
-export type Criativo = { caminho: string; nome: string; tipo: string; tamanho: number; videoId?: string; conta?: string; hash?: string; miniatura?: string | null };
+export type Criativo = {
+  caminho: string; nome: string; tipo: string; tamanho: number; videoId?: string; conta?: string; hash?: string; miniatura?: string | null;
+  // copy própria deste anúncio (sem ela, vale a do modelo, lá embaixo)
+  nomeAnuncio?: string; texto?: string; titulo?: string; descricao?: string;
+};
+
+const temCopy = (c: Criativo) => [c.nomeAnuncio, c.texto, c.titulo, c.descricao].some((x) => x?.trim());
+
+/** Copy própria do anúncio: nome, texto principal, título e descrição deste criativo. */
+function CopyDoAnuncio({ c, onChange }: { c: Criativo; onChange: (c: Criativo) => void }) {
+  const caixa = "w-full rounded-lg border border-borda bg-fundo px-3 py-2 text-sm";
+  return (
+    <div className="grid gap-2 rounded-lg border border-borda bg-fundo/60 p-3 md:grid-cols-2">
+      <label className="block space-y-1 text-xs text-texto-3 md:col-span-2">Nome do anúncio
+        <input value={c.nomeAnuncio ?? ""} onChange={(e) => onChange({ ...c, nomeAnuncio: e.target.value })} placeholder="(o do modelo)" className={caixa} /></label>
+      <label className="block space-y-1 text-xs text-texto-3 md:col-span-2">Texto principal
+        <textarea value={c.texto ?? ""} onChange={(e) => onChange({ ...c, texto: e.target.value })} rows={4} placeholder="(o do modelo)" className={caixa} /></label>
+      <label className="block space-y-1 text-xs text-texto-3">Título
+        <input value={c.titulo ?? ""} onChange={(e) => onChange({ ...c, titulo: e.target.value })} placeholder="(o do modelo)" className={caixa} /></label>
+      <label className="block space-y-1 text-xs text-texto-3">Descrição
+        <input value={c.descricao ?? ""} onChange={(e) => onChange({ ...c, descricao: e.target.value })} placeholder="(a do modelo)" className={caixa} /></label>
+    </div>
+  );
+}
 export type Padroes = Partial<{ conta: string; pagina: string; instagram: string; formulario: string; pixel: string; locais: ConfigMeta["locais"] }>;
 
 const botao = "rounded-lg border border-borda bg-superficie px-3 py-1.5 text-sm hover:border-destaque disabled:opacity-60";
@@ -69,6 +92,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
   const [formulario, setFormulario] = useState(
     rascunho?.formulario || padroes.formulario || (modelosFormulario[0] ? `modelo:${modelosFormulario[0].id}` : ""));
   const [criativos, setCriativos] = useState<Criativo[]>(rascunho?.criativos ?? []);
+  const [copyAberta, setCopyAberta] = useState<number | null>(null);
   // rascunho: salvo sozinho enquanto você edita (só publica no Meta quando você mandar)
   const [rascunhoId, setRascunhoId] = useState<string | null>(rascunho?.id ?? null);
   const [tituloRascunho, setTituloRascunho] = useState(rascunho?.titulo ?? "");
@@ -374,7 +398,8 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
         {criativos.length > 0 && (
           <ul className="divide-y divide-borda text-sm">
             {criativos.map((c, i) => (
-              <li key={c.caminho || c.videoId || c.hash} className="flex items-center gap-3 py-1.5">
+              <li key={c.caminho || c.videoId || c.hash} className="space-y-2 py-2">
+              <div className="flex items-center gap-3">
                 <span className="w-6 text-texto-3">{i + 1}</span>
                 {c.miniatura
                   // eslint-disable-next-line @next/next/no-img-element
@@ -388,12 +413,24 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
                   {(c.videoId || c.hash) && c.conta !== conta && <span className="ml-2 text-xs text-critico">é de outra conta: remova e escolha de novo</span>}
                 </span>
                 <span className="text-xs text-texto-3">{c.tamanho ? tamanho(c.tamanho) : ""}</span>
+                <button type="button" onClick={() => setCopyAberta((a) => (a === i ? null : i))}
+                  className={`rounded px-2 py-0.5 text-xs ${temCopy(c) ? "bg-destaque-bg font-semibold text-destaque" : "text-texto-3 hover:text-texto"}`}>
+                  {copyAberta === i ? "fechar copy" : temCopy(c) ? "copy própria ✎" : "+ copy própria"}
+                </button>
                 <button type="button" onClick={() => setCriativos((x) => x.filter((y) => y !== c))} className="text-texto-3 hover:text-critico">remover</button>
+              </div>
+              {copyAberta === i && <CopyDoAnuncio c={c} onChange={(novo) => setCriativos((x) => x.map((y, j) => (j === i ? novo : y)))} />}
+              {copyAberta !== i && temCopy(c) && (
+                <p className="line-clamp-2 pl-9 text-xs text-texto-3">{c.nomeAnuncio ? <b>{c.nomeAnuncio}: </b> : null}{c.texto}</p>
+              )}
               </li>
             ))}
           </ul>
         )}
-        <p className="text-xs text-texto-3">Cada criativo vira um anúncio em cada conjunto, com os textos do modelo. Normalmente basta um: depois é só duplicar e trocar a imagem.</p>
+        <p className="text-xs text-texto-3">
+          Cada criativo vira um anúncio em cada conjunto. Com <b>copy própria</b>, o anúncio usa o nome, o texto e o título dele; sem, usa os textos do modelo (lá embaixo).
+          {criativos.some(temCopy) && " Na cópia de um conjunto, cada anúncio já vem com a copy que tinha."}
+        </p>
         {biblioteca && (
           <BibliotecaMidia conta={conta} multiplo onFechar={() => setBiblioteca(false)} onEscolher={(itens) => setCriativos((x) => [
             ...x,

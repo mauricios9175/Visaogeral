@@ -85,11 +85,22 @@ function lerPublico(t: Targeting) {
     ...(t.publisher_platforms || t.facebook_positions || t.instagram_positions ? ["posicionamentos manuais"] : []),
     ...(t.locales ? ["idiomas"] : []),
   ];
+  // o que o painel não edita vai junto, do jeito que está (para a cópia sair igual ao original)
+  const CHAVES_MODELADAS = new Set(["age_min", "age_max", "genders", "geo_locations", "flexible_spec", "targeting_automation", "age_range"]);
+  const extras = Object.fromEntries(Object.entries(t).filter(([k, v]) => !CHAVES_MODELADAS.has(k) && v != null));
+  // segmentação detalhada com mais de um bloco (E/OU): o painel não edita, então vai igual
+  if (blocos.length > 1) extras.flexible_spec = t.flexible_spec;
+  // dentro dos locais: tudo menos cidades/regiões/países (que o painel edita); inclui os tipos de local do original
+  const geoExtra = Object.fromEntries(Object.entries(geo).filter(([k, v]) => !["cities", "regions", "countries"].includes(k) && v != null));
+  if (t.excluded_geo_locations) mantidos.unshift("exclusão de locais");
   const generos: ConjuntoMeta["generos"] = t.genders?.length === 1 ? (t.genders[0] === 1 ? "homens" : "mulheres") : "todos";
   const publico: ConjuntoMeta = {
     ...CONJUNTO_PADRAO, nome: "", orcamentoDiario: 0,
     idadeMin: t.age_min ?? 18, idadeMax: t.age_max ?? 65, generos,
     advantage: t.targeting_automation?.advantage_audience === 1, interesses,
+    ...(Object.keys(extras).length ? { extras } : {}),
+    ...(Object.keys(geoExtra).length ? { geoExtra } : {}),
+    ...(mantidos.length ? { mantidos } : {}),
   };
   return { publico, locais, locaisEditaveis: !outrosGeo.length, interessesEditaveis: blocos.length <= 1, mantidos };
 }
