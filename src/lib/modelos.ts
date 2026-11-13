@@ -43,6 +43,8 @@ export type ConjuntoMeta = {
   advantage: boolean;     // público Advantage+ (o Meta pode ampliar além dos interesses)
   /** Advantage+: idade mínima "de verdade" (controle, até 25); a faixa idadeMin–idadeMax vira a sugestão (age_range) */
   idadeControle?: number;
+  /** Locais próprios do conjunto (cópia: os do conjunto original). Quando tem, valem no lugar da localização geral. */
+  locais?: Local[];
   interesses: Interesse[];
   /**
    * Partes da segmentação que o painel não edita, copiadas do conjunto original (exclusões de locais, públicos
@@ -325,9 +327,9 @@ const LOCAIS_COPIADOS: Record<string, string> = {
 type CustomLocation = { address_string?: string; name?: string; latitude?: number; longitude?: number; radius?: number; distance_unit?: string };
 
 /** Descrição em português dos locais copiados de um conjunto (vazio = nenhum). */
-export function locaisCopiados(c: Pick<ConjuntoMeta, "geoExtra">): string[] {
+export function locaisCopiados(c: Pick<ConjuntoMeta, "geoExtra" | "locais" | "extras">): string[] {
   const g = c.geoExtra ?? {};
-  const saida: string[] = [];
+  const saida: string[] = (c.locais ?? []).map((l) => `${l.nome}${l.raio ? ` (+${l.raio} km)` : ""}`);
   for (const [k, rotulo] of Object.entries(LOCAIS_COPIADOS)) {
     const v = g[k];
     if (!Array.isArray(v) || !v.length) continue;
@@ -341,10 +343,14 @@ export function locaisCopiados(c: Pick<ConjuntoMeta, "geoExtra">): string[] {
       saida.push(`${rotulo}: ${v.length}`);
     }
   }
+  // exclusões (para você conferir o que fica de fora)
+  const ex = ((c.extras ?? {}).excluded_geo_locations ?? {}) as Record<string, unknown>;
+  const nomesEx = Object.values(ex).flatMap((v) => (Array.isArray(v) ? v.map((x) => (typeof x === "string" ? x : (x as { name?: string; key?: string }).name ?? (x as { key?: string }).key ?? "")) : [])).filter(Boolean);
+  if (saida.length && nomesEx.length) saida.push(`excluindo ${nomesEx.slice(0, 6).join(", ")}${nomesEx.length > 6 ? ` e mais ${nomesEx.length - 6}` : ""}`);
   return saida;
 }
 
-/** Algum conjunto tem locais copiados do original (então a montagem não precisa de cidade escolhida)? */
-export function temLocaisCopiados(conjuntos: Pick<ConjuntoMeta, "geoExtra">[]) {
-  return conjuntos.some((c) => locaisCopiados(c).length > 0);
+/** Todos os conjuntos têm local próprio (copiado do original), então a montagem não precisa de cidade escolhida? */
+export function temLocaisCopiados(conjuntos: Pick<ConjuntoMeta, "geoExtra" | "locais">[]) {
+  return conjuntos.length > 0 && conjuntos.every((c) => (c.locais?.length ?? 0) > 0 || locaisCopiados(c).length > 0);
 }

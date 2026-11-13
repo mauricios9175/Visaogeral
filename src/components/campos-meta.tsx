@@ -184,7 +184,7 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
                   <li key={i}>{valor.conjuntos.length > 1 ? `${c.nome || `Conjunto ${i + 1}`}: ` : ""}{locaisCopiados(c).join(" · ")}</li>
                 ))}
               </ul>
-              <span className="text-texto-3">Se escolher cidades aqui também, elas entram junto.</span>
+              <span className="text-texto-3">A localização abaixo vale só para conjuntos novos que você adicionar (os copiados usam os locais deles).</span>
             </div>
           )}
           <CampoLocais valor={valor.locais} onChange={(v) => set("locais", v)} conta={conta} />

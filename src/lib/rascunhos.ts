@@ -143,20 +143,21 @@ export async function rascunhoDeMeta(
     return { ...c.publico, extras, mantidos };
   }).map((publico, i) => ({
     ...publico, nome: conjuntos[i].nome,
+    // os locais de cada conjunto (cidades, regiões, países) vão com ele: conjuntos com locais diferentes não se misturam
+    locais: conjuntos[i].locais,
     orcamentoDiario: conjuntos[i].orcamento?.tipo === "dia" ? conjuntos[i].orcamento!.valor : CONJUNTO_PADRAO.orcamentoDiario,
   }));
   if (tirouPublicos) avisos.push("Públicos personalizados e semelhantes são da conta de origem: ficaram de fora. Escolha os da conta de destino no Gerenciador depois de publicar.");
   const mantidosTodos = [...new Set(conjuntosMeta.flatMap((c) => c.mantidos ?? []))];
   if (mantidosTodos.length) avisos.push(`Vai igual ao original (não dá para editar aqui, mas não se perde): ${mantidosTodos.join(", ")}.`);
-  if (conjuntos.length > 1 && conjuntos.some((c) => JSON.stringify(c.locais) !== JSON.stringify(conjuntos[0].locais))) {
-    avisos.push("Os conjuntos tinham locais diferentes: no rascunho, todos ficam com os locais do primeiro.");
-  }
+
 
   const config = normalizarConfig({
     nomeCampanha: camp.nome,
     orcamentoEm: camp.orcamento ? "campanha" : "conjunto",
     orcamentoDiario: camp.orcamento?.tipo === "dia" ? camp.orcamento.valor : 30,
-    locais: conjuntos[0]?.locais ?? [],
+    // cada conjunto já leva os próprios locais; a localização geral fica para conjuntos novos que você adicionar
+    locais: [],
     conjuntos: conjuntosMeta.length ? conjuntosMeta : [CONJUNTO_PADRAO],
     nomeAnuncio: "{arquivo}",
     textos: textos.length ? textos : ref?.textos.slice(0, 1) ?? [""],

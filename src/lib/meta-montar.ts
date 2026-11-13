@@ -472,10 +472,16 @@ function agruparPorTipo(itens: Interesse[]) {
 }
 
 export function segmentacao(c: ConfigMeta, p: ConjuntoMeta) {
-  const cidades = c.locais.filter((l) => l.tipo === "city")
+  // locais do próprio conjunto (cópia) valem no lugar da localização geral
+  const locais = p.locais?.length ? p.locais : c.locais;
+  // o que o conjunto exclui não pode estar incluído (o Meta recusa: "localização conflitante")
+  const excl = ((p.extras ?? {}).excluded_geo_locations ?? {}) as { cities?: { key: string }[]; regions?: { key: string }[]; countries?: string[] };
+  const excluidas = new Set([...(excl.cities ?? []).map((x) => `city:${x.key}`), ...(excl.regions ?? []).map((x) => `region:${x.key}`), ...(excl.countries ?? []).map((x) => `country:${x}`)]);
+  const valem = locais.filter((l) => !excluidas.has(`${l.tipo}:${l.key}`));
+  const cidades = valem.filter((l) => l.tipo === "city")
     .map((l) => (l.raio ? { key: l.key, radius: l.raio, distance_unit: "kilometer" } : { key: l.key }));
-  const regioes = c.locais.filter((l) => l.tipo === "region").map((l) => ({ key: l.key }));
-  const paises = c.locais.filter((l) => l.tipo === "country").map((l) => l.key);
+  const regioes = valem.filter((l) => l.tipo === "region").map((l) => ({ key: l.key }));
+  const paises = valem.filter((l) => l.tipo === "country").map((l) => l.key);
   return {
     // extras do conjunto copiado (exclusões de locais, públicos personalizados, posicionamentos…): do jeito que estavam
     ...(p.extras ?? {}),
