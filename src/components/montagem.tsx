@@ -5,7 +5,7 @@ import { BibliotecaMidia, PlayerVideo } from "./midia-meta";
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { montarCampanhaMeta, type ResultadoMontagem } from "@/app/acoes-montagem";
 import type { Rascunho } from "@/lib/rascunhos";
-import { configDoZero, FORMULARIO_PADRAO, normalizarConfig, OBJETIVOS, type ObjetivoMeta, type ConfigFormulario, type ConfigMeta, type Modelo } from "@/lib/modelos";
+import { configDoZero, FORMULARIO_PADRAO, normalizarConfig, OBJETIVOS, temLocaisCopiados, type ObjetivoMeta, type ConfigFormulario, type ConfigMeta, type Modelo } from "@/lib/modelos";
 import { CamposMeta, campo } from "./campos-meta";
 import { CamposFormulario } from "./editor-formulario";
 
@@ -253,7 +253,7 @@ export function Montagem({ clienteId, clienteNome, contas, modelos: todosModelos
     !pagina ? "Escolha a página do Facebook." :
     objetivo === "formulario" && !formulario ? "Escolha o formulário." :
     objetivo === "site" && !config.url ? "Informe o link do site." :
-    !soAnuncios && !config.locais.length ? "Escolha pelo menos uma localização." :
+    !soAnuncios && !config.locais.length && !temLocaisCopiados(config.conjuntos) ? "Escolha pelo menos uma localização." :
     soAnuncios && !criativosDaConta.length ? "Escolha pelo menos um criativo." :
     !semCriativo && !config.textos.some((t) => t.trim()) ? "Escreva o texto principal." : null;
 

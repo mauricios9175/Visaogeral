@@ -2,8 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  CONJUNTO_PADRAO, CTAS, PARAMETROS_URL_PADRAO, TIPOS_SEGMENTACAO, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type MensagemWhatsApp, type ObjetivoMeta,
-} from "@/lib/modelos";
+  CONJUNTO_PADRAO, CTAS, PARAMETROS_URL_PADRAO, TIPOS_SEGMENTACAO, type ConfigMeta, type ConjuntoMeta, type Interesse, type Local, type MensagemWhatsApp, type ObjetivoMeta, locaisCopiados } from "@/lib/modelos";
 
 const publico = (n?: number) =>
   !n ? "" : n >= 1e6 ? `${(n / 1e6).toFixed(1).replace(".", ",")} mi` : n >= 1e3 ? `${Math.round(n / 1e3)} mil` : String(n);
@@ -177,6 +176,17 @@ export function CamposMeta({ objetivo, valor, onChange, conta, naMontagem = fals
         <legend className="mb-2 text-sm font-medium">Localização <span className="font-normal text-texto-3">(vale para todos os conjuntos)</span></legend>
         <div className="space-y-1">
           {!naMontagem && <span className={dica}>Opcional no modelo; na montagem você escolhe a cidade do cliente.</span>}
+          {valor.conjuntos.some((c) => locaisCopiados(c).length) && (
+            <div className="rounded-md bg-superficie-2 px-3 py-2 text-xs text-texto-2">
+              <b>Locais copiados do original</b> (vão do jeito que estavam; não precisa escolher cidade):
+              <ul className="mt-1 list-disc pl-5">
+                {valor.conjuntos.map((c, i) => locaisCopiados(c).length > 0 && (
+                  <li key={i}>{valor.conjuntos.length > 1 ? `${c.nome || `Conjunto ${i + 1}`}: ` : ""}{locaisCopiados(c).join(" · ")}</li>
+                ))}
+              </ul>
+              <span className="text-texto-3">Se escolher cidades aqui também, elas entram junto.</span>
+            </div>
+          )}
           <CampoLocais valor={valor.locais} onChange={(v) => set("locais", v)} conta={conta} />
         </div>
       </fieldset>

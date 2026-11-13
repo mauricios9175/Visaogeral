@@ -310,3 +310,39 @@ export const FORMULARIO_PADRAO: ConfigFormulario = {
 export function normalizarFormulario(c: Partial<ConfigFormulario> | null | undefined): ConfigFormulario {
   return { ...FORMULARIO_PADRAO, ...(c ?? {}), perguntas: c?.perguntas?.length ? c.perguntas : FORMULARIO_PADRAO.perguntas };
 }
+
+// ---------- Locais copiados de um conjunto (raio em volta de endereço, CEPs, bairros…) ----------
+
+/** Tipos de local do Meta que o painel não edita, mas que vêm na cópia de um conjunto (dentro de geoExtra). */
+const LOCAIS_COPIADOS: Record<string, string> = {
+  custom_locations: "raio em volta de endereço/ponto", zips: "CEPs", places: "lugares", neighborhoods: "bairros",
+  subcities: "distritos", metros: "regiões metropolitanas", geo_markets: "mercados", electoral_districts: "distritos eleitorais",
+  medium_geo_areas: "áreas", large_geo_areas: "áreas", small_geo_areas: "áreas",
+};
+
+type CustomLocation = { address_string?: string; name?: string; latitude?: number; longitude?: number; radius?: number; distance_unit?: string };
+
+/** Descrição em português dos locais copiados de um conjunto (vazio = nenhum). */
+export function locaisCopiados(c: Pick<ConjuntoMeta, "geoExtra">): string[] {
+  const g = c.geoExtra ?? {};
+  const saida: string[] = [];
+  for (const [k, rotulo] of Object.entries(LOCAIS_COPIADOS)) {
+    const v = g[k];
+    if (!Array.isArray(v) || !v.length) continue;
+    if (k === "custom_locations") {
+      for (const p of v as CustomLocation[]) {
+        const onde = p.address_string || p.name || (p.latitude != null ? `${p.latitude.toFixed(4)}, ${p.longitude?.toFixed(4)}` : "ponto no mapa");
+        const raio = p.radius ? ` (raio de ${p.radius} ${p.distance_unit === "mile" ? "mi" : "km"})` : "";
+        saida.push(`${onde}${raio}`);
+      }
+    } else {
+      saida.push(`${rotulo}: ${v.length}`);
+    }
+  }
+  return saida;
+}
+
+/** Algum conjunto tem locais copiados do original (então a montagem não precisa de cidade escolhida)? */
+export function temLocaisCopiados(conjuntos: Pick<ConjuntoMeta, "geoExtra">[]) {
+  return conjuntos.some((c) => locaisCopiados(c).length > 0);
+}
