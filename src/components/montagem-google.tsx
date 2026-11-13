@@ -11,12 +11,13 @@ import { EsbocoIA } from "./esboco-ia";
 type Opcao = { id: string; nome: string };
 
 /** Montagem de campanha de Pesquisa no Google: modelo (ou do zero / IA) → revisar → criar pausada. */
-export function MontagemGoogle({ clienteId, contas, modelos, pedidoInicial }: {
+export function MontagemGoogle({ clienteId, contas, modelos, pedidoInicial, copia }: {
   clienteId: string; contas: Opcao[]; modelos: (Opcao & { config: ConfigGoogle })[]; pedidoInicial?: string;
+  copia?: { config: ConfigGoogle; origem: string; avisos: string[] } | null; // "copiar e colar" de outra conta
 }) {
   const [conta, setConta] = useState(contas[0]?.id ?? "");
-  const [modeloId, setModeloId] = useState(pedidoInicial ? "zero" : modelos[0]?.id ?? "zero");
-  const [config, setConfig] = useState<ConfigGoogle>(() => normalizarGoogle(pedidoInicial ? CONFIG_GOOGLE_PADRAO : modelos[0]?.config ?? CONFIG_GOOGLE_PADRAO));
+  const [modeloId, setModeloId] = useState(pedidoInicial || copia ? "zero" : modelos[0]?.id ?? "zero");
+  const [config, setConfig] = useState<ConfigGoogle>(() => normalizarGoogle(copia ? copia.config : pedidoInicial ? CONFIG_GOOGLE_PADRAO : modelos[0]?.config ?? CONFIG_GOOGLE_PADRAO));
   const [salvarModeloComo, setSalvarModeloComo] = useState("");
   const [imagens, setImagens] = useState<ImagemPmax[]>([]);
   const [resultado, enviar, montando] = useActionState<ResultadoGoogle | null, FormData>(montarCampanhaGoogle, null);
@@ -36,6 +37,12 @@ export function MontagemGoogle({ clienteId, contas, modelos, pedidoInicial }: {
     ?? (pmax && !imagens.some((i) => i.tipo === "quadrada") ? "Escolha pelo menos uma imagem quadrada." : null);
   return (
     <div className="space-y-6">
+      {copia && (
+        <section className="space-y-1 rounded-2xl border border-destaque/50 bg-destaque-bg/30 p-4 text-sm">
+          <p><b>Colando a campanha “{copia.origem}”.</b> Revise tudo abaixo (nome, orçamento, locais, links) e escolha a conta onde ela vai ser criada. Nada vai para o Google até você publicar, e ela nasce pausada.</p>
+          {copia.avisos.length > 0 && <ul className="list-disc pl-5 text-xs text-texto-2">{copia.avisos.map((a, i) => <li key={i}>{a}</li>)}</ul>}
+        </section>
+      )}
       <EsbocoIA plataforma="google" clienteId={clienteId} pedidoInicial={pedidoInicial} onPronto={(e) => {
         setModeloId("zero");
         setConfig((atual) => normalizarGoogle({ ...e.config, url: e.config.url || atual.url, locais: atual.locais }));

@@ -177,6 +177,12 @@ export function TabelaGoogle({ nivel, linhas, voltar, cpaMedio }: {
                         mostrarOrcamento={l.status !== "REMOVED"} voltar={voltar}
                       />
                     )}
+                    {l.conta && nivel === "campanhas" && (
+                      <Link href={`/copiar-google?${new URLSearchParams({ conta: l.conta, campanha: l.id, nome: l.nome, voltar })}`}
+                        className="mt-1 inline-block text-xs text-texto-3 underline hover:text-destaque" title="Copiar e colar esta campanha em outra conta (como no Google Ads Editor)">
+                        Copiar para…
+                      </Link>
+                    )}
                     {l.conta && nivel !== "campanhas" && (
                       <div className="flex justify-end gap-1.5">
                         {nivel !== "termos" && (l.status === "ENABLED" || l.status === "PAUSED") && (
