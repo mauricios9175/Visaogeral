@@ -81,6 +81,17 @@ jobs:
           done
           true
 
+      # Um pouco de análise de criativo a cada execução (além da rodada da madrugada): o Gemini grátis fica cheio em
+      # alguns horários, então espalhar ao longo do dia faz a fila andar.
+      - name: Análise de criativos (um lote)
+        if: always()
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -sS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/sync?modo=criativos" || true
+          true
+
       # Histórico mensal (substitui a planilha): de madrugada, depois do CRM.
       - name: Atualizar histórico mensal
         if: always() && (github.event.schedule == '17 6 * * *' || github.event_name == 'workflow_dispatch')

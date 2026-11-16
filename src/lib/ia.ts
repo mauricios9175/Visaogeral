@@ -101,19 +101,30 @@ async function gerarGemini(sistema: string, pedido: ParteIA[], opcoes: Opcoes, m
     // modelo sobrecarregado (503) ou instável (500): tenta mais 2 vezes, depois passa para o próximo modelo
     for (let tentativa = 0; tentativa < 3; tentativa++) {
       if (tentativa) await espera(2000 * tentativa);
-      const r = await fetch(`${URL_BASE}/${encodeURIComponent(modelo)}:generateContent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": chave },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: sistema }] },
-          contents: [{ role: "user", parts: partes }],
-          generationConfig: {
-            temperature: opcoes.temperatura ?? 0.4, maxOutputTokens: 8192,
-            ...(opcoes.json && { responseMimeType: "application/json" }),
-          },
-        }),
-        signal: AbortSignal.timeout(opcoes.tempoMs ?? 50_000),
-      });
+      let r: Response;
+      try {
+        r = await fetch(`${URL_BASE}/${encodeURIComponent(modelo)}:generateContent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": chave },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: sistema }] },
+            contents: [{ role: "user", parts: partes }],
+            generationConfig: {
+              temperature: opcoes.temperatura ?? 0.4, maxOutputTokens: 8192,
+              ...(opcoes.json && { responseMimeType: "application/json" }),
+            },
+          }),
+          signal: AbortSignal.timeout(opcoes.tempoMs ?? 90_000),
+        });
+      } catch (e) {
+        // demorou demais (o grátis fica lento quando está cheio): vai para o próximo modelo, que costuma ser mais rápido
+        if (e instanceof Error && /abort|timeout/i.test(`${e.name} ${e.message}`)) {
+          sobrecarga = true;
+          ultimoErro = `${modelo} demorou demais`;
+          break;
+        }
+        throw e;
+      }
       const j = (await r.json().catch(() => ({}))) as RespostaGemini;
       if (r.status === 404) {
         ultimoErro = `modelo ${modelo} não encontrado`;
@@ -136,7 +147,7 @@ async function gerarGemini(sistema: string, pedido: ParteIA[], opcoes: Opcoes, m
     }
   }
   if (limite && !sobrecarga) throw new Error("Bateu o limite gratuito do Gemini. Espere um minuto e tente de novo (se for o limite do dia, só amanhã).");
-  if (sobrecarga) throw new Error("Os modelos gratuitos do Gemini estão sobrecarregados agora (isso costuma passar em alguns minutos). Tente de novo daqui a pouco.");
+  if (sobrecarga) throw new Error("Os modelos gratuitos do Gemini estão sobrecarregados ou lentos agora (isso costuma passar em alguns minutos). Tente de novo daqui a pouco.");
   throw new Error(`Nenhum modelo do Gemini respondeu (${ultimoErro}). Confira GEMINI_MODELO na Vercel.`);
 }
 

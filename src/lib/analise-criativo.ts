@@ -252,6 +252,9 @@ export async function analisarCriativo(adId: string, clienteId: string, ctx: { t
 
 // ---------- Rodada automática (de madrugada): analisa o que ainda não tem análise ----------
 
+/** Erro da IA que passa sozinho (sobrecarga, lentidão, limite): o criativo tenta de novo na próxima rodada. */
+const erroPassageiro = (msg: string) => /limite|sobrecarregad|lent|timeout|aborted|demorou|tente de novo|50[0-9]|429|overloaded|unavailable/i.test(msg);
+
 const MINIMO = { gasto: 20, impressoes: 1000 };
 const REANALISAR_DIAS = 21;
 const TEMPO_MAX_MS = 220_000;
@@ -262,17 +265,18 @@ export async function analisarCriativosPendentes() {
   const { atual } = resolverPeriodo({ p: "30" });
   const todos = await listarCriativos(atual, {});
   const candidatos = todos.filter((c) => c.gasto >= MINIMO.gasto && c.impressoes >= MINIMO.impressoes);
-  const feitas = new Map<string, { em: string; erro: boolean }>();
+  const feitas = new Map<string, { em: string; erro: string | null }>();
   for (let i = 0; i < candidatos.length; i += 200) {
     const { data } = await db().from("configuracoes").select("chave, valor").in("chave", candidatos.slice(i, i + 200).map((c) => chave(c.id)));
-    for (const x of (data ?? []) as { chave: string; valor: AnaliseCriativo & { erro?: string } }[]) feitas.set(x.chave.split(":")[1], { em: x.valor.criadoEm, erro: !!x.valor.erro });
+    for (const x of (data ?? []) as { chave: string; valor: AnaliseCriativo & { erro?: string } }[]) feitas.set(x.chave.split(":")[1], { em: x.valor.criadoEm, erro: x.valor.erro ?? null });
   }
   const dias = (iso: string) => (Date.now() - Date.parse(iso)) / 86_400_000;
   const pendentes = candidatos
     .filter((c) => {
       const f = feitas.get(c.id);
       if (!f) return true;
-      if (f.erro) return dias(f.em) > 3;                      // falhou: tenta de novo depois de 3 dias
+      // falha da IA (lenta, cheia, no limite): tenta de novo na próxima rodada; problema do criativo: depois de 3 dias
+      if (f.erro) return erroPassageiro(f.erro) || dias(f.em) > 3;
       return dias(f.em) > REANALISAR_DIAS && c.status === "ACTIVE"; // análise velha de criativo que segue rodando
     })
     .sort((a, b) => b.gasto - a.gasto);
@@ -287,7 +291,8 @@ export async function analisarCriativosPendentes() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       erros.push(`${c.nome}: ${msg}`);
-      if (/limite|sobrecarregad/i.test(msg)) break; // cota da IA: para por hoje
+      // a IA está cheia/lenta ou no limite: não é culpa do criativo, então não marca nada e para por agora
+      if (erroPassageiro(msg)) break;
       // não deu para analisar (ex.: vídeo grande): marca para não tentar de novo toda noite
       await db().from("configuracoes").upsert({ chave: chave(c.id), valor: { adId: c.id, nome: c.nome, formato: c.formato, criadoEm: new Date().toISOString(), erro: msg }, atualizado_em: new Date().toISOString() }).then(() => null, () => null);
     }
