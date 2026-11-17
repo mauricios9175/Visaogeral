@@ -52,7 +52,7 @@ async function contasPorCliente(clienteId?: string) {
 async function linhas(contas: string[], desde: string, ate: string) {
   if (!contas.length) return [];
   return buscarTudo<LinhaGoogle>((de, a) =>
-    db().from("metricas_google").select("*").in("conta_id", contas).gte("data", desde).lte("data", ate).range(de, a),
+    db().from("metricas_google").select("*").in("conta_id", contas).gte("data", desde).lte("data", ate).order("data").order("conta_id").order("campaign_id").range(de, a),
   );
 }
 
@@ -146,7 +146,7 @@ export async function saldosGoogle(contaIds?: string[]) {
   const contas = [...new Set(recargas.map((r) => r.conta_id))];
   const inicio = recargas.reduce((m, r) => (r.data < m ? r.data : m), hojeISO());
   const gastos = await buscarTudo<{ conta_id: string; data: string; gasto: number }>((de, ate) =>
-    banco.from("metricas_google").select("conta_id, data, gasto").in("conta_id", contas).gte("data", [inicio, somarDias(hojeISO(), -7)].sort()[0]).range(de, ate),
+    banco.from("metricas_google").select("conta_id, data, gasto").in("conta_id", contas).gte("data", [inicio, somarDias(hojeISO(), -7)].sort()[0]).order("data").order("conta_id").order("campaign_id").range(de, ate),
   );
   const ini7 = somarDias(hojeISO(), -7), ontem = somarDias(hojeISO(), -1);
   const mapa = new Map<string, SaldoGoogle>();

@@ -231,7 +231,7 @@ export async function gerarRelatorios(tipo: TipoRelatorio, empresa: string | nul
     ? await buscarTudo<Linha>((de, ate) =>
         banco.from("metricas_diarias")
           .select("conta_id, data, ad_id, ad_nome, gasto, impressoes, cliques_link, resultados, resultado_tipo, leads, conversas, valor_compras")
-          .in("conta_id", contas.map((c) => c.id)).gte("data", anterior.desde).lte("data", atual.ate).range(de, ate),
+          .in("conta_id", contas.map((c) => c.id)).gte("data", anterior.desde).lte("data", atual.ate).order("data").order("conta_id").order("ad_id").range(de, ate),
       )
     : [];
   // Google Ads (se o SQL do Google não rodou, segue sem ele)
@@ -240,7 +240,7 @@ export async function gerarRelatorios(tipo: TipoRelatorio, empresa: string | nul
   const linhasGoogle = contasGoogle.length
     ? await buscarTudo<LinhaGoogle>((de, ate) =>
         banco.from("metricas_google").select("*")
-          .in("conta_id", contasGoogle.map((c) => c.id)).gte("data", anterior.desde).lte("data", atual.ate).range(de, ate),
+          .in("conta_id", contasGoogle.map((c) => c.id)).gte("data", anterior.desde).lte("data", atual.ate).order("data").order("conta_id").order("campaign_id").range(de, ate),
       ).catch(() => [])
     : [];
   const crm = await resumoCrm(

@@ -123,7 +123,7 @@ export async function resumoClientes(atual: Periodo, anterior: Periodo): Promise
     banco.from("clientes").select("*").eq("ativo", true).order("nome"),
     banco.from("contas_anuncio").select("id, cliente_id"),
     buscarTudo<LinhaDia>((de, ate) =>
-      banco.from("vw_cliente_dia").select("*").gte("data", desde).lte("data", hoje).range(de, ate),
+      banco.from("vw_cliente_dia").select("*").gte("data", desde).lte("data", hoje).order("data").order("cliente_id").range(de, ate),
     ),
     // se o SQL do Google ainda não rodou, vem erro e seguimos só com o Meta
     banco.from("contas_google").select("id, cliente_id").not("cliente_id", "is", null),
@@ -132,7 +132,7 @@ export async function resumoClientes(atual: Periodo, anterior: Periodo): Promise
   const diasG = clienteDaContaG.size
     ? await buscarTudo<LinhaGoogle>((de, ate) =>
         banco.from("metricas_google").select("conta_id, data, gasto, impressoes, cliques, conversoes, valor_conversoes")
-          .in("conta_id", [...clienteDaContaG.keys()]).gte("data", desde).lte("data", hoje).range(de, ate),
+          .in("conta_id", [...clienteDaContaG.keys()]).gte("data", desde).lte("data", hoje).order("data").order("conta_id").order("campaign_id").range(de, ate),
       ).catch(() => [])
     : [];
 
@@ -272,8 +272,7 @@ export async function detalheCliente(clienteId: string, atual: Periodo, anterior
   const brutas = todasIds.length
     ? await buscarTudo<LinhaAnuncio>((de, ate) =>
         banco.from("metricas_diarias").select("*")
-          .in("conta_id", todasIds).gte("data", anterior.desde).lte("data", atual.ate)
-          .order("data").range(de, ate),
+          .in("conta_id", todasIds).gte("data", anterior.desde).lte("data", atual.ate).order("data").order("conta_id").order("ad_id").range(de, ate),
       )
     : [];
   const linhasTodas = brutas.map(comTipos);
@@ -281,7 +280,7 @@ export async function detalheCliente(clienteId: string, atual: Periodo, anterior
   const linhas = linhasTodas.filter((l) => ids.includes(l.conta_id));
   // Status é informativo: se a tabela ainda não existir ou falhar, a tela abre sem os selos.
   const lerStatus = (colunas: string) => buscarTudo<InfoStatus & { id: string }>((de, ate) =>
-    banco.from("status_meta").select(colunas).in("conta_id", ids).range(de, ate),
+    banco.from("status_meta").select(colunas).in("conta_id", ids).order("id").range(de, ate),
   );
   const statusRows = ids.length
     // sem o SQL 0012 não há colunas de orçamento: lê só o status
@@ -376,7 +375,7 @@ async function alertasSaldoGoogle(nomeCliente: Map<string, string>): Promise<Ale
   const gastos = comLimite.length
     ? await buscarTudo<{ conta_id: string; gasto: number }>((de, ate) =>
         db().from("metricas_google").select("conta_id, gasto").in("conta_id", comLimite.map((c) => c.id))
-          .gte("data", ini7).lt("data", hojeISO()).range(de, ate),
+          .gte("data", ini7).lt("data", hojeISO()).order("data").order("conta_id").order("campaign_id").range(de, ate),
       )
     : [];
   const alertas: AlertaConta[] = [];
@@ -422,7 +421,7 @@ export async function alertasContas(): Promise<AlertaConta[]> {
     banco.from("contas_anuncio").select("*").not("cliente_id", "is", null),
     banco.from("clientes").select("id, nome").eq("ativo", true),
     buscarTudo<{ conta_id: string; gasto: number }>((de, ate) =>
-      banco.from("metricas_diarias").select("conta_id, gasto").gte("data", desde).range(de, ate),
+      banco.from("metricas_diarias").select("conta_id, gasto").gte("data", desde).order("data").order("conta_id").order("ad_id").range(de, ate),
     ),
   ]);
   const nomeCliente = new Map((clientes ?? []).map((c) => [c.id as string, c.nome as string]));
@@ -638,8 +637,7 @@ export async function negociosDe(clienteIds: string[], desde: string) {
     db().from("crm_negocios")
       .select(colunas)
       .in("cliente_id", clienteIds)
-      .or(`criado_em.gte.${limite},fechado_em.gte.${limite}`)
-      .range(de, ate),
+      .or(`criado_em.gte.${limite},fechado_em.gte.${limite}`).order("id").range(de, ate),
   );
   // sem o SQL 0020 (motivo de perda) ou o 0011 (UTMs), segue sem essas colunas
   return buscar(`${COLUNAS_NEGOCIO}, ${COLUNAS_UTM}, motivo_perda`)
@@ -753,7 +751,7 @@ export function motivosDePerda(negocios: NegocioCrm[], cx: ConexaoResumo, p: { d
 /** Fontes distintas dos negócios do cliente (para escolher quais são de anúncio). */
 export async function fontesDoCliente(clienteId: string) {
   const linhas = await buscarTudo<{ origem: string | null }>((de, ate) =>
-    db().from("crm_negocios").select("origem").eq("cliente_id", clienteId).range(de, ate),
+    db().from("crm_negocios").select("origem").eq("cliente_id", clienteId).order("id").range(de, ate),
   );
   const contagem = new Map<string, number>();
   for (const l of linhas) {

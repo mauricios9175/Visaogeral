@@ -68,7 +68,7 @@ export async function listarCriativos(periodo: Periodo, filtro: { clienteId?: st
 
   const linhas = await buscarTudo<Linha>((de, ate) =>
     banco.from("metricas_diarias").select("*").in("conta_id", ids)
-      .gte("data", periodo.desde).lte("data", periodo.ate).gt("impressoes", 0).range(de, ate),
+      .gte("data", periodo.desde).lte("data", periodo.ate).gt("impressoes", 0).order("data").order("conta_id").order("ad_id").range(de, ate),
   );
   const adIds = [...new Set(linhas.map((l) => l.ad_id))];
 

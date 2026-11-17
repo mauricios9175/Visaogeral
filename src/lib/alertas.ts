@@ -68,7 +68,7 @@ export async function calcularAlertas(): Promise<Alerta[]> {
     ? await buscarTudo<Linha>((de, ate) =>
         banco.from("metricas_diarias")
           .select("conta_id, data, ad_id, ad_nome, adset_id, adset_nome, campaign_nome, gasto, impressoes, alcance, cliques_link, resultados, resultado_tipo, leads, conversas")
-          .in("conta_id", contas.map((c) => c.id)).gte("data", ini14).lte("data", ontem).range(de, ate),
+          .in("conta_id", contas.map((c) => c.id)).gte("data", ini14).lte("data", ontem).order("data").order("conta_id").order("ad_id").range(de, ate),
       )
     : [];
 
@@ -78,7 +78,7 @@ export async function calcularAlertas(): Promise<Alerta[]> {
   const linhasG = contasG.length
     ? await buscarTudo<LinhaGoogle>((de, ate) =>
         banco.from("metricas_google").select("*")
-          .in("conta_id", contasG.map((c) => c.id)).gte("data", ini14).lte("data", ontem).range(de, ate),
+          .in("conta_id", contasG.map((c) => c.id)).gte("data", ini14).lte("data", ontem).order("data").order("conta_id").order("campaign_id").range(de, ate),
       ).catch(() => [])
     : [];
 

@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   const buscar = (cols: string) => buscarTudo<Record<string, unknown>>((a, b) =>
     banco.from("crm_negocios").select(cols).eq("cliente_id", cliente)
       .or(`and(criado_em.gte.${inicio},criado_em.lte.${fim}),and(fechado_em.gte.${inicio},fechado_em.lte.${fim})`)
-      .order("criado_em").range(a, b),
+      .order("criado_em").order("id").range(a, b),
   );
   const brutas = await buscar(`${colunas}, utm_source, utm_medium, utm_campaign, utm_content, utm_term`).catch(() => buscar(colunas));
   // UTMs também dos campos personalizados ("Campanha", "Criativo"…), conforme o mapa do cliente
