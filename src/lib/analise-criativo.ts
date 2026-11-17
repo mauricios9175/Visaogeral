@@ -148,7 +148,7 @@ function linhaNumeros(c: Criativo, todos: Criativo[], crm: NumerosCrm | null) {
 }
 
 /** Analisa o criativo com a IA e guarda o resultado. */
-export async function analisarCriativo(adId: string, clienteId: string, ctx: { todos?: Criativo[]; automatica?: boolean } = {}): Promise<AnaliseCriativo> {
+export async function analisarCriativo(adId: string, clienteId: string, ctx: { todos?: Criativo[]; automatica?: boolean; prazo?: number } = {}): Promise<AnaliseCriativo> {
   const { atual, anterior } = resolverPeriodo({ p: "30" });
   const [todos, crmDet, { data: cri }, { data: cli }] = await Promise.all([
     ctx.todos ? Promise.resolve(ctx.todos.filter((x) => x.cliente.id === clienteId)) : listarCriativos(atual, { clienteId }),
@@ -219,7 +219,7 @@ export async function analisarCriativo(adId: string, clienteId: string, ctx: { t
       pesquisa ? `O que está funcionando no nicho (pesquisa na internet de ${new Date(pesquisa.criadoEm).toLocaleDateString("pt-BR")}):\n${pesquisa.texto}` : "",
     ].filter(Boolean).join("\n\n") });
 
-    const bruto = await perguntarIA(SISTEMA, partes, { json: true, temperatura: 0.4, tempoMs: 150_000 });
+    const bruto = await perguntarIA(SISTEMA, partes, { json: true, temperatura: 0.4, tempoMs: 150_000, ...(ctx.prazo && { prazo: ctx.prazo }) });
     let r: Partial<AnaliseCriativo> & { gancho?: Partial<AnaliseCriativo["gancho"]> };
     try {
       r = JSON.parse(bruto.replace(/^```(?:json)?\s*|\s*```$/g, ""));
@@ -286,7 +286,8 @@ export async function analisarCriativosPendentes() {
   for (const c of pendentes) {
     if (Date.now() - inicio > TEMPO_MAX_MS) break;
     try {
-      await analisarCriativo(c.id, c.cliente.id, { todos, automatica: true });
+      // prazo total da rodada: a Vercel corta em 5 min (deixa folga para responder)
+      await analisarCriativo(c.id, c.cliente.id, { todos, automatica: true, prazo: inicio + 270_000 });
       analisados++;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

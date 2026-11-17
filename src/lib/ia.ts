@@ -85,7 +85,10 @@ export async function apagarArquivoIA(nome: string) {
   if (chave) await fetch(`https://generativelanguage.googleapis.com/v1beta/${nome}`, { method: "DELETE", headers: { "x-goog-api-key": chave } }).catch(() => null);
 }
 
-type Opcoes = { temperatura?: number; json?: boolean; tempoMs?: number };
+type Opcoes = {
+  temperatura?: number; json?: boolean; tempoMs?: number;
+  prazo?: number; // hora limite (Date.now()) para tudo, incluindo as trocas de modelo: a rotina não pode passar dos 5 min da Vercel
+};
 
 /** Gemini: tenta o modelo escolhido e os de reserva (o limite gratuito é por modelo). */
 async function gerarGemini(sistema: string, pedido: ParteIA[], opcoes: Opcoes, modeloEscolhido?: string): Promise<string> {
@@ -101,6 +104,8 @@ async function gerarGemini(sistema: string, pedido: ParteIA[], opcoes: Opcoes, m
     // modelo sobrecarregado (503) ou instável (500): tenta mais 2 vezes, depois passa para o próximo modelo
     for (let tentativa = 0; tentativa < 3; tentativa++) {
       if (tentativa) await espera(2000 * tentativa);
+      const resta = opcoes.prazo ? opcoes.prazo - Date.now() : Infinity;
+      if (resta < 15_000) throw new Error("A IA está lenta e acabou o tempo desta rodada. Tente de novo daqui a pouco.");
       let r: Response;
       try {
         r = await fetch(`${URL_BASE}/${encodeURIComponent(modelo)}:generateContent`, {
@@ -114,7 +119,7 @@ async function gerarGemini(sistema: string, pedido: ParteIA[], opcoes: Opcoes, m
               ...(opcoes.json && { responseMimeType: "application/json" }),
             },
           }),
-          signal: AbortSignal.timeout(opcoes.tempoMs ?? 90_000),
+          signal: AbortSignal.timeout(Math.min(opcoes.tempoMs ?? 90_000, resta)),
         });
       } catch (e) {
         // demorou demais (o grátis fica lento quando está cheio): vai para o próximo modelo, que costuma ser mais rápido
