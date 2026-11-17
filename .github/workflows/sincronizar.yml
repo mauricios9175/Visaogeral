@@ -11,11 +11,25 @@ on:
   workflow_dispatch:
     inputs:
       modo:
-        description: "hoje, semana ou mes"
+        description: "hoje, semana, mes ou rodada (testa a rodada do agendador externo)"
         default: "semana"
 
 jobs:
+  # Teste da rodada do agendador externo (Actions → Sincronizar Meta Ads → Run workflow → modo "rodada")
+  rodada:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.modo == 'rodada'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Rodada (dispara as tarefas desta hora)
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -sS --fail-with-body --max-time 60 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/rodada"
+
   sync:
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.modo != 'rodada'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -108,7 +122,7 @@ jobs:
   # porque leva alguns minutos: cada chamada faz o que couber no tempo).
   sugestoes:
     needs: sync
-    if: always() && (github.event.schedule == '17 6 * * *' || github.event_name == 'workflow_dispatch')
+    if: always() && (github.event.schedule == '17 6 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.modo != 'rodada'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

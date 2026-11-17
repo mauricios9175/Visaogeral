@@ -5,7 +5,7 @@ import { statusIA } from "@/lib/ia";
 import { ConfigIA } from "@/components/config-ia";
 import { lerManual } from "@/lib/sugestoes";
 import { MANUAL_GOOGLE_PADRAO, MANUAL_PADRAO } from "@/lib/manual-ia";
-import { diasAte, dinheiro, quandoFoi } from "@/lib/formato";
+import { diasAte, dinheiro, horasAtras, quandoFoi } from "@/lib/formato";
 import { AvisosCelular } from "@/components/avisos-celular";
 import { ConfigBomDia } from "@/components/bom-dia";
 import { lerConfigBomDia } from "@/lib/bom-dia";
@@ -22,6 +22,12 @@ import { hojeISO } from "@/lib/datas";
 import type { ContaGoogle } from "@/lib/sync-google";
 import { PainelSincronizacao } from "@/components/sincronizacao";
 import { contasAgenda } from "@/lib/agenda";
+import { ultimasTarefas } from "@/lib/cron";
+
+const NOME_TAREFA: Record<string, string> = {
+  hoje: "Meta (hoje)", semana: "Meta (7 dias, madrugada)", mes: "Meta (30 dias)", crm: "CRMs", google: "Google Ads",
+  avisos: "Avisos no celular", sugestoes: "Sugestões da IA", criativos: "Análise de criativos", radar: "Radar de criativos", historico: "Histórico mensal",
+};
 import { agendaPrincipal, sairDaAgenda } from "@/app/acoes-agenda";
 
 export const maxDuration = 300;
@@ -34,6 +40,7 @@ const botaoPrimario = "rounded-lg bg-destaque px-3 py-1.5 text-sm font-medium te
 export default async function Configuracoes({ searchParams }: PageProps<"/configuracoes">) {
   const iaStatus = await statusIA().catch(() => []);
   const agendas = await contasAgenda().catch(() => []);
+  const tarefasCron = await ultimasTarefas().catch(() => []);
   const bomDia = await lerConfigBomDia().catch(() => ({ ligado: true, hora: 8 }));
   const [manualIA, manualGoogle] = await Promise.all([
     lerManual("meta").catch(() => MANUAL_PADRAO),
@@ -191,6 +198,28 @@ export default async function Configuracoes({ searchParams }: PageProps<"/config
         </div>
         <AvisosCelular />
         <ConfigBomDia inicial={bomDia} />
+      </section>
+
+      <section id="agendador" className="space-y-2 rounded-2xl border border-borda bg-superficie p-4 lg:p-5">
+        <h2 className="font-bold">Agendador (tarefas automáticas)</h2>
+        <p className="text-sm text-texto-2">
+          A última vez que cada tarefa rodou sozinha. O agendador externo chama o painel de hora em hora; se alguma
+          estiver parada há mais de 2 horas, confira o agendador.
+        </p>
+        {tarefasCron.length === 0 ? <p className="text-sm text-texto-3">Nenhuma execução registrada ainda.</p> : (
+          <ul className="grid gap-1.5 text-sm sm:grid-cols-2">
+            {tarefasCron.map((t) => {
+              const atrasada = t.em < horasAtras(["semana", "historico", "sugestoes"].includes(t.modo) ? 30 : 2.5);
+              return (
+                <li key={t.modo} className="flex items-center gap-2 rounded-lg border border-borda bg-fundo px-3 py-2">
+                  <span className={t.ok ? (atrasada ? "text-atencao" : "text-bom") : "text-critico"}>●</span>
+                  <span className="font-medium">{NOME_TAREFA[t.modo] ?? t.modo}</span>
+                  <span className="ml-auto text-xs text-texto-3" title={t.erro ?? ""}>{quandoFoi(t.em)}{t.ok ? ` · ${t.segundos}s` : " · erro"}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
 
       {!!execucoes?.length && (
