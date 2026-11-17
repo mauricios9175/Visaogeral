@@ -1,0 +1,33 @@
+# Dependabot: abre pedidos de atualização (pull requests) das dependências.
+# - Correções de segurança: abrem assim que saem (independente do horário abaixo).
+# - Atualizações normais: uma vez por semana, agrupadas num pedido só (menos barulho).
+# Cada pedido roda o build da Vercel (prévia): se passar, é só aprovar e juntar.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 5
+    labels: [dependencias]
+    commit-message:
+      prefix: "deps"
+    groups:
+      # correções e melhorias pequenas de tudo num pedido só
+      pequenas:
+        update-types: [minor, patch]
+    ignore:
+      # versões grandes (major) de pacotes que mudam muita coisa: atualizar com calma, à mão
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    labels: [dependencias]
+    commit-message:
+      prefix: "ci"
