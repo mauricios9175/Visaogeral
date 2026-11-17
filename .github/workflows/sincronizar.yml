@@ -4,10 +4,9 @@ name: Sincronizar Meta Ads
 # Configure em Settings → Secrets and variables → Actions:
 #   APP_URL      → endereço do painel (ex.: https://visaogeral.vercel.app)
 #   CRON_SECRET  → o mesmo valor configurado na Vercel
+# Os horários automáticos agora ficam no agendador externo (cron-job.org → /api/cron/rodada, de hora em hora).
+# Aqui ficou só o botão manual (Actions → Sincronizar Meta Ads → Run workflow), de reserva.
 on:
-  schedule:
-    - cron: "7 * * * *"   # a cada hora: hoje + ontem
-    - cron: "17 6 * * *"  # 03:17 de Brasília: reprocessa últimos 7 dias
   workflow_dispatch:
     inputs:
       modo:
