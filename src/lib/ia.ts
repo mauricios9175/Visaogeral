@@ -88,6 +88,7 @@ export async function apagarArquivoIA(nome: string) {
 type Opcoes = {
   temperatura?: number; json?: boolean; tempoMs?: number;
   prazo?: number; // hora limite (Date.now()) para tudo, incluindo as trocas de modelo: a rotina não pode passar dos 5 min da Vercel
+  soQuemVeVideo?: boolean; // tem vídeo no pedido e ele é o principal: só tenta IAs que assistem vídeo (não cai para a miniatura)
 };
 
 /** Gemini: tenta o modelo escolhido e os de reserva (o limite gratuito é por modelo). */
@@ -324,7 +325,7 @@ async function gerarOpenAI(sistema: string, partes: ParteIA[], opcoes: Opcoes, m
  */
 export async function perguntarIA(sistema: string, pedido: string | ParteIA[], opcoes: Opcoes = {}): Promise<string> {
   const partes: ParteIA[] = typeof pedido === "string" ? [{ texto: pedido }] : pedido;
-  const ativos = await provedoresAtivos();
+  const ativos = await provedoresAtivos(opcoes.soQuemVeVideo ? (p) => PROVEDORES[p].video : undefined);
   if (!ativos.length) throw new Error(semChave());
   const erros: string[] = [];
   for (const { p, modelo } of ativos) {

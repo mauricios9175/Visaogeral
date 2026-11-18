@@ -5,7 +5,8 @@ import { listarCriativos, type Criativo } from "./criativos";
 import { resolverPeriodo } from "./datas";
 import { decimal, dinheiro, inteiro, pct } from "./formato";
 import { apagarArquivoIA, enviarArquivoIA, geminiParaVideo, perguntarIA, pesquisarNaWeb, type ParteIA } from "./ia";
-import { fonteDoVideo } from "./meta-montar";
+import { fonteDoVideo, tokenDaPagina } from "./meta-montar";
+import { getMeta, montarUrl } from "./meta";
 import { chaveDe, nomeDoAnuncio } from "./agrupar";
 import { tokenDaConta } from "./sync";
 
@@ -29,7 +30,30 @@ export type AnaliseCriativo = {
   numeros: string;                    // como os números confirmam (ou não) a leitura
   nicho?: string;                     // o que funciona no nicho (pesquisa + melhores criativos do segmento) e como este se compara
   automatica?: boolean;               // feita pela rodada da madrugada
+  assistiu?: boolean;                 // vídeo: a IA assistiu ao vídeo de verdade (com áudio)
 };
+
+/**
+ * Link do arquivo do vídeo no Meta. O token da conta de anúncio nem sempre libera o arquivo de um vídeo que é da
+ * página; aí tenta com o token da própria página.
+ */
+async function arquivoDoVideo(videoId: string, token: string): Promise<string> {
+  const direto = await fonteDoVideo(videoId, token).catch(() => ({ fonte: null }));
+  if (direto.fonte) return direto.fonte;
+  const dono = await getMeta<{ from?: { id?: string } }>(montarUrl(videoId, token, { fields: "from" })).catch(() => null);
+  if (dono?.from?.id) {
+    const tokenPagina = await tokenDaPagina(dono.from.id, token).catch(() => null);
+    if (tokenPagina) {
+      const pelaPagina = await fonteDoVideo(videoId, tokenPagina).catch(() => ({ fonte: null }));
+      if (pelaPagina.fonte) return pelaPagina.fonte;
+    }
+  }
+  throw new Error("O Meta não liberou o arquivo deste vídeo para análise (nem pela conta de anúncio, nem pela página).");
+}
+
+/** Análise de vídeo feita só pela miniatura (antes desta correção, ou por falha): precisa ser refeita. */
+export const analiseSemVideo = (a: Pick<AnaliseCriativo, "formato" | "resumo"> & { assistiu?: boolean }) =>
+  a.formato === "video" && a.assistiu !== true && (a.assistiu === false || /n[aã]o (foi poss[ií]vel |consegui |deu para )?(assistir|ver o v[ií]deo)|pela miniatura|sem (o|assistir ao) v[ií]deo|n[aã]o assisti/i.test(a.resumo ?? ""));
 
 // ---------- Pesquisa do nicho na internet (uma vez a cada 14 dias por nicho) ----------
 
@@ -170,38 +194,23 @@ export async function analisarCriativo(adId: string, clienteId: string, ctx: { t
 
   const partes: ParteIA[] = [];
   let arquivoIA: string | null = null;
+  let assistiu = false;
   try {
     if (c.formato === "video" && criativo?.video_id) {
-      // miniatura sempre junto: se o Gemini (o único que assiste vídeo) não responder, a outra IA ainda vê a peça
-      const mini = criativo.thumbnail_url || c.miniatura;
-      if (mini) {
-        const m = await fetch(mini, { signal: AbortSignal.timeout(30_000) }).catch(() => null);
-        if (m?.ok) partes.push({ imagem: { mime: m.headers.get("content-type")?.split(";")[0] || "image/jpeg", base64: Buffer.from(await m.arrayBuffer()).toString("base64") } });
-      }
-      if (await geminiParaVideo()) {
-        try {
-          const { data: conta } = await db().from("contas_anuncio").select("*").eq("id", criativo.conta_id).maybeSingle();
-          const token = conta ? await tokenDaConta(conta as ContaAnuncio) : undefined;
-          if (!token) throw new Error("Sem token do Meta para baixar o vídeo.");
-          const { fonte } = await fonteDoVideo(criativo.video_id, token);
-          if (!fonte) throw new Error("O Meta não liberou o arquivo deste vídeo para análise.");
-          const r = await fetch(fonte, { signal: AbortSignal.timeout(120_000) });
-          if (!r.ok) throw new Error(`Não consegui baixar o vídeo do Meta (${r.status}).`);
-          const tamanho = Number(r.headers.get("content-length") ?? 0);
-          if (tamanho > LIMITE_VIDEO) throw new Error("Vídeo grande demais para analisar (acima de 200 MB).");
-          const bytes = await r.arrayBuffer();
-          const enviado = await enviarArquivoIA(bytes, r.headers.get("content-type")?.split(";")[0] || "video/mp4", c.nome);
-          arquivoIA = enviado.nome;
-          partes.unshift({ arquivo: { mime: enviado.mime, uri: enviado.uri } });
-        } catch (e) {
-          if (!partes.length) throw e;
-          partes.push({ texto: `(Não foi possível enviar o vídeo: ${e instanceof Error ? e.message : e}. Analise pela miniatura, pelo texto e pelos números, e diga que não assistiu ao vídeo.)` });
-        }
-      } else if (!partes.length) {
-        throw new Error("Para assistir ao vídeo é preciso o Gemini ligado (Configurações → IA do painel), e não achei a miniatura.");
-      } else {
-        partes.push({ texto: "(Sem o vídeo: analise pela miniatura, pelo texto e pelos números, e diga que não assistiu ao vídeo.)" });
-      }
+      // vídeo: a IA precisa ASSISTIR (com áudio). Sem o vídeo não faz análise só pela miniatura: dá erro e tenta depois.
+      if (!(await geminiParaVideo())) throw new Error("Para assistir ao vídeo é preciso o Gemini ligado (Configurações → IA do painel).");
+      const { data: conta } = await db().from("contas_anuncio").select("*").eq("id", criativo.conta_id).maybeSingle();
+      const token = conta ? await tokenDaConta(conta as ContaAnuncio) : undefined;
+      if (!token) throw new Error("Sem token do Meta para baixar o vídeo.");
+      const fonte = await arquivoDoVideo(criativo.video_id, token);
+      const r = await fetch(fonte, { signal: AbortSignal.timeout(120_000) });
+      if (!r.ok) throw new Error(`Não consegui baixar o vídeo do Meta (${r.status}).`);
+      const tamanho = Number(r.headers.get("content-length") ?? 0);
+      if (tamanho > LIMITE_VIDEO) throw new Error("Vídeo grande demais para analisar (acima de 200 MB).");
+      const enviado = await enviarArquivoIA(await r.arrayBuffer(), r.headers.get("content-type")?.split(";")[0] || "video/mp4", c.nome);
+      arquivoIA = enviado.nome;
+      partes.push({ arquivo: { mime: enviado.mime, uri: enviado.uri } });
+      assistiu = true;
     } else {
       const url = criativo?.imagem_url || criativo?.thumbnail_url || c.miniatura;
       if (!url) throw new Error("Não achei a imagem deste anúncio.");
@@ -219,7 +228,8 @@ export async function analisarCriativo(adId: string, clienteId: string, ctx: { t
       pesquisa ? `O que está funcionando no nicho (pesquisa na internet de ${new Date(pesquisa.criadoEm).toLocaleDateString("pt-BR")}):\n${pesquisa.texto}` : "",
     ].filter(Boolean).join("\n\n") });
 
-    const bruto = await perguntarIA(SISTEMA, partes, { json: true, temperatura: 0.4, tempoMs: 150_000, ...(ctx.prazo && { prazo: ctx.prazo }) });
+    // com vídeo, só a IA que assiste (o Gemini); se ela estiver fora, dá erro e tenta depois, sem cair para a miniatura
+    const bruto = await perguntarIA(SISTEMA, partes, { json: true, temperatura: 0.4, tempoMs: 150_000, soQuemVeVideo: assistiu, ...(ctx.prazo && { prazo: ctx.prazo }) });
     let r: Partial<AnaliseCriativo> & { gancho?: Partial<AnaliseCriativo["gancho"]> };
     try {
       r = JSON.parse(bruto.replace(/^```(?:json)?\s*|\s*```$/g, ""));
@@ -242,6 +252,7 @@ export async function analisarCriativo(adId: string, clienteId: string, ctx: { t
       numeros: String(r.numeros ?? ""),
       nicho: String(r.nicho ?? ""),
       ...(ctx.automatica && { automatica: true }),
+      ...(c.formato === "video" ? { assistiu } : {}),
     };
     await db().from("configuracoes").upsert({ chave: chave(adId), valor: analise, atualizado_em: analise.criadoEm });
     return analise;
@@ -265,10 +276,10 @@ export async function analisarCriativosPendentes() {
   const { atual } = resolverPeriodo({ p: "30" });
   const todos = await listarCriativos(atual, {});
   const candidatos = todos.filter((c) => c.gasto >= MINIMO.gasto && c.impressoes >= MINIMO.impressoes);
-  const feitas = new Map<string, { em: string; erro: string | null }>();
+  const feitas = new Map<string, { em: string; erro: string | null; semVideo: boolean }>();
   for (let i = 0; i < candidatos.length; i += 200) {
     const { data } = await db().from("configuracoes").select("chave, valor").in("chave", candidatos.slice(i, i + 200).map((c) => chave(c.id)));
-    for (const x of (data ?? []) as { chave: string; valor: AnaliseCriativo & { erro?: string } }[]) feitas.set(x.chave.split(":")[1], { em: x.valor.criadoEm, erro: x.valor.erro ?? null });
+    for (const x of (data ?? []) as { chave: string; valor: AnaliseCriativo & { erro?: string } }[]) feitas.set(x.chave.split(":")[1], { em: x.valor.criadoEm, erro: x.valor.erro ?? null, semVideo: !x.valor.erro && analiseSemVideo(x.valor) });
   }
   const dias = (iso: string) => (Date.now() - Date.parse(iso)) / 86_400_000;
   const pendentes = candidatos
@@ -277,6 +288,7 @@ export async function analisarCriativosPendentes() {
       if (!f) return true;
       // falha da IA (lenta, cheia, no limite): tenta de novo na próxima rodada; problema do criativo: depois de 3 dias
       if (f.erro) return erroPassageiro(f.erro) || dias(f.em) > 3;
+      if (f.semVideo) return true;                             // vídeo analisado só pela miniatura: refaz assistindo
       return dias(f.em) > REANALISAR_DIAS && c.status === "ACTIVE"; // análise velha de criativo que segue rodando
     })
     .sort((a, b) => b.gasto - a.gasto);

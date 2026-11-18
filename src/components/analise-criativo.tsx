@@ -19,8 +19,17 @@ function Lista({ titulo, itens, cor }: { titulo: string; itens: string[]; cor: s
 
 /** A análise na tela: nota, gancho, estrutura (linha do tempo), falas, pontos fortes/fracos, sugestões e números. */
 function Resultado({ a }: { a: AnaliseCriativo }) {
+  // vídeo analisado só pela miniatura (análises antigas): avisa para refazer
+  const semVideo = a.formato === "video" && a.assistiu !== true &&
+    (a.assistiu === false || /n[aã]o (foi poss[ií]vel |consegui |deu para )?(assistir|ver o v[ií]deo)|pela miniatura|sem (o|assistir ao) v[ií]deo|n[aã]o assisti/i.test(a.resumo));
   return (
     <div className="space-y-5">
+      {semVideo && (
+        <p className="rounded-lg bg-atencao-bg px-3 py-2 text-sm text-atencao">
+          ▲ Esta análise foi feita só pela miniatura (a IA não conseguiu assistir ao vídeo na época). Clique em “Analisar de novo”:
+          agora ela assiste ao vídeo inteiro ou avisa o motivo. A rodada automática também vai refazer.
+        </p>
+      )}
       <div className="flex items-start gap-4">
         <div className="text-center">
           <div className={`num text-4xl font-extrabold ${corNota(a.nota)}`}>{a.nota}</div>
