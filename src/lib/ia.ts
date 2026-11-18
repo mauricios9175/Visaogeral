@@ -80,6 +80,15 @@ export async function enviarArquivoIA(bytes: ArrayBuffer, mime: string, nome: st
   return { nome: arquivo.name, uri: arquivo.uri, mime: arquivo.mimeType ?? mime };
 }
 
+/** O arquivo ainda está no Gemini e pronto (os enviados ficam guardados lá por 48 h)? */
+export async function arquivoIAPronto(nome: string) {
+  const chave = chaveIA();
+  if (!chave) return false;
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/${nome}`, { headers: { "x-goog-api-key": chave }, signal: AbortSignal.timeout(15_000) }).catch(() => null);
+  const j = (await r?.json().catch(() => ({}))) as { state?: string } | undefined;
+  return !!r?.ok && j?.state === "ACTIVE";
+}
+
 export async function apagarArquivoIA(nome: string) {
   const chave = chaveIA();
   if (chave) await fetch(`https://generativelanguage.googleapis.com/v1beta/${nome}`, { method: "DELETE", headers: { "x-goog-api-key": chave } }).catch(() => null);
@@ -96,14 +105,17 @@ async function gerarGemini(sistema: string, pedido: ParteIA[], opcoes: Opcoes, m
   const chave = chaveIA();
   if (!chave) throw new Error(semChave());
   const partes = pedido.map(paraGemini);
-  const modelos = [...new Set([modeloEscolhido, process.env.GEMINI_MODELO?.trim(), ...MODELOS_RESERVA].filter(Boolean) as string[])];
+  const comVideo = partes.some((p) => "fileData" in p);
+  // com vídeo: começa pelos modelos leves (os menos disputados no plano grátis, e também assistem vídeo com áudio)
+  const leves = MODELOS_RESERVA.filter((m) => m.includes("lite"));
+  const modelos = [...new Set([...(comVideo ? leves : []), modeloEscolhido, process.env.GEMINI_MODELO?.trim(), ...MODELOS_RESERVA].filter(Boolean) as string[])];
 
   let ultimoErro = "";
   let sobrecarga = false;
   let limite = false;
   // com vídeo: resolução baixa (o Gemini olha menos pixels por quadro, mas ouve o áudio inteiro): bem mais rápido
   // e cabe no limite grátis. Se o modelo não aceitar a opção, tenta sem ela.
-  let baixaResolucao = partes.some((p) => "fileData" in p);
+  let baixaResolucao = comVideo;
   for (const modelo of modelos) {
     // modelo sobrecarregado (503) ou instável (500): tenta mais 2 vezes, depois passa para o próximo modelo
     for (let tentativa = 0; tentativa < 3; tentativa++) {

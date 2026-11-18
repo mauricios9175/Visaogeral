@@ -4,7 +4,7 @@ import { detalheCrm, type NumerosCrm } from "./consultas";
 import { listarCriativos, type Criativo } from "./criativos";
 import { resolverPeriodo } from "./datas";
 import { decimal, dinheiro, inteiro, pct } from "./formato";
-import { apagarArquivoIA, enviarArquivoIA, geminiParaVideo, perguntarIA, pesquisarNaWeb, type ParteIA } from "./ia";
+import { apagarArquivoIA, arquivoIAPronto, enviarArquivoIA, geminiParaVideo, perguntarIA, pesquisarNaWeb, type ParteIA } from "./ia";
 import { fonteDoVideo, tokenDaPagina } from "./meta-montar";
 import { getMeta, montarUrl } from "./meta";
 import { chaveDe, nomeDoAnuncio } from "./agrupar";
@@ -202,12 +202,20 @@ export async function analisarCriativo(adId: string, clienteId: string, ctx: { t
       const { data: conta } = await db().from("contas_anuncio").select("*").eq("id", criativo.conta_id).maybeSingle();
       const token = conta ? await tokenDaConta(conta as ContaAnuncio) : undefined;
       if (!token) throw new Error("Sem token do Meta para baixar o vídeo.");
-      const fonte = await arquivoDoVideo(criativo.video_id, token);
-      const r = await fetch(fonte, { signal: AbortSignal.timeout(120_000) });
-      if (!r.ok) throw new Error(`Não consegui baixar o vídeo do Meta (${r.status}).`);
-      const tamanho = Number(r.headers.get("content-length") ?? 0);
-      if (tamanho > LIMITE_VIDEO) throw new Error("Vídeo grande demais para analisar (acima de 200 MB).");
-      const enviado = await enviarArquivoIA(await r.arrayBuffer(), r.headers.get("content-type")?.split(";")[0] || "video/mp4", c.nome);
+      // o vídeo já enviado ao Gemini numa tentativa anterior fica lá 48 h: reaproveita (não baixa nem envia de novo)
+      const chaveArquivo = `gemini_video:${criativo.video_id}`;
+      const { data: guardado } = await db().from("configuracoes").select("valor").eq("chave", chaveArquivo).maybeSingle();
+      let enviado = guardado?.valor as { nome: string; uri: string; mime: string; em: string } | undefined;
+      if (!enviado || Date.now() - Date.parse(enviado.em) > 44 * 3600_000 || !(await arquivoIAPronto(enviado.nome))) {
+        const fonte = await arquivoDoVideo(criativo.video_id, token);
+        const r = await fetch(fonte, { signal: AbortSignal.timeout(120_000) });
+        if (!r.ok) throw new Error(`Não consegui baixar o vídeo do Meta (${r.status}).`);
+        const tamanho = Number(r.headers.get("content-length") ?? 0);
+        if (tamanho > LIMITE_VIDEO) throw new Error("Vídeo grande demais para analisar (acima de 200 MB).");
+        const novo = await enviarArquivoIA(await r.arrayBuffer(), r.headers.get("content-type")?.split(";")[0] || "video/mp4", c.nome);
+        enviado = { ...novo, em: new Date().toISOString() };
+        await db().from("configuracoes").upsert({ chave: chaveArquivo, valor: enviado, atualizado_em: enviado.em }).then(() => null, () => null);
+      }
       arquivoIA = enviado.nome;
       partes.push({ arquivo: { mime: enviado.mime, uri: enviado.uri } });
       assistiu = true;
@@ -255,9 +263,14 @@ export async function analisarCriativo(adId: string, clienteId: string, ctx: { t
       ...(c.formato === "video" ? { assistiu } : {}),
     };
     await db().from("configuracoes").upsert({ chave: chave(adId), valor: analise, atualizado_em: analise.criadoEm });
+    // deu certo: apaga o vídeo do Gemini (se falhou, ele fica lá 48 h para a próxima tentativa reaproveitar)
+    if (arquivoIA) {
+      await apagarArquivoIA(arquivoIA);
+      await db().from("configuracoes").delete().eq("chave", `gemini_video:${criativo?.video_id}`).then(() => null, () => null);
+    }
     return analise;
   } finally {
-    if (arquivoIA) await apagarArquivoIA(arquivoIA);
+    // nada: o arquivo só é apagado quando a análise sai
   }
 }
 
