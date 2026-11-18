@@ -281,6 +281,12 @@ export async function analisarCriativosPendentes() {
     const { data } = await db().from("configuracoes").select("chave, valor").in("chave", candidatos.slice(i, i + 200).map((c) => chave(c.id)));
     for (const x of (data ?? []) as { chave: string; valor: AnaliseCriativo & { erro?: string } }[]) feitas.set(x.chave.split(":")[1], { em: x.valor.criadoEm, erro: x.valor.erro ?? null, semVideo: !x.valor.erro && analiseSemVideo(x.valor) });
   }
+  // tentativas que falharam por causa da IA (lenta/cheia): vão para o fim da fila, para os outros terem vez
+  const tentativas = new Map<string, string>();
+  for (let i = 0; i < candidatos.length; i += 200) {
+    const { data } = await db().from("configuracoes").select("chave, valor").in("chave", candidatos.slice(i, i + 200).map((c) => `analise_tentativa:${c.id}`));
+    for (const x of (data ?? []) as { chave: string; valor: { em: string } }[]) tentativas.set(x.chave.split(":")[1], x.valor.em);
+  }
   const dias = (iso: string) => (Date.now() - Date.parse(iso)) / 86_400_000;
   const pendentes = candidatos
     .filter((c) => {
@@ -291,7 +297,8 @@ export async function analisarCriativosPendentes() {
       if (f.semVideo) return true;                             // vídeo analisado só pela miniatura: refaz assistindo
       return dias(f.em) > REANALISAR_DIAS && c.status === "ACTIVE"; // análise velha de criativo que segue rodando
     })
-    .sort((a, b) => b.gasto - a.gasto);
+    // nunca tentados primeiro (maior gasto antes); os que falharam há pouco por causa da IA, por último
+    .sort((a, b) => (tentativas.get(a.id) ?? "").localeCompare(tentativas.get(b.id) ?? "") || b.gasto - a.gasto);
 
   let analisados = 0;
   const erros: string[] = [];
@@ -304,8 +311,12 @@ export async function analisarCriativosPendentes() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       erros.push(`${c.nome}: ${msg}`);
-      // a IA está cheia/lenta ou no limite: não é culpa do criativo, então não marca nada e para por agora
-      if (erroPassageiro(msg)) break;
+      // a IA está cheia/lenta ou no limite: não é culpa do criativo (não marca como falho); anota a tentativa para ele
+      // ir para o fim da fila, e para por agora
+      if (erroPassageiro(msg)) {
+        await db().from("configuracoes").upsert({ chave: `analise_tentativa:${c.id}`, valor: { em: new Date().toISOString(), erro: msg.slice(0, 300) }, atualizado_em: new Date().toISOString() }).then(() => null, () => null);
+        break;
+      }
       // não deu para analisar (ex.: vídeo grande): marca para não tentar de novo toda noite
       await db().from("configuracoes").upsert({ chave: chave(c.id), valor: { adId: c.id, nome: c.nome, formato: c.formato, criadoEm: new Date().toISOString(), erro: msg }, atualizado_em: new Date().toISOString() }).then(() => null, () => null);
     }
