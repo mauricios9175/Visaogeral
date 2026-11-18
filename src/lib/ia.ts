@@ -101,6 +101,9 @@ async function gerarGemini(sistema: string, pedido: ParteIA[], opcoes: Opcoes, m
   let ultimoErro = "";
   let sobrecarga = false;
   let limite = false;
+  // com vídeo: resolução baixa (o Gemini olha menos pixels por quadro, mas ouve o áudio inteiro): bem mais rápido
+  // e cabe no limite grátis. Se o modelo não aceitar a opção, tenta sem ela.
+  let baixaResolucao = partes.some((p) => "fileData" in p);
   for (const modelo of modelos) {
     // modelo sobrecarregado (503) ou instável (500): tenta mais 2 vezes, depois passa para o próximo modelo
     for (let tentativa = 0; tentativa < 3; tentativa++) {
@@ -118,6 +121,7 @@ async function gerarGemini(sistema: string, pedido: ParteIA[], opcoes: Opcoes, m
             generationConfig: {
               temperature: opcoes.temperatura ?? 0.4, maxOutputTokens: 8192,
               ...(opcoes.json && { responseMimeType: "application/json" }),
+              ...(baixaResolucao && { mediaResolution: "MEDIA_RESOLUTION_LOW" }),
             },
           }),
           signal: AbortSignal.timeout(Math.min(opcoes.tempoMs ?? 90_000, resta)),
@@ -143,6 +147,7 @@ async function gerarGemini(sistema: string, pedido: ParteIA[], opcoes: Opcoes, m
       }
       // o limite gratuito é por modelo: passa para o próximo
       if (r.status === 429) { limite = true; ultimoErro = `${modelo} no limite`; break; }
+      if (r.status === 400 && baixaResolucao && /media.?resolution/i.test(j.error?.message ?? "")) { baixaResolucao = false; tentativa--; continue; }
       if (r.status === 400 && /api key/i.test(j.error?.message ?? "")) throw new Error("A chave do Gemini foi recusada. Confira a GEMINI_API_KEY na Vercel.");
       if (r.status === 403) throw new Error(`O Google recusou a chave do Gemini: ${j.error?.message ?? "sem permissão"}`);
       if (!r.ok) throw new Error(`Erro do Gemini (${r.status}): ${j.error?.message ?? "sem detalhes"}`);
