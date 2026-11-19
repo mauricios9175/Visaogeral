@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { sincronizarContaGooglePorId } from "@/lib/sync-google";
 import { contasParaSincronizar, importarContas, registrarExecucao, sincronizarContaPorId, type ModoSync } from "@/lib/sync";
 import { sincronizarCrmCliente, type ConexaoCrm } from "@/lib/crm/sync";
 import { db } from "@/lib/db";
@@ -43,12 +44,22 @@ export async function POST(request: NextRequest) {
         if (!data) throw new Error("Cliente sem CRM conectado");
         return NextResponse.json({ linhas: await sincronizarCrmCliente(data as ConexaoCrm, 30) });
       }
+      case "conta_google": {
+        // histórico do Google: um pedaço de até ~31 dias de uma conta
+        const data = /^\d{4}-\d{2}-\d{2}$/;
+        if (!data.test(String(corpo.desde)) || !data.test(String(corpo.ate))) throw new Error("Período inválido");
+        const dias = (Date.parse(corpo.ate) - Date.parse(corpo.desde)) / 86_400_000;
+        if (dias < 0 || dias > 31) throw new Error("Intervalo inválido (até 31 dias por vez)");
+        return NextResponse.json({ linhas: await sincronizarContaGooglePorId(String(corpo.id), corpo.desde, corpo.ate) });
+      }
       case "historico_feito": {
         // lembra até onde o histórico de cada conta já foi puxado (dias sem gasto não deixam linha nos dados)
         const desde = String(corpo.desde);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(desde)) throw new Error("data inválida");
+        // Google: "historico_google:<conta>"; Meta: "historico_meta:<conta>"
+        const prefixo = corpo.plataforma === "google" ? "historico_google" : "historico_meta";
         for (const id of (Array.isArray(corpo.contas) ? corpo.contas : []).map(String)) {
-          const chave = `historico_meta:${id}`;
+          const chave = `${prefixo}:${id}`;
           const { data: ja } = await db().from("configuracoes").select("valor").eq("chave", chave).maybeSingle();
           const antes = typeof ja?.valor === "string" ? ja.valor : null;
           if (!antes || desde < antes) await db().from("configuracoes").upsert({ chave, valor: desde, atualizado_em: new Date().toISOString() });

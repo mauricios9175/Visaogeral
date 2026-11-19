@@ -21,9 +21,11 @@ const dataBR = (iso: string) => iso.split("-").reverse().join("/");
  * A sincronização automática só refaz os últimos 7–30 dias; dias mais antigos que nunca foram puxados
  * (antes do painel existir ou de a conta ser vinculada) ficam faltando, e o investido sai baixo.
  */
-export function PuxarHistoricoMeta({ contas, desde, ate, primeiroDia }: {
+export function PuxarHistoricoMeta({ contas, desde, ate, primeiroDia, plataforma = "meta" }: {
   contas: { id: string; nome: string }[]; desde: string; ate: string; primeiroDia: string | null;
+  plataforma?: "meta" | "google";
 }) {
+  const nomePlataforma = plataforma === "google" ? "Google Ads" : "Meta";
   const router = useRouter();
   const [estado, setEstado] = useState<string | null>(null);
   const [rodando, setRodando] = useState(false);
@@ -47,7 +49,7 @@ export function PuxarHistoricoMeta({ contas, desde, ate, primeiroDia }: {
           try {
             const r = await fetch("/api/sync", {
               method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ etapa: "conta", id: t.conta.id, desde: t.desde, ate: t.ate }),
+              body: JSON.stringify({ etapa: plataforma === "google" ? "conta_google" : "conta", id: t.conta.id, desde: t.desde, ate: t.ate }),
             });
             const j = await r.json().catch(() => ({ erro: `erro ${r.status}` }));
             if (!r.ok || j.erro) throw new Error(j.erro ?? `erro ${r.status}`);
@@ -65,10 +67,10 @@ export function PuxarHistoricoMeta({ contas, desde, ate, primeiroDia }: {
     // contas que deram certo em todos os pedaços: marca o histórico como puxado desde o início do período
     const ok = contas.filter((c) => !falhas.some((f) => f.startsWith(`${c.nome} (`))).map((c) => c.id);
     if (ok.length) {
-      await fetch("/api/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ etapa: "historico_feito", contas: ok, desde }) }).catch(() => {});
+      await fetch("/api/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ etapa: "historico_feito", contas: ok, desde, plataforma }) }).catch(() => {});
     }
     setErros(falhas);
-    setEstado(falhas.length ? `Concluído com ${falhas.length} erro(s).` : "Pronto! Os números do período foram puxados de novo do Meta.");
+    setEstado(falhas.length ? `Concluído com ${falhas.length} erro(s).` : `Pronto! Os números do período foram puxados de novo do ${nomePlataforma}.`);
     setRodando(false);
     router.refresh();
   }
@@ -78,12 +80,12 @@ export function PuxarHistoricoMeta({ contas, desde, ate, primeiroDia }: {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-texto-2">
           {faltando
-            ? <>▲ O painel só tem dados do Meta {primeiroDia ? <>a partir de <b>{dataBR(primeiroDia)}</b></> : "de nenhum dia"} neste período (começa em {dataBR(desde)}). O investido e os resultados estão incompletos.</>
-            : <>Os números não batem com o Gerenciador? Puxe de novo do Meta todos os dias deste período.</>}
+            ? <>▲ O painel só tem dados do {nomePlataforma} {primeiroDia ? <>a partir de <b>{dataBR(primeiroDia)}</b></> : "de nenhum dia"} neste período (começa em {dataBR(desde)}). O investido e os resultados estão incompletos.</>
+            : <>Os números não batem com o {plataforma === "google" ? "Google Ads" : "Gerenciador"}? Puxe de novo do {nomePlataforma} todos os dias deste período.</>}
         </p>
         <button type="button" onClick={puxar} disabled={rodando}
           className="rounded-lg bg-destaque px-3 py-1.5 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">
-          {rodando ? "Puxando…" : `Puxar do Meta ${dataBR(desde)} a ${dataBR(ate)}`}
+          {rodando ? "Puxando…" : `Puxar do ${nomePlataforma} ${dataBR(desde)} a ${dataBR(ate)}`}
         </button>
       </div>
       {estado && <p className="text-xs text-texto-3">{estado}</p>}

@@ -113,6 +113,17 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
     return datas.sort()[0] ?? null;
   })).catch((): (string | null)[] => []);
   const primeiroDia = inicioDasContas.includes(null) ? null : (inicioDasContas as string[]).sort().at(-1) ?? null;
+  // o mesmo para o Google: desde quando o painel tem os dados de cada conta do Google do cliente
+  const contasGoogleCliente = google && !("erro" in google) ? google.contas.map((x) => ({ id: x.id, nome: x.nome })) : [];
+  const inicioGoogle = await Promise.all(contasGoogleCliente.map(async (x): Promise<string | null> => {
+    const [{ data: primeira }, { data: marca }] = await Promise.all([
+      db().from("metricas_google").select("data").eq("conta_id", x.id).order("data").limit(1).maybeSingle(),
+      db().from("configuracoes").select("valor").eq("chave", `historico_google:${x.id}`).maybeSingle(),
+    ]);
+    const datas = [primeira?.data as string | undefined, typeof marca?.valor === "string" ? marca.valor : undefined].filter(Boolean) as string[];
+    return datas.sort()[0] ?? null;
+  })).catch((): (string | null)[] => []);
+  const primeiroDiaGoogle = inicioGoogle.includes(null) ? null : (inicioGoogle as string[]).sort().at(-1) ?? null;
   const nivelAtual = NIVEIS.find((n) => n.chave === nivel) ?? NIVEIS[0];
   // navegação igual ao Gerenciador: escolher uma campanha filtra conjuntos e anúncios; um conjunto filtra os anúncios
   const campanhaSel = d.campanhas.find((x) => x.id === busca.campanha) ?? null;
@@ -346,7 +357,9 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
 
       {google && ("erro" in google ? <Aviso>Erro ao carregar o Google Ads: {google.erro}</Aviso> : <SecaoGoogle g={google} nav={{
         clienteId: id, base, qs: atual.qs, desde: atual.desde, ate: atual.ate, nivel: busca.gnivel, campanha: busca.gcampanha, grupo: busca.ggrupo,
-      }} />)}
+      }} puxar={contasGoogleCliente.length > 0
+        ? <PuxarHistoricoMeta plataforma="google" contas={contasGoogleCliente} desde={atual.desde} ate={atual.ate} primeiroDia={primeiroDiaGoogle} />
+        : null} />)}
 
       <SecaoCrm crm={crm} gasto={gastoTotal} gastoAnterior={gastoTotalAnterior} base={base} comGoogle={!!g}
         dimensao={dimensao} qs={atual.qs} periodo={atual}
@@ -404,7 +417,7 @@ const CANAL: Record<string, string> = {
 
 type NavGoogle = { clienteId: string; base: string; qs: string; desde: string; ate: string; nivel?: string; campanha?: string; grupo?: string };
 
-async function SecaoGoogle({ g, nav }: { g: NonNullable<Awaited<ReturnType<typeof detalheGoogle>>>; nav: NavGoogle }) {
+async function SecaoGoogle({ g, nav, puxar }: { g: NonNullable<Awaited<ReturnType<typeof detalheGoogle>>>; nav: NavGoogle; puxar?: React.ReactNode }) {
   const { atual: x, anterior: y } = g;
   // navegação igual à do Google Ads: campanha → grupos → anúncios / palavras-chave / termos (lido na hora na API)
   const nivel = (NIVEIS_GOOGLE.find((n) => n.chave === nav.nivel) ?? NIVEIS_GOOGLE[0]).chave;
@@ -462,6 +475,7 @@ async function SecaoGoogle({ g, nav }: { g: NonNullable<Awaited<ReturnType<typeo
           · {g.contas.map((c) => `${c.nome} (${formatarIdGoogle(c.id)})`).join(", ")} · atualizado {quandoFoi(g.contas[0]?.ultima_sync ?? null)}
         </span>
       </h2>
+      {puxar}
       {erros.map((c) => <Aviso key={c.id}>Erro no Google Ads ({c.nome}): {c.ultimo_erro}</Aviso>)}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi rotulo="Investido" valor={dinheiro(x.gasto)}><Variacao atual={x.gasto} anterior={y.gasto} neutro /></Kpi>

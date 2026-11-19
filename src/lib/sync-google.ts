@@ -129,3 +129,22 @@ export async function sincronizarGoogle(dias: number) {
   }
   return resultado;
 }
+
+/** Sincroniza uma conta do Google num intervalo livre (puxar histórico pela tela do cliente). */
+export async function sincronizarContaGooglePorId(contaId: string, desde: string, ate: string) {
+  const banco = db();
+  const { data } = await banco.from("contas_google").select("*").eq("id", contaId).maybeSingle();
+  if (!data) throw new Error("Conta do Google não encontrada");
+  const conta = data as ContaGoogle;
+  const { data: t } = await banco.from("tokens_google").select("refresh_token").eq("id", conta.token_id ?? "").maybeSingle();
+  if (!t?.refresh_token) throw new Error("Sem login do Google para esta conta (reconecte em Configurações)");
+  try {
+    const linhas = await sincronizarContaGoogle(conta, t.refresh_token as string, desde, ate);
+    await banco.from("contas_google").update({ ultima_sync: new Date().toISOString(), ultimo_erro: null }).eq("id", conta.id);
+    return linhas;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await banco.from("contas_google").update({ ultimo_erro: msg }).eq("id", conta.id);
+    throw new Error(msg);
+  }
+}
