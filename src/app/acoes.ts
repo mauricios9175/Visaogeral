@@ -1,5 +1,8 @@
 "use server";
 
+import { after } from "next/server";
+import { enfileirarHistorico } from "@/lib/historico-contas";
+
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -76,8 +79,11 @@ export async function reativarCliente(form: FormData) {
 export async function vincularConta(form: FormData) {
   const conta = String(form.get("conta_id"));
   const cliente = String(form.get("cliente_id") ?? "") || null;
+  const { data: antes } = await db().from("contas_anuncio").select("cliente_id").eq("id", conta).maybeSingle();
   const { error } = await db().from("contas_anuncio").update({ cliente_id: cliente }).eq("id", conta);
   if (error) aviso(`Erro: ${error.message}`);
+  // vinculou agora a um cliente: puxa sozinho os últimos meses (em segundo plano)
+  if (cliente && antes?.cliente_id !== cliente) await comecarHistorico("meta", conta);
   revalidatePath("/", "layout");
 }
 
@@ -134,9 +140,20 @@ export async function sincronizarGoogleAgora(form: FormData) {
 export async function vincularContaGoogle(form: FormData) {
   const conta = String(form.get("conta_id"));
   const cliente = String(form.get("cliente_id") ?? "") || null;
+  const { data: antes } = await db().from("contas_google").select("cliente_id").eq("id", conta).maybeSingle();
   const { error } = await db().from("contas_google").update({ cliente_id: cliente }).eq("id", conta);
   if (error) avisoGoogle(`Erro: ${error.message}`);
+  if (cliente && antes?.cliente_id !== cliente) await comecarHistorico("google", conta);
   revalidatePath("/", "layout");
+}
+
+/** Põe a conta na fila de histórico e já dispara a primeira rodada em segundo plano (as próximas vêm de hora em hora). */
+async function comecarHistorico(plataforma: "meta" | "google", conta: string) {
+  await enfileirarHistorico(plataforma, conta).catch(() => null);
+  const segredo = process.env.CRON_SECRET;
+  const site = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  if (!segredo || !site) return;
+  after(() => fetch(`https://${site}/api/cron/sync?modo=historico_contas&fundo=1`, { headers: { authorization: `Bearer ${segredo}` }, signal: AbortSignal.timeout(20_000) }).then(() => null, () => null));
 }
 
 export async function alternarSyncContaGoogle(form: FormData) {

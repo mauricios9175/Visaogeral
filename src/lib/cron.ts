@@ -8,22 +8,24 @@ import { enviarAvisos } from "./push";
 import { rodadaAutomaticaSugestoes } from "./sugestoes-auto";
 import { analisarCriativosPendentes } from "./analise-criativo";
 import { gerarRadar } from "./radar";
+import { processarFilaHistorico } from "./historico-contas";
 
 // As tarefas automáticas do painel (chamadas pelo agendador externo, de hora em hora, ou à mão).
 // Cada tarefa registra a última execução (para a tela de Configurações mostrar se o agendador está funcionando).
 
 export type Tarefa = { modo: string; params?: Record<string, string> };
 
-export const TAREFAS_VALIDAS = ["hoje", "semana", "mes", "crm", "google", "avisos", "sugestoes", "criativos", "radar", "historico"];
+export const TAREFAS_VALIDAS = ["hoje", "semana", "mes", "crm", "google", "avisos", "sugestoes", "criativos", "radar", "historico", "historico_contas"];
 
 /** Tarefas que fazem uma parte por vez (devolvem "restantes"): o agendador chama de novo até acabar. */
-export const REPETEM = new Set(["sugestoes", "criativos", "radar"]);
+export const REPETEM = new Set(["sugestoes", "criativos", "radar", "historico_contas"]);
 
 export async function executarTarefa(t: Tarefa): Promise<Record<string, unknown>> {
   const p = t.params ?? {};
   switch (t.modo) {
     case "crm": return sincronizarCrms(Math.min(Number(p.dias) || 30, 180)) as unknown as Record<string, unknown>;
     case "historico": return (await atualizarHistoricoRecente()) as unknown as Record<string, unknown>;
+    case "historico_contas": return (await processarFilaHistorico()) as unknown as Record<string, unknown>;
     case "avisos": return (await enviarAvisos()) as unknown as Record<string, unknown>;
     case "sugestoes": return (await rodadaAutomaticaSugestoes()) as unknown as Record<string, unknown>;
     case "criativos": return (await analisarCriativosPendentes()) as unknown as Record<string, unknown>;
@@ -62,11 +64,11 @@ export function tarefasDaHora(hora: number): Tarefa[] {
   if (hora === 3) {
     return [
       { modo: "semana" }, { modo: "google", params: { dias: "30" } }, { modo: "crm", params: { dias: "90" } },
-      { modo: "historico" }, { modo: "sugestoes" }, { modo: "criativos" }, { modo: "avisos" }, { modo: "radar", params: { seNecessario: "1" } },
+      { modo: "historico" }, { modo: "historico_contas" }, { modo: "sugestoes" }, { modo: "criativos" }, { modo: "avisos" }, { modo: "radar", params: { seNecessario: "1" } },
     ];
   }
   return [
-    { modo: "hoje" }, { modo: "crm", params: { dias: "30" } }, { modo: "avisos" },
+    { modo: "hoje" }, { modo: "crm", params: { dias: "30" } }, { modo: "avisos" }, { modo: "historico_contas" },
     // de hora em hora, só um lote de criativos (uma=1: não se chama de novo; a fila grande anda de madrugada)
     { modo: "radar", params: { seNecessario: "1" } }, { modo: "criativos", params: { uma: "1" } },
     ...(hora % 3 === 0 ? [{ modo: "google", params: { dias: "2" } }] : []),

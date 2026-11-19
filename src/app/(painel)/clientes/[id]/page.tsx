@@ -24,6 +24,7 @@ import { PARAMS_PADRAO } from "@/lib/manual-ia";
 import { AcoesRapidas, type DestinosDuplicar } from "@/components/acoes-rapidas";
 import { db, EMPRESA_PADRAO } from "@/lib/db";
 import { PuxarHistoricoMeta } from "@/components/puxar-historico";
+import { filaDeHistorico } from "@/lib/historico-contas";
 import { LinksFicha } from "@/components/ficha";
 import { lerFicha } from "@/lib/ficha";
 import { checklistDoCliente } from "@/lib/implantacao";
@@ -123,6 +124,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
     const datas = [primeira?.data as string | undefined, typeof marca?.valor === "string" ? marca.valor : undefined].filter(Boolean) as string[];
     return datas.sort()[0] ?? null;
   })).catch((): (string | null)[] => []);
+  const naFila = new Set((await filaDeHistorico().catch(() => [])).map((x) => `${x.plataforma}:${x.conta}`));
   const primeiroDiaGoogle = inicioGoogle.includes(null) ? null : (inicioGoogle as string[]).sort().at(-1) ?? null;
   const nivelAtual = NIVEIS.find((n) => n.chave === nivel) ?? NIVEIS[0];
   // navegação igual ao Gerenciador: escolher uma campanha filtra conjuntos e anúncios; um conjunto filtra os anúncios
@@ -244,7 +246,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
         <ContasDoCliente contas={contasComDados} porConta={d.porConta} selecionada={d.contaFiltrada} cplMeta={c.cpl_meta}
           link={(conta) => `${base}?${qsPeriodo}${conta ? `&mconta=${conta}` : ""}#meta`} />
       )}
-      <PuxarHistoricoMeta contas={contasSync.map((x) => ({ id: x.id, nome: x.nome }))} desde={atual.desde} ate={atual.ate} primeiroDia={primeiroDia} />
+      <PuxarHistoricoMeta contas={contasSync.map((x) => ({ id: x.id, nome: x.nome }))} desde={atual.desde} ate={atual.ate} primeiroDia={primeiroDia} naFila={contasSync.some((x) => naFila.has(`meta:${x.id}`))} />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi rotulo="Investido" valor={dinheiro(a.gasto)} serie={d.serie.map((x) => x.gasto)}><Variacao atual={a.gasto} anterior={b.gasto} neutro /></Kpi>
         <Kpi rotulo="Resultados" valor={inteiro(a.resultados)} serie={d.serie.map((x) => x.resultados)}>
@@ -358,7 +360,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
       {google && ("erro" in google ? <Aviso>Erro ao carregar o Google Ads: {google.erro}</Aviso> : <SecaoGoogle g={google} nav={{
         clienteId: id, base, qs: atual.qs, desde: atual.desde, ate: atual.ate, nivel: busca.gnivel, campanha: busca.gcampanha, grupo: busca.ggrupo,
       }} puxar={contasGoogleCliente.length > 0
-        ? <PuxarHistoricoMeta plataforma="google" contas={contasGoogleCliente} desde={atual.desde} ate={atual.ate} primeiroDia={primeiroDiaGoogle} />
+        ? <PuxarHistoricoMeta plataforma="google" contas={contasGoogleCliente} desde={atual.desde} ate={atual.ate} primeiroDia={primeiroDiaGoogle} naFila={contasGoogleCliente.some((x) => naFila.has(`google:${x.id}`))} />
         : null} />)}
 
       <SecaoCrm crm={crm} gasto={gastoTotal} gastoAnterior={gastoTotalAnterior} base={base} comGoogle={!!g}

@@ -21,9 +21,10 @@ const dataBR = (iso: string) => iso.split("-").reverse().join("/");
  * A sincronização automática só refaz os últimos 7–30 dias; dias mais antigos que nunca foram puxados
  * (antes do painel existir ou de a conta ser vinculada) ficam faltando, e o investido sai baixo.
  */
-export function PuxarHistoricoMeta({ contas, desde, ate, primeiroDia, plataforma = "meta" }: {
+export function PuxarHistoricoMeta({ contas, desde, ate, primeiroDia, plataforma = "meta", naFila = false }: {
   contas: { id: string; nome: string }[]; desde: string; ate: string; primeiroDia: string | null;
   plataforma?: "meta" | "google";
+  naFila?: boolean; // conta nova: o painel já está puxando o histórico sozinho
 }) {
   const nomePlataforma = plataforma === "google" ? "Google Ads" : "Meta";
   const router = useRouter();
@@ -31,7 +32,7 @@ export function PuxarHistoricoMeta({ contas, desde, ate, primeiroDia, plataforma
   const [rodando, setRodando] = useState(false);
   const [erros, setErros] = useState<string[]>([]);
   if (!contas.length) return null;
-  const faltando = !primeiroDia || primeiroDia > desde;
+  const faltando = !naFila && (!primeiroDia || primeiroDia > desde);
 
   async function puxar() {
     setRodando(true);
@@ -79,7 +80,9 @@ export function PuxarHistoricoMeta({ contas, desde, ate, primeiroDia, plataforma
     <div className={`space-y-2 rounded-xl border p-3 text-sm ${faltando ? "border-atencao/50 bg-atencao-bg/40" : "border-borda"}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-texto-2">
-          {faltando
+          {naFila
+            ? <>⏳ Conta nova: o painel está puxando sozinho os últimos 6 meses do {nomePlataforma}, um pedaço por vez (de hora em hora). Não precisa fazer nada.</>
+            : faltando
             ? <>▲ O painel só tem dados do {nomePlataforma} {primeiroDia ? <>a partir de <b>{dataBR(primeiroDia)}</b></> : "de nenhum dia"} neste período (começa em {dataBR(desde)}). O investido e os resultados estão incompletos.</>
             : <>Os números não batem com o {plataforma === "google" ? "Google Ads" : "Gerenciador"}? Puxe de novo do {nomePlataforma} todos os dias deste período.</>}
         </p>

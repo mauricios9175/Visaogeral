@@ -26,7 +26,7 @@ import { ultimasTarefas } from "@/lib/cron";
 
 const NOME_TAREFA: Record<string, string> = {
   hoje: "Meta (hoje)", semana: "Meta (7 dias, madrugada)", mes: "Meta (30 dias)", crm: "CRMs", google: "Google Ads",
-  avisos: "Avisos no celular", sugestoes: "Sugestões da IA", criativos: "Análise de criativos", radar: "Radar de criativos", historico: "Histórico mensal",
+  avisos: "Avisos no celular", sugestoes: "Sugestões da IA", criativos: "Análise de criativos", radar: "Radar de criativos", historico: "Histórico mensal", historico_contas: "Histórico de contas novas",
 };
 import { agendaPrincipal, sairDaAgenda } from "@/app/acoes-agenda";
 
