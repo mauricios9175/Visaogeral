@@ -364,6 +364,7 @@ export default async function PaginaCliente({ params, searchParams }: PageProps<
         : null} />)}
 
       <SecaoCrm crm={crm} gasto={gastoTotal} gastoAnterior={gastoTotalAnterior} base={base} comGoogle={!!g}
+        puxando={naFila.has(`crm:${id}`)}
         dimensao={dimensao} qs={atual.qs} periodo={atual}
         gastos={{
           // gasto do período por nome, para a coluna "Investido" das UTMs
@@ -661,8 +662,9 @@ function Tabela({ linhas, meta, nivel, voltar, abrir, destinos }: {
 
 type GastosPorNivel = Record<"campanha" | "conjunto" | "anuncio", Map<string, number>>;
 
-function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, periodo, gastos }: {
+function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, periodo, gastos, puxando = false }: {
   crm: Awaited<ReturnType<typeof detalheCrm>> | { erro: string };
+  puxando?: boolean; // CRM novo: o painel ainda está puxando os últimos 6 meses
   gasto: number;
   gastoAnterior: number;
   base: string;
@@ -695,6 +697,11 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, pe
           {" · "}<Link href={`${base}/crm`} className="text-destaque underline">ajustar</Link>
         </span>
       </h2>
+      {puxando && (
+        <p className="rounded-xl border border-borda p-3 text-sm text-texto-2">
+          ⏳ CRM novo: o painel está puxando sozinho os leads dos últimos 6 meses, um pedaço por vez (de hora em hora). Os números de meses antigos vão aparecendo aos poucos.
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <Kpi rotulo="Leads no CRM" valor={inteiro(x.leads)}>
           <span className="block text-xs text-texto-3">{inteiro(x.leadsAnuncio)} de anúncio · {inteiro(x.leads - x.leadsAnuncio)} outras fontes</span>

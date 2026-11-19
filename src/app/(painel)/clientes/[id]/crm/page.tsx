@@ -1,3 +1,4 @@
+import { filaDeHistorico } from "@/lib/historico-contas";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { quandoFoi } from "@/lib/formato";
@@ -28,6 +29,8 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
   ]);
   if (!cliente) notFound();
   const c = conexao as ConexaoCrm | null;
+  const filaHist = await filaDeHistorico().catch(() => []);
+  const puxandoCrm = filaHist.some((x) => (x.plataforma === "crm" || x.plataforma === "mensal") && x.conta === id);
 
   const [fontes, camposCrm] = c
     ? await Promise.all([fontesDoCliente(id).catch(() => []), camposDoClienteCrm(id).catch(() => [])])
@@ -76,6 +79,11 @@ export default async function ConfigCrm({ params, searchParams }: PageProps<"/cl
         </p>
       </div>
       {msg && <Aviso>{msg}</Aviso>}
+      {puxandoCrm && (
+        <p className="rounded-xl border border-borda p-3 text-sm text-texto-2">
+          ⏳ CRM novo: o painel está puxando sozinho os leads dos últimos 6 meses e depois monta o histórico mensal, um pedaço por vez (de hora em hora). Não precisa fazer nada.
+        </p>
+      )}
 
       {/* 1. Conexão */}
       <section className="space-y-3 rounded-2xl border border-borda bg-superficie p-4">

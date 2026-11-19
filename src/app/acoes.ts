@@ -148,7 +148,7 @@ export async function vincularContaGoogle(form: FormData) {
 }
 
 /** Põe a conta na fila de histórico e já dispara a primeira rodada em segundo plano (as próximas vêm de hora em hora). */
-async function comecarHistorico(plataforma: "meta" | "google", conta: string) {
+async function comecarHistorico(plataforma: "meta" | "google" | "crm", conta: string) {
   await enfileirarHistorico(plataforma, conta).catch(() => null);
   const segredo = process.env.CRON_SECRET;
   const site = process.env.VERCEL_PROJECT_PRODUCTION_URL;
@@ -204,6 +204,11 @@ export async function salvarConexaoCrm(form: FormData) {
     );
     if (error) throw new Error(error.message);
     msg = `${NOME_CRM[tipo]} conectado! ${funis.length} funil(is) encontrado(s). Agora escolha o funil e a etapa de qualificação.`;
+    // CRM novo (ou trocado): puxa sozinho os leads dos últimos meses, aos poucos
+    if (!atual || atual.tipo !== tipo) {
+      await comecarHistorico("crm", clienteId);
+      msg += " O painel já está puxando os leads dos últimos 6 meses sozinho (pode levar algumas horas).";
+    }
   } catch (e) {
     msg = `Não foi possível conectar: ${e instanceof Error ? e.message : e}`;
   }
