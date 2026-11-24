@@ -699,6 +699,49 @@ export type DetalheMes = {
   plataforma: Record<"meta" | "google" | "outros", NumerosPlataforma>;
 };
 
+type Plat = "meta" | "google" | "outros";
+
+/** Negócios do funil do relatório do cliente desde uma data, com a plataforma de cada um (Meta, Google ou outros). */
+async function negociosDoFunil(clienteId: string, desde: string) {
+  const cx = await conexaoResumo(clienteId);
+  if (!cx) return null;
+  const f = funilDaConexao(cx);
+  const negocios = (await negociosDe([clienteId], desde))
+    .map((n) => {
+      const u = completarUtms(n, n.campos, cx.mapa_utm);
+      return { ...n, utm_source: u.source, utm_medium: u.medium, utm_campaign: u.campaign, utm_content: u.content, utm_term: u.term };
+    })
+    .filter((n) => entraNoFunil(n, f, cx));
+  const plataforma = new Map(negocios.map((n) => [n.id, (plataformaDoNegocio(n) ?? "outros") as Plat] as const));
+  return { f, negocios, plataforma };
+}
+
+function contarPorPlataforma(d: NonNullable<Awaited<ReturnType<typeof negociosDoFunil>>>, periodo: { desde: string; ate: string }) {
+  const { f, negocios, plataforma } = d;
+  const criados = negocios.filter((n) => noPeriodo(n.criado_em, periodo));
+  const ganhos = negocios.filter((n) => n.ganho === true && noPeriodo(n.fechado_em, periodo));
+  const daPlataforma = (p: Plat): NumerosPlataforma => {
+    const c = criados.filter((n) => plataforma.get(n.id) === p);
+    const g = ganhos.filter((n) => plataforma.get(n.id) === p);
+    return {
+      leads: c.length,
+      passos: new Map(f.passos.map((x, i) => [x.nome, c.filter(f.teste[i]).length])),
+      vendas: g.length,
+      faturamento: g.reduce((t, n) => t + Number(n.valor), 0),
+    };
+  };
+  return {
+    criados,
+    plataforma: { meta: daPlataforma("meta"), google: daPlataforma("google"), outros: daPlataforma("outros") } as Record<Plat, NumerosPlataforma>,
+  };
+}
+
+/** Relatório: leads, passos, vendas e valor do funil do relatório, separados por Meta, Google e outros, num período. */
+export async function funilPorPlataforma(clienteId: string, periodo: { desde: string; ate: string }) {
+  const d = await negociosDoFunil(clienteId, periodo.desde);
+  return d ? contarPorPlataforma(d, periodo).plataforma : null;
+}
+
 /**
  * Histórico, calculado na hora a partir do CRM (mesma regra do funil do relatório), por mês ("2026-01-01"):
  * - situação de hoje dos leads do mês (e de cada passo, ex.: Interessados): abertos e perdidos;
@@ -707,37 +750,17 @@ export type DetalheMes = {
 export async function detalheDosMeses(clienteId: string, meses: string[]) {
   const resultado = new Map<string, DetalheMes>();
   if (!meses.length) return resultado;
-  const cx = await conexaoResumo(clienteId);
-  if (!cx) return resultado;
-  const f = funilDaConexao(cx);
   const ordenados = [...meses].sort();
-  const negocios = (await negociosDe([clienteId], ordenados[0]))
-    .map((n) => {
-      const u = completarUtms(n, n.campos, cx.mapa_utm);
-      return { ...n, utm_source: u.source, utm_medium: u.medium, utm_campaign: u.campaign, utm_content: u.content, utm_term: u.term };
-    })
-    .filter((n) => entraNoFunil(n, f, cx));
-  const plataforma = new Map(negocios.map((n) => [n.id, plataformaDoNegocio(n) ?? "outros"] as const));
+  const d = await negociosDoFunil(clienteId, ordenados[0]);
+  if (!d) return resultado;
   for (const mes of ordenados) {
     const [a, m] = mes.split("-").map(Number);
     const proximo = m === 12 ? `${a + 1}-01-01` : `${a}-${String(m + 1).padStart(2, "0")}-01`;
-    const periodo = { desde: mes, ate: somarDiasISO(proximo, -1) };
-    const criados = negocios.filter((n) => noPeriodo(n.criado_em, periodo));
-    const ganhos = negocios.filter((n) => n.ganho === true && noPeriodo(n.fechado_em, periodo));
-    const daPlataforma = (p: "meta" | "google" | "outros"): NumerosPlataforma => {
-      const c = criados.filter((n) => plataforma.get(n.id) === p);
-      const g = ganhos.filter((n) => plataforma.get(n.id) === p);
-      return {
-        leads: c.length,
-        passos: new Map(f.passos.map((x, i) => [x.nome, c.filter(f.teste[i]).length])),
-        vendas: g.length,
-        faturamento: g.reduce((t, n) => t + Number(n.valor), 0),
-      };
-    };
+    const { criados, plataforma } = contarPorPlataforma(d, { desde: mes, ate: somarDiasISO(proximo, -1) });
     resultado.set(mes, {
       leads: situacaoDe(criados),
-      passos: new Map(f.passos.map((p, i) => [p.nome, situacaoDe(criados.filter(f.teste[i]))])),
-      plataforma: { meta: daPlataforma("meta"), google: daPlataforma("google"), outros: daPlataforma("outros") },
+      passos: new Map(d.f.passos.map((p, i) => [p.nome, situacaoDe(criados.filter(d.f.teste[i]))])),
+      plataforma,
     });
   }
   return resultado;

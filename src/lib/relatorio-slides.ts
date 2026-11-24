@@ -6,7 +6,7 @@ import { tokenDeAcesso, tokenSoDrive } from "./google";
 import { atividadesDaConta } from "./meta";
 import { tokenDaConta } from "./sync";
 import type { ContaAnuncio } from "./db";
-import { detalheCliente, detalheCrm, type DimensaoUtm, type LinhaTabela } from "./consultas";
+import { detalheCliente, detalheCrm, funilPorPlataforma, type DimensaoUtm, type LinhaTabela } from "./consultas";
 import { detalheGoogle } from "./consultas-google";
 import { funilDoCliente, lerHistorico, mesDe, nomeMes, somarMeses, type MesConsolidado } from "./historico";
 import { dinheiro, inteiro, pct } from "./formato";
@@ -450,6 +450,7 @@ export type PedidoRelatorio = {
   vendas?: boolean;       // slide com o gráfico de vendas realizadas e valor das vendas (padrão: sim, se houver CRM)
   empresaModelo?: string; // usar o modelo desta empresa (sem: o da empresa do cliente)
   resumoIA?: boolean;     // slide "Destaques" escrito pela IA (modelos novos; padrão: sim)
+  metaGoogle?: boolean;   // slide "Meta × Google": resultados do CRM separados por plataforma (padrão: sim, se tiver os dois)
 };
 
 /** Período anterior para comparar: o mês anterior (relatório de mês inteiro) ou os mesmos dias logo antes. */
@@ -683,7 +684,7 @@ async function preencherRelatorio(p: PedidoRelatorio, cfg: ConfigEmpresa) {
   const ant = periodoAnterior(p.desde, p.ate);
   const anteriorP = periodo(ant.desde, ant.ate);
   const novo = cfg.layout !== "completo";
-  const [meta, crm, google, { meses }, funil, acoes, destaques] = await Promise.all([
+  const [meta, crm, google, { meses }, funil, acoes, destaques, porPlataforma] = await Promise.all([
     detalheCliente(p.clienteId, atual, anteriorP),
     detalheCrm(p.clienteId, atual, anteriorP).catch(() => null),
     detalheGoogle(p.clienteId, atual, anteriorP).catch(() => null),
@@ -694,6 +695,7 @@ async function preencherRelatorio(p: PedidoRelatorio, cfg: ConfigEmpresa) {
     novo && p.resumoIA !== false
       ? destaquesIA(p.clienteId, atual, anteriorP).catch((e) => `• (Não consegui escrever com a IA: ${e instanceof Error ? e.message.slice(0, 120) : e}. Escreva aqui os destaques do período.)`)
       : Promise.resolve("• Escreva aqui os destaques do período."),
+    p.metaGoogle !== false ? funilPorPlataforma(p.clienteId, { desde: p.desde, ate: p.ate }).catch(() => null) : Promise.resolve(null),
   ]);
   if (!meta) throw new Error("Cliente não encontrado.");
   const rotuloPer = rotuloPeriodo(p.desde, p.ate);
@@ -833,6 +835,41 @@ async function preencherRelatorio(p: PedidoRelatorio, cfg: ConfigEmpresa) {
     const caixa = chave.startsWith("tabela") ? { ...m.caixa, h: alturaSlide - m.caixa.y - 150_000 } : m.caixa;
     reqs.push(...gerar(m.slide, caixa));
   };
+
+  // Meta × Google: cópia de um slide de tabela (de preferência o das campanhas do Google, para ficar logo depois dele),
+  // com o título trocado e a tabela por plataforma. Feita antes de preencher a origem, para a cópia vir sem a tabela dela.
+  const divMG = (a: number | null | undefined, b: number | null | undefined) => (a != null && b ? a / b : null);
+  const gastoMetaP = soma ? soma.gastoMeta : meta.atual.gasto;
+  const gastoGoogleP = soma ? soma.gastoGoogle : google?.atual.gasto ?? 0;
+  const origemMG = ["tabela:google", "tabela:qualificacao", "tabela:anuncios", "tabela:conjuntos"].map((k) => marcadores.get(k)).find(Boolean);
+  if (temCrm && porPlataforma && origemMG && gastoMetaP > 0 && gastoGoogleP > 0) {
+    const slide = novoId("mg"), elemento = novoId("mge");
+    // título e subtítulo: as caixas de texto acima da tabela, de cima para baixo
+    const textos = (apresentacao.slides.find((x) => x.objectId === origemMG.slide)?.pageElements ?? [])
+      .filter((el) => el.objectId !== origemMG.elemento && textoDe(el).trim() && (el.transform?.translateY ?? 0) < origemMG.caixa.y)
+      .sort((a, b) => (a.transform?.translateY ?? 0) - (b.transform?.translateY ?? 0));
+    const ids = Object.fromEntries(textos.slice(0, 2).map((el, i) => [el.objectId, novoId(`mgt${i}`)]));
+    reqs.push({ duplicateObject: { objectId: origemMG.slide, objectIds: { [origemMG.slide]: slide, [origemMG.elemento]: elemento, ...ids } } });
+    reqs.push({ deleteObject: { objectId: elemento } });
+    Object.values(ids).forEach((id, i) => {
+      reqs.push({ deleteText: { objectId: id, textRange: { type: "ALL" } } });
+      reqs.push({ insertText: { objectId: id, insertionIndex: 0, text: i === 0 ? "Meta × Google" : "De onde vieram os resultados (pela origem do lead no CRM)" } });
+    });
+    const pl = porPlataforma;
+    const total = { leads: leads ?? 0, vendas: vendas ?? 0, faturamento: faturamento ?? 0 };
+    const linhaPl = (nome: string, n: typeof pl.meta, gastoPl: number | null) => [
+      nome, dinheiro(gastoPl), inteiro(n.leads), ...nomesPassos.map((x) => inteiro(n.passos.get(x) ?? 0)), inteiro(n.vendas), dinheiro(n.faturamento),
+      dinheiro(divMG(gastoPl, n.leads)), gastoPl && n.faturamento ? `${(n.faturamento / gastoPl).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}x` : "—",
+    ];
+    const temOutros = pl.outros.leads > 0 || pl.outros.vendas > 0;
+    reqs.push(...tabela(slide, { ...origemMG.caixa, h: alturaSlide - origemMG.caixa.y - 150_000 },
+      ["Plataforma", "Investimento", funil.leads, ...nomesPassos, funil.vendas, "Valor das vendas", `Custo por ${funil.leads.toLowerCase().replace(/s$/, "")}`, "Retorno"],
+      [linhaPl("Meta", pl.meta, gastoMetaP), linhaPl("Google", pl.google, gastoGoogleP), ...(temOutros ? [linhaPl("Outras origens", pl.outros, null)] : [])],
+      { total: [
+        "Total", dinheiro(gasto), inteiro(total.leads), ...nomesPassos.map((x) => inteiro(valorPasso(x))), inteiro(total.vendas), dinheiro(total.faturamento),
+        dinheiro(divMG(gasto, total.leads)), gasto && total.faturamento ? `${(total.faturamento / gasto).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}x` : "—",
+      ], larguraPrimeira: 0.18 }));
+  }
 
   const totalMeta = celulasMeta("Total", { ...meta.atual, nome: "Total" });
   preencher("tabela:conjuntos", meta.conjuntos.length

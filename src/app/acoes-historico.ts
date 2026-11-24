@@ -77,7 +77,7 @@ export async function gerarRelatorioSlides(form: FormData) {
   try {
     const modelo = String(form.get("modelo") ?? "");
     const r = await gerarRelatorio({
-      clienteId, desde, ate, qualificacoes, agrupar: form.get("agrupar") === "on", motivosPerda: form.get("motivos_perda") === "on", vendas: form.get("vendas") === "on",
+      clienteId, desde, ate, qualificacoes, agrupar: form.get("agrupar") === "on", motivosPerda: form.get("motivos_perda") === "on", metaGoogle: form.get("meta_google") === "on", vendas: form.get("vendas") === "on",
       ...(modelo ? { empresaModelo: modelo } : {}), resumoIA: form.get("resumo_ia") === "on",
     });
     msg = `Relatório de ${r.periodo} pronto: ${r.link}`;

@@ -159,6 +159,12 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
                 <input type="checkbox" name="resumo_ia" defaultChecked />
                 Destaques escritos pela IA <span className="text-xs text-texto-3">(layouts Mensal e Simples)</span>
               </label>
+              {temGoogle && (
+                <label className="flex items-center gap-2 self-center text-sm">
+                  <input type="checkbox" name="meta_google" defaultChecked />
+                  Slide Meta × Google <span className="text-xs text-texto-3">(leads e vendas do CRM por plataforma)</span>
+                </label>
+              )}
               <label className="flex items-center gap-2 self-center text-sm">
                 <input type="checkbox" name="motivos_perda" />
                 Slide de motivos de perda <span className="text-xs text-texto-3">(do CRM)</span>
