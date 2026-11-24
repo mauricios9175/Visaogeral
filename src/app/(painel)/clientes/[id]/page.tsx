@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Ordenavel } from "@/components/ordenavel";
+import { SituacaoLeads } from "@/components/situacao";
 import { notFound } from "next/navigation";
 import { resolverPeriodo } from "@/lib/datas";
 import { detalheCliente, detalheCrm, DIMENSOES_UTM, somarGeral, type DimensaoUtm, type LinhaTabela } from "@/lib/consultas";
@@ -736,7 +737,7 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, pe
 
       {crm.porFonte.length > 0 && (
         <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
-          <Ordenavel><table className="w-full text-sm">
+          <Ordenavel chave="crm-fontes" situacao><table className="w-full text-sm">
             <thead className="text-left text-xs text-texto-3">
               <tr>
                 <th className="px-4 py-2 font-normal">Fonte no CRM</th>
@@ -752,8 +753,10 @@ function SecaoCrm({ crm, gasto, gastoAnterior, base, comGoogle, dimensao, qs, pe
                     {o.nome}{" "}
                     {o.anuncio && <span className="rounded-full bg-fundo px-2 py-0.5 text-[11px] text-destaque">anúncio</span>}
                   </td>
-                  <td className="px-3 py-2 text-right">{inteiro(o.leads)}</td>
-                  <td className="px-3 py-2 text-right">{o.qualificados == null ? "—" : inteiro(o.qualificados)}</td>
+                  <td className="px-3 py-2 text-right" data-valor={o.leads}>{inteiro(o.leads)}<SituacaoLeads s={o.situacao.leads} /></td>
+                  <td className="px-3 py-2 text-right" data-valor={o.qualificados ?? undefined}>
+                    {o.qualificados == null ? "—" : inteiro(o.qualificados)}<SituacaoLeads s={o.situacao.qualificados} />
+                  </td>
                   <td className="px-3 py-2 text-right">{inteiro(o.vendas)}</td>
                   <td className="px-3 py-2 text-right">{dinheiro(o.faturamento)}</td>
                   <td className="px-3 py-2 text-right">{dinheiro(o.emNegociacao)}</td>
@@ -861,7 +864,7 @@ function TabelaUtm({ crm, dimensao, base, qs, periodo, gastos }: {
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <Ordenavel><table className="w-full text-sm">
+          <Ordenavel chave="utm" situacao><table className="w-full text-sm">
             <thead className="text-left text-xs text-texto-3">
               <tr>
                 <th className="px-4 py-2 font-normal">{DIMENSOES_UTM.find((d) => d.chave === dimensao)!.rotulo}</th>
@@ -874,8 +877,10 @@ function TabelaUtm({ crm, dimensao, base, qs, periodo, gastos }: {
               {linhas.map((l) => (
                 <tr key={l.nome} className="border-t border-borda">
                   <td className={`max-w-96 truncate px-4 py-2 ${l.nome === "(sem UTM)" ? "text-texto-3" : ""}`} title={l.nome}>{l.nome}</td>
-                  <td className="px-3 py-2 text-right">{inteiro(l.leads)}</td>
-                  <td className="px-3 py-2 text-right">{l.qualificados == null ? "—" : inteiro(l.qualificados)}</td>
+                  <td className="px-3 py-2 text-right" data-valor={l.leads}>{inteiro(l.leads)}<SituacaoLeads s={l.situacao.leads} /></td>
+                  <td className="px-3 py-2 text-right" data-valor={l.qualificados ?? undefined}>
+                    {l.qualificados == null ? "—" : inteiro(l.qualificados)}<SituacaoLeads s={l.situacao.qualificados} />
+                  </td>
                   <td className="px-3 py-2 text-right">{inteiro(l.vendas)}</td>
                   <td className="px-3 py-2 text-right">{l.leads ? pct((l.vendas / l.leads) * 100) : "—"}</td>
                   <td className="px-3 py-2 text-right">{dinheiro(l.faturamento)}</td>

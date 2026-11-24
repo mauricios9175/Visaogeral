@@ -65,3 +65,14 @@ a.text-destaque:hover {
 input, select, textarea {
   color-scheme: dark;
 }
+
+/* Tabelas (componente Ordenavel): modo compacto e "abertos e perdidos" */
+.tabela-opcoes .so-situacao { display: none; }
+.tabela-opcoes[data-situacao="sim"] .so-situacao { display: block; }
+.tabela-opcoes[data-compacto="sim"] table { font-size: 12px; }
+.tabela-opcoes[data-compacto="sim"] td,
+.tabela-opcoes[data-compacto="sim"] th { padding-top: 3px; padding-bottom: 3px; }
+.tabela-opcoes[data-compacto="sim"] .so-detalhe { display: none; }
+/* Tabela com alguma coluna de largura escolhida à mão (colunas-ajustaveis.ts): texto numa linha só */
+table[data-colunas] th,
+table[data-colunas] td { white-space: nowrap; }

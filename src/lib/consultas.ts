@@ -564,8 +564,14 @@ export type NumerosCrm = {
   faturamento: number;
   faturamentoAnuncio: number;
   emNegociacao: number;               // valor dos negócios em aberto criados no período
+  // situação de hoje dos leads criados no período: ainda abertos (nem ganhos nem perdidos) e já perdidos
+  situacao: { leads: Situacao; qualificados: Situacao | null };
   funil: NumerosFunil;                // funil do relatório (só anúncio, se o cliente estiver configurado assim)
 };
+
+export type Situacao = { abertos: number; perdidos: number };
+const situacaoDe = (ns: { ganho: boolean | null }[]): Situacao =>
+  ({ abertos: ns.filter((n) => n.ganho == null).length, perdidos: ns.filter((n) => n.ganho === false).length });
 
 // um formatador só (criar um por negócio deixava o histórico de clientes grandes lento demais)
 const formatoDiaSP = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" });
@@ -626,6 +632,7 @@ export function numerosCrm(negocios: NegocioCrm[], cx: ConexaoResumo, p: { desde
     faturamento: ganhos.reduce((s, n) => s + Number(n.valor), 0),
     faturamentoAnuncio: ganhos.filter(anuncio).reduce((s, n) => s + Number(n.valor), 0),
     emNegociacao: criados.filter((n) => n.ganho == null).reduce((s, n) => s + Number(n.valor), 0),
+    situacao: { leads: situacaoDe(criados), qualificados: semEtapa ? null : situacaoDe(criados.filter(qualificado)) },
   };
 }
 
@@ -662,16 +669,43 @@ export async function resumoCrm(atual: Periodo, anterior: Periodo) {
 const CAMPO_VALOR = /or[cç]amento|valor|ticket|budget|investimento|pre[cç]o/i;
 
 /** CRM na tela do cliente: totais, quebra por fonte e lista de negócios do período. */
-export async function detalheCrm(clienteId: string, atual: Periodo, anterior: Periodo) {
+async function conexaoResumo(clienteId: string) {
   // mapa_utm vem do SQL 0014; sem ele, segue só com a detecção automática
   const ler = (colunas: string) => db().from("crm_conexoes").select(colunas).eq("cliente_id", clienteId).maybeSingle();
   // funil/rótulos (SQL 0015 e 0018) e mapa_utm (SQL 0014): cada um que faltar, tenta sem
   let resp = await ler(`${COLUNAS_CONEXAO}, mapa_utm, funil, rotulos, pipeline_proposta_id, etapa_proposta_ordem`);
   if (resp.error) resp = await ler(`${COLUNAS_CONEXAO}, mapa_utm`);
   if (resp.error) resp = await ler(COLUNAS_CONEXAO);
-  const { data } = resp;
-  if (!data) return null;
-  const cx = data as unknown as ConexaoResumo;
+  return (resp.data ?? null) as unknown as ConexaoResumo | null;
+}
+
+/**
+ * Histórico: dos leads de cada mês (e de cada passo do funil, ex.: Interessados), quantos estão abertos HOJE no CRM
+ * e quantos já foram perdidos. Mesma regra do funil do relatório. Chave: o mês ("2026-01-01").
+ */
+export async function situacaoPorMes(clienteId: string, meses: string[]) {
+  const resultado = new Map<string, { leads: Situacao; passos: Map<string, Situacao> }>();
+  if (!meses.length) return resultado;
+  const cx = await conexaoResumo(clienteId);
+  if (!cx) return resultado;
+  const f = funilDaConexao(cx);
+  const ordenados = [...meses].sort();
+  const negocios = (await negociosDe([clienteId], ordenados[0])).filter((n) => entraNoFunil(n, f, cx));
+  for (const mes of ordenados) {
+    const [a, m] = mes.split("-").map(Number);
+    const proximo = m === 12 ? `${a + 1}-01-01` : `${a}-${String(m + 1).padStart(2, "0")}-01`;
+    const criados = negocios.filter((n) => noPeriodo(n.criado_em, { desde: mes, ate: somarDiasISO(proximo, -1) }));
+    resultado.set(mes, {
+      leads: situacaoDe(criados),
+      passos: new Map(f.passos.map((p, i) => [p.nome, situacaoDe(criados.filter(f.teste[i]))])),
+    });
+  }
+  return resultado;
+}
+
+export async function detalheCrm(clienteId: string, atual: Periodo, anterior: Periodo) {
+  const cx = await conexaoResumo(clienteId);
+  if (!cx) return null;
   // UTMs: atribuição do CRM + campos personalizados ("Campanha", "Criativo", "Público"…), conforme o mapa do cliente
   const negocios = (await negociosDe([clienteId], anterior.desde)).map((n) => {
     const u = completarUtms(n, n.campos, cx.mapa_utm);

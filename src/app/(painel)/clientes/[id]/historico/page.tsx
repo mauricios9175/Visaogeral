@@ -8,7 +8,8 @@ import type { FunilCliente } from "@/lib/funil";
 import { configRelatorio, linkApresentacao, ORDEM_QUALIFICACAO, TITULO_QUALIFICACAO } from "@/lib/relatorio-slides";
 import { chaveEmpresa, LAYOUTS, listarEmpresas } from "@/lib/empresas";
 import { EMPRESA_PADRAO } from "@/lib/db";
-import { DIMENSOES_UTM } from "@/lib/consultas";
+import { DIMENSOES_UTM, situacaoPorMes, type Situacao } from "@/lib/consultas";
+import { SituacaoLeads } from "@/components/situacao";
 import { hojeISO } from "@/lib/datas";
 import { Aviso, Voltar } from "@/components/ui";
 import { BotaoEnviar } from "@/components/botao";
@@ -50,6 +51,16 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   // do mais antigo (em cima) para o mais recente (embaixo)
   const visiveis = (anoSel ? meses.filter((m) => m.mes.startsWith(anoSel)) : meses.slice(0, 12)).reverse();
   const total = somarMeses(visiveis);
+  // de cada mês, quantos leads (e de cada passo) estão abertos hoje no CRM e quantos já foram perdidos
+  const situacao = await situacaoPorMes(id, visiveis.map((m) => m.mes)).catch(() => new Map<string, SituacaoMes>());
+  const somar = (lista: (Situacao | undefined)[]) => lista.some(Boolean)
+    ? lista.reduce<Situacao>((t, x) => ({ abertos: t.abertos + (x?.abertos ?? 0), perdidos: t.perdidos + (x?.perdidos ?? 0) }), { abertos: 0, perdidos: 0 })
+    : undefined;
+  const situacaoTotal: SituacaoMes | undefined = situacao.size ? {
+    leads: somar([...situacao.values()].map((x) => x.leads))!,
+    passos: new Map([...new Set([...situacao.values()].flatMap((x) => [...x.passos.keys()]))]
+      .map((p) => [p, somar([...situacao.values()].map((x) => x.passos.get(p)))!])),
+  } : undefined;
   // colunas dos passos: as do funil atual do cliente e as que aparecem nos meses já gravados
   const passos = [...new Set([...funil.passos.map((p) => p.nome), ...nomesDosPassos(visiveis)])];
   const temValorPropostas = visiveis.some((m) => m.valorPropostas != null);
@@ -197,7 +208,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
           </div>
 
           <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
-            <Ordenavel><table className="w-full min-w-[1100px] text-sm">
+            <Ordenavel chave="historico" compacto="ligado" situacao><table className="w-full min-w-[1100px] text-sm">
               <thead className="text-left text-xs text-texto-3">
                 <tr className="border-b border-borda">
                   <th className="px-3 py-2 font-normal">Mês</th>
@@ -215,11 +226,11 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
                 </tr>
               </thead>
               <tbody>
-                {visiveis.map((m) => <LinhaMes key={m.mes} m={m} passos={passos} temValorPropostas={temValorPropostas} temGoogle={temGoogle} />)}
+                {visiveis.map((m) => <LinhaMes key={m.mes} m={m} passos={passos} temValorPropostas={temValorPropostas} temGoogle={temGoogle} situacao={situacao.get(m.mes)} />)}
               </tbody>
               {total && visiveis.length > 1 && (
                 <tfoot className="border-t border-borda font-medium">
-                  <LinhaMes m={{ ...total, mes: anoSel ? `Total ${anoSel}` : visiveis.length < 12 ? `Total (${visiveis.length} meses)` : "Total 12 meses" }} passos={passos} temValorPropostas={temValorPropostas} temGoogle={temGoogle} total />
+                  <LinhaMes m={{ ...total, mes: anoSel ? `Total ${anoSel}` : visiveis.length < 12 ? `Total (${visiveis.length} meses)` : "Total 12 meses" }} passos={passos} temValorPropostas={temValorPropostas} temGoogle={temGoogle} situacao={situacaoTotal} total />
                 </tfoot>
               )}
             </table></Ordenavel>
@@ -243,7 +254,11 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   );
 }
 
-function LinhaMes({ m, passos, temValorPropostas, temGoogle, total }: { m: MesConsolidado; passos: string[]; temValorPropostas: boolean; temGoogle: boolean; total?: boolean }) {
+type SituacaoMes = { leads: Situacao; passos: Map<string, Situacao> };
+
+function LinhaMes({ m, passos, temValorPropostas, temGoogle, total, situacao }: {
+  m: MesConsolidado; passos: string[]; temValorPropostas: boolean; temGoogle: boolean; total?: boolean; situacao?: SituacaoMes;
+}) {
   const celula = "px-3 py-2 text-right tabular-nums";
   const passo = (nome: string) => m.passos.find((p) => p.nome === nome);
   const marca = (c: string) => (m.ajustado.includes(c) ? <span className="text-destaque" title="corrigido à mão">*</span> : null);
@@ -256,11 +271,15 @@ function LinhaMes({ m, passos, temValorPropostas, temGoogle, total }: { m: MesCo
       <td className={celula}>
         {dinheiro(m.investimento)}{marca("investimento")}
         {temGoogle && !m.ajustado.includes("investimento") && (
-          <span className="block text-xs text-texto-3">Meta {dinheiro(m.gastoMeta)} · Google {dinheiro(m.gastoGoogle)}</span>
+          <span className="so-detalhe block whitespace-nowrap text-[11px] text-texto-3">Meta {dinheiro(m.gastoMeta)} · Google {dinheiro(m.gastoGoogle)}</span>
         )}
       </td>
-      <td className={celula}>{inteiro(m.leads)}{marca("leads")}</td>
-      {passos.map((p) => <td key={p} className={celula}>{inteiro(passo(p)?.valor)}{marca(chavePasso(p))}</td>)}
+      <td className={celula} data-valor={m.leads ?? undefined}>{inteiro(m.leads)}{marca("leads")}<SituacaoLeads s={situacao?.leads} /></td>
+      {passos.map((p) => (
+        <td key={p} className={celula} data-valor={passo(p)?.valor ?? undefined}>
+          {inteiro(passo(p)?.valor)}{marca(chavePasso(p))}<SituacaoLeads s={situacao?.passos.get(p)} />
+        </td>
+      ))}
       <td className={celula}>{inteiro(m.vendas)}{marca("vendas")}</td>
       <td className={celula}>{dinheiro(m.faturamento)}{marca("faturamento")}</td>
       {temValorPropostas && <td className={celula}>{dinheiro(m.valorPropostas)}{marca("valor_propostas")}</td>}

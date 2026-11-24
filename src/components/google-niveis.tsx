@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ajustarColunas } from "./colunas-ajustaveis";
 import type { LinhaNivelGoogle, NivelGoogle } from "@/lib/google";
 import { decimal, dinheiro, inteiro, pct } from "@/lib/formato";
 import { BotaoGoogle } from "./botao-google";
@@ -76,6 +77,9 @@ export function TabelaGoogle({ nivel, linhas, voltar, cpaMedio }: {
   nivel: "campanhas" | NivelGoogle; linhas: LinhaTabelaGoogle[]; voltar: string; cpaMedio: number | null;
 }) {
   const filtros = nivel === "termos" ? FILTROS_TERMOS : FILTROS_GERAIS;
+  const tabelaRef = useRef<HTMLTableElement>(null);
+  // colunas com largura ajustável (arrastar a borda do cabeçalho), como nas outras tabelas
+  useEffect(() => (tabelaRef.current ? ajustarColunas(tabelaRef.current) : undefined), []);
   const [busca, setBusca] = useState("");
   const [filtro, setFiltro] = useState("todos");
   const [ordem, setOrdem] = useState<{ col: Coluna; desc: boolean }>({ col: "gasto", desc: true });
@@ -119,7 +123,7 @@ export function TabelaGoogle({ nivel, linhas, voltar, cpaMedio }: {
         ))}
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table ref={tabelaRef} className="w-full text-sm">
           <thead className="text-left text-xs text-texto-3">
             <tr>
               <th className="px-4 py-2 font-normal"><button type="button" onClick={() => ordenar("nome")} className="hover:text-texto">{cab}{seta("nome")}</button></th>

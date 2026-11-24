@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ajustarColunas } from "./colunas-ajustaveis";
 
 /**
  * Deixa qualquer tabela ordenável pelo cabeçalho (clique: maior → menor; de novo: menor → maior; de novo: ordem
@@ -10,17 +11,44 @@ import { useEffect, useRef, useState } from "react";
  * - O valor da célula é o primeiro número do texto (R$ 1.234,56 · 12,5% · 3,2x) ou o texto; vazio ("—") vai pro fim.
  * - Uma célula pode dizer o valor certo com data-valor (ex.: data-valor="2026-10" num mês).
  * - Cabeçalho com data-sem-ordem não ordena (ex.: "Ações"). Linhas de total ficam no tfoot.
+ * - Colunas com largura ajustável (arrastar a borda do cabeçalho), em todas as tabelas.
+ * - Opcional: botões "Compacto" (linhas finas, para print; esconde o que tiver a classe so-detalhe) e
+ *   "Abertos e perdidos" (mostra o que tiver a classe so-situacao). A escolha fica guardada no navegador.
  */
-export function Ordenavel({ children, busca, minimoBusca = 12 }: {
+export function Ordenavel({ children, busca, minimoBusca = 12, chave, compacto, situacao }: {
   children: React.ReactNode;
   /** força mostrar (true) ou esconder (false) a busca; padrão: só com mais de `minimoBusca` linhas */
   busca?: boolean;
   minimoBusca?: number;
+  /** nome para guardar as escolhas abaixo no navegador */
+  chave?: string;
+  /** mostra o botão "Compacto", começando ligado ou desligado */
+  compacto?: "ligado" | "desligado";
+  /** mostra o botão "Abertos e perdidos" (começa desligado) */
+  situacao?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const estado = useRef<{ col: number; desc: boolean } | null>(null);
   const [q, setQ] = useState("");
   const [linhas, setLinhas] = useState({ total: 0, visiveis: 0 });
+  const [opcoes, setOpcoes] = useState({ compacto: compacto === "ligado", situacao: false });
+
+  // escolhas guardadas no navegador (lidas depois de montar, para o servidor e o navegador começarem iguais)
+  useEffect(() => {
+    if (!chave) return;
+    const t = setTimeout(() => {
+      try {
+        const salvo = JSON.parse(localStorage.getItem(`tabela:${chave}`) ?? "null");
+        if (salvo) setOpcoes((o) => ({ compacto: typeof salvo.compacto === "boolean" ? salvo.compacto : o.compacto, situacao: !!salvo.situacao }));
+      } catch { /* sem armazenamento */ }
+    }, 0);
+    return () => clearTimeout(t);
+  }, [chave]);
+  const mudar = (campo: "compacto" | "situacao") => setOpcoes((o) => {
+    const novo = { ...o, [campo]: !o[campo] };
+    try { if (chave) localStorage.setItem(`tabela:${chave}`, JSON.stringify(novo)); } catch { /* sem armazenamento */ }
+    return novo;
+  });
 
   useEffect(() => {
     const raiz = ref.current;
@@ -104,6 +132,7 @@ export function Ordenavel({ children, busca, minimoBusca = 12 }: {
     }
 
     // o servidor trocou as linhas (ex.: depois de uma ação): reaplica a ordem escolhida
+    const desligarColunas = ajustarColunas(tabela);
     observador = new MutationObserver(() => {
       if (estado.current) aplicar();
       setLinhas((x) => ({ ...x, total: corpo.rows.length }));
@@ -112,6 +141,7 @@ export function Ordenavel({ children, busca, minimoBusca = 12 }: {
     setLinhas({ total: corpo.rows.length, visiveis: corpo.rows.length });
     return () => {
       observador?.disconnect();
+      desligarColunas();
       cliques.forEach(([th, f]) => th.removeEventListener("click", f));
     };
   }, []);
@@ -131,13 +161,29 @@ export function Ordenavel({ children, busca, minimoBusca = 12 }: {
   }, [q]);
 
   const mostrarBusca = busca ?? linhas.total > minimoBusca;
+  const botao = (ligado: boolean) =>
+    `rounded-md border px-2.5 py-1 ${ligado ? "border-destaque bg-destaque/15 text-texto" : "border-borda text-texto-2 hover:text-texto"}`;
   return (
-    <div ref={ref}>
-      {mostrarBusca && (
+    <div ref={ref} className="tabela-opcoes" data-compacto={opcoes.compacto ? "sim" : undefined} data-situacao={opcoes.situacao ? "sim" : undefined}>
+      {(mostrarBusca || compacto || situacao) && (
         <div className="sticky left-0 flex flex-wrap items-center gap-2 px-3 py-2 text-xs text-texto-3">
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar na tabela…" aria-label="Buscar na tabela"
-            className="min-h-8 w-full rounded-lg border border-borda bg-fundo px-2.5 text-sm text-texto sm:w-60" />
+          {mostrarBusca && (
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar na tabela…" aria-label="Buscar na tabela"
+              className="min-h-8 w-full rounded-lg border border-borda bg-fundo px-2.5 text-sm text-texto sm:w-60" />
+          )}
           {q && <span>{linhas.visiveis} de {linhas.total}</span>}
+          {situacao && (
+            <button type="button" aria-pressed={opcoes.situacao} onClick={() => mudar("situacao")} className={botao(opcoes.situacao)}
+              title="Mostra, embaixo de cada número, quantos desses leads ainda estão abertos no CRM e quantos já foram perdidos">
+              Abertos e perdidos
+            </button>
+          )}
+          {compacto && (
+            <button type="button" aria-pressed={opcoes.compacto} onClick={() => mudar("compacto")} className={botao(opcoes.compacto)}
+              title="Linhas mais finas, boas para tirar print">
+              Compacto
+            </button>
+          )}
         </div>
       )}
       {children}
