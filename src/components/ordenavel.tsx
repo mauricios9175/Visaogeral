@@ -15,7 +15,7 @@ import { ajustarColunas } from "./colunas-ajustaveis";
  * - Opcional: botões "Compacto" (linhas finas, para print; esconde o que tiver a classe so-detalhe) e
  *   "Abertos e perdidos" (mostra o que tiver a classe so-situacao). A escolha fica guardada no navegador.
  */
-export function Ordenavel({ children, busca, minimoBusca = 12, chave, compacto, situacao }: {
+export function Ordenavel({ children, busca, minimoBusca = 12, chave, compacto, situacao, plataformas }: {
   children: React.ReactNode;
   /** força mostrar (true) ou esconder (false) a busca; padrão: só com mais de `minimoBusca` linhas */
   busca?: boolean;
@@ -26,12 +26,14 @@ export function Ordenavel({ children, busca, minimoBusca = 12, chave, compacto, 
   compacto?: "ligado" | "desligado";
   /** mostra o botão "Abertos e perdidos" (começa desligado) */
   situacao?: boolean;
+  /** mostra o botão "Meta e Google" (classe so-plataforma; começa desligado) */
+  plataformas?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const estado = useRef<{ col: number; desc: boolean } | null>(null);
   const [q, setQ] = useState("");
   const [linhas, setLinhas] = useState({ total: 0, visiveis: 0 });
-  const [opcoes, setOpcoes] = useState({ compacto: compacto === "ligado", situacao: false });
+  const [opcoes, setOpcoes] = useState({ compacto: compacto === "ligado", situacao: false, plataformas: false });
 
   // escolhas guardadas no navegador (lidas depois de montar, para o servidor e o navegador começarem iguais)
   useEffect(() => {
@@ -39,12 +41,12 @@ export function Ordenavel({ children, busca, minimoBusca = 12, chave, compacto, 
     const t = setTimeout(() => {
       try {
         const salvo = JSON.parse(localStorage.getItem(`tabela:${chave}`) ?? "null");
-        if (salvo) setOpcoes((o) => ({ compacto: typeof salvo.compacto === "boolean" ? salvo.compacto : o.compacto, situacao: !!salvo.situacao }));
+        if (salvo) setOpcoes((o) => ({ compacto: typeof salvo.compacto === "boolean" ? salvo.compacto : o.compacto, situacao: !!salvo.situacao, plataformas: !!salvo.plataformas }));
       } catch { /* sem armazenamento */ }
     }, 0);
     return () => clearTimeout(t);
   }, [chave]);
-  const mudar = (campo: "compacto" | "situacao") => setOpcoes((o) => {
+  const mudar = (campo: "compacto" | "situacao" | "plataformas") => setOpcoes((o) => {
     const novo = { ...o, [campo]: !o[campo] };
     try { if (chave) localStorage.setItem(`tabela:${chave}`, JSON.stringify(novo)); } catch { /* sem armazenamento */ }
     return novo;
@@ -164,8 +166,9 @@ export function Ordenavel({ children, busca, minimoBusca = 12, chave, compacto, 
   const botao = (ligado: boolean) =>
     `rounded-md border px-2.5 py-1 ${ligado ? "border-destaque bg-destaque/15 text-texto" : "border-borda text-texto-2 hover:text-texto"}`;
   return (
-    <div ref={ref} className="tabela-opcoes" data-compacto={opcoes.compacto ? "sim" : undefined} data-situacao={opcoes.situacao ? "sim" : undefined}>
-      {(mostrarBusca || compacto || situacao) && (
+    <div ref={ref} className="tabela-opcoes" data-compacto={opcoes.compacto ? "sim" : undefined} data-situacao={opcoes.situacao ? "sim" : undefined}
+      data-plataformas={opcoes.plataformas ? "sim" : undefined}>
+      {(mostrarBusca || compacto || situacao || plataformas) && (
         <div className="sticky left-0 flex flex-wrap items-center gap-2 px-3 py-2 text-xs text-texto-3">
           {mostrarBusca && (
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar na tabela…" aria-label="Buscar na tabela"
@@ -176,6 +179,12 @@ export function Ordenavel({ children, busca, minimoBusca = 12, chave, compacto, 
             <button type="button" aria-pressed={opcoes.situacao} onClick={() => mudar("situacao")} className={botao(opcoes.situacao)}
               title="Mostra, embaixo de cada número, quantos desses leads ainda estão abertos no CRM e quantos já foram perdidos">
               Abertos e perdidos
+            </button>
+          )}
+          {plataformas && (
+            <button type="button" aria-pressed={opcoes.plataformas} onClick={() => mudar("plataformas")} className={botao(opcoes.plataformas)}
+              title="Mostra, embaixo de cada número, quanto veio do Meta e quanto veio do Google (pela origem/UTM do lead no CRM)">
+              Meta e Google
             </button>
           )}
           {compacto && (

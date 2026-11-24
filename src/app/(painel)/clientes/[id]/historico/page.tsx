@@ -8,7 +8,7 @@ import type { FunilCliente } from "@/lib/funil";
 import { configRelatorio, linkApresentacao, ORDEM_QUALIFICACAO, TITULO_QUALIFICACAO } from "@/lib/relatorio-slides";
 import { chaveEmpresa, LAYOUTS, listarEmpresas } from "@/lib/empresas";
 import { EMPRESA_PADRAO } from "@/lib/db";
-import { DIMENSOES_UTM, situacaoPorMes, type Situacao } from "@/lib/consultas";
+import { DIMENSOES_UTM, detalheDosMeses, type DetalheMes, type NumerosPlataforma, type Situacao } from "@/lib/consultas";
 import { SituacaoLeads } from "@/components/situacao";
 import { hojeISO } from "@/lib/datas";
 import { Aviso, Voltar } from "@/components/ui";
@@ -51,16 +51,9 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   // do mais antigo (em cima) para o mais recente (embaixo)
   const visiveis = (anoSel ? meses.filter((m) => m.mes.startsWith(anoSel)) : meses.slice(0, 12)).reverse();
   const total = somarMeses(visiveis);
-  // de cada mês, quantos leads (e de cada passo) estão abertos hoje no CRM e quantos já foram perdidos
-  const situacao = await situacaoPorMes(id, visiveis.map((m) => m.mes)).catch(() => new Map<string, SituacaoMes>());
-  const somar = (lista: (Situacao | undefined)[]) => lista.some(Boolean)
-    ? lista.reduce<Situacao>((t, x) => ({ abertos: t.abertos + (x?.abertos ?? 0), perdidos: t.perdidos + (x?.perdidos ?? 0) }), { abertos: 0, perdidos: 0 })
-    : undefined;
-  const situacaoTotal: SituacaoMes | undefined = situacao.size ? {
-    leads: somar([...situacao.values()].map((x) => x.leads))!,
-    passos: new Map([...new Set([...situacao.values()].flatMap((x) => [...x.passos.keys()]))]
-      .map((p) => [p, somar([...situacao.values()].map((x) => x.passos.get(p)))!])),
-  } : undefined;
+  // calculado na hora pelo CRM: de cada mês, abertos/perdidos de hoje e a divisão Meta × Google
+  const detalhes = await detalheDosMeses(id, visiveis.map((m) => m.mes)).catch(() => new Map<string, DetalheMes>());
+  const detalheTotal = somarDetalhes([...detalhes.values()]);
   // colunas dos passos: as do funil atual do cliente e as que aparecem nos meses já gravados
   const passos = [...new Set([...funil.passos.map((p) => p.nome), ...nomesDosPassos(visiveis)])];
   const temValorPropostas = visiveis.some((m) => m.valorPropostas != null);
@@ -208,7 +201,7 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
           </div>
 
           <div className="overflow-x-auto rounded-2xl border border-borda bg-superficie">
-            <Ordenavel chave="historico" compacto="ligado" situacao><table className="w-full min-w-[1100px] text-sm">
+            <Ordenavel chave="historico" compacto="ligado" situacao={detalhes.size > 0} plataformas={detalhes.size > 0 || temGoogle}><table className="w-full min-w-[1100px] text-sm">
               <thead className="text-left text-xs text-texto-3">
                 <tr className="border-b border-borda">
                   <th className="px-3 py-2 font-normal">Mês</th>
@@ -226,11 +219,11 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
                 </tr>
               </thead>
               <tbody>
-                {visiveis.map((m) => <LinhaMes key={m.mes} m={m} passos={passos} temValorPropostas={temValorPropostas} temGoogle={temGoogle} situacao={situacao.get(m.mes)} />)}
+                {visiveis.map((m) => <LinhaMes key={m.mes} m={m} passos={passos} temValorPropostas={temValorPropostas} temGoogle={temGoogle} detalhe={detalhes.get(m.mes)} />)}
               </tbody>
               {total && visiveis.length > 1 && (
                 <tfoot className="border-t border-borda font-medium">
-                  <LinhaMes m={{ ...total, mes: anoSel ? `Total ${anoSel}` : visiveis.length < 12 ? `Total (${visiveis.length} meses)` : "Total 12 meses" }} passos={passos} temValorPropostas={temValorPropostas} temGoogle={temGoogle} situacao={situacaoTotal} total />
+                  <LinhaMes m={{ ...total, mes: anoSel ? `Total ${anoSel}` : visiveis.length < 12 ? `Total (${visiveis.length} meses)` : "Total 12 meses" }} passos={passos} temValorPropostas={temValorPropostas} temGoogle={temGoogle} detalhe={detalheTotal} total />
                 </tfoot>
               )}
             </table></Ordenavel>
@@ -254,11 +247,43 @@ export default async function Historico({ params, searchParams }: PageProps<"/cl
   );
 }
 
-type SituacaoMes = { leads: Situacao; passos: Map<string, Situacao> };
+/** Soma os meses (linha de total). */
+function somarDetalhes(lista: DetalheMes[]): DetalheMes | undefined {
+  if (!lista.length) return undefined;
+  const sit = (xs: (Situacao | undefined)[]) => xs.reduce<Situacao>((t, x) => ({ abertos: t.abertos + (x?.abertos ?? 0), perdidos: t.perdidos + (x?.perdidos ?? 0) }), { abertos: 0, perdidos: 0 });
+  const nomes = [...new Set(lista.flatMap((d) => [...d.passos.keys()]))];
+  const plat = (p: "meta" | "google" | "outros"): NumerosPlataforma => ({
+    leads: lista.reduce((t, d) => t + d.plataforma[p].leads, 0),
+    passos: new Map(nomes.map((n) => [n, lista.reduce((t, d) => t + (d.plataforma[p].passos.get(n) ?? 0), 0)])),
+    vendas: lista.reduce((t, d) => t + d.plataforma[p].vendas, 0),
+    faturamento: lista.reduce((t, d) => t + d.plataforma[p].faturamento, 0),
+  });
+  return {
+    leads: sit(lista.map((d) => d.leads)),
+    passos: new Map(nomes.map((n) => [n, sit(lista.map((d) => d.passos.get(n)))])),
+    plataforma: { meta: plat("meta"), google: plat("google"), outros: plat("outros") },
+  };
+}
 
-function LinhaMes({ m, passos, temValorPropostas, temGoogle, total, situacao }: {
-  m: MesConsolidado; passos: string[]; temValorPropostas: boolean; temGoogle: boolean; total?: boolean; situacao?: SituacaoMes;
+/** Embaixo de um número: quanto veio do Meta e quanto do Google (só com o botão "Meta e Google" ligado). */
+function PorPlataforma({ d, valor, formato = inteiro }: {
+  d?: DetalheMes; valor: (n: NumerosPlataforma) => number | null; formato?: (v: number | null) => string;
 }) {
+  if (!d) return null;
+  const outros = valor(d.plataforma.outros);
+  return (
+    <span className="so-plataforma whitespace-nowrap text-[11px] font-normal text-texto-3">
+      Meta {formato(valor(d.plataforma.meta))} · Google {formato(valor(d.plataforma.google))}
+      {outros ? <> · outros {formato(outros)}</> : null}
+    </span>
+  );
+}
+
+function LinhaMes({ m, passos, temValorPropostas, temGoogle, total, detalhe }: {
+  m: MesConsolidado; passos: string[]; temValorPropostas: boolean; temGoogle: boolean; total?: boolean; detalhe?: DetalheMes;
+}) {
+  const situacao = detalhe;
+  const cplDe = (gasto: number, leads: number) => (leads ? gasto / leads : null);
   const celula = "px-3 py-2 text-right tabular-nums";
   const passo = (nome: string) => m.passos.find((p) => p.nome === nome);
   const marca = (c: string) => (m.ajustado.includes(c) ? <span className="text-destaque" title="corrigido à mão">*</span> : null);
@@ -270,23 +295,32 @@ function LinhaMes({ m, passos, temValorPropostas, temGoogle, total, situacao }: 
       </td>
       <td className={celula}>
         {dinheiro(m.investimento)}{marca("investimento")}
-        {temGoogle && !m.ajustado.includes("investimento") && (
+        {(temGoogle || detalhe) && !m.ajustado.includes("investimento") && (
           <span className="so-detalhe block whitespace-nowrap text-[11px] text-texto-3">Meta {dinheiro(m.gastoMeta)} · Google {dinheiro(m.gastoGoogle)}</span>
         )}
       </td>
-      <td className={celula} data-valor={m.leads ?? undefined}>{inteiro(m.leads)}{marca("leads")}<SituacaoLeads s={situacao?.leads} /></td>
+      <td className={celula} data-valor={m.leads ?? undefined}>{inteiro(m.leads)}{marca("leads")}<SituacaoLeads s={situacao?.leads} /><PorPlataforma d={detalhe} valor={(n) => n.leads} /></td>
       {passos.map((p) => (
         <td key={p} className={celula} data-valor={passo(p)?.valor ?? undefined}>
-          {inteiro(passo(p)?.valor)}{marca(chavePasso(p))}<SituacaoLeads s={situacao?.passos.get(p)} />
+          {inteiro(passo(p)?.valor)}{marca(chavePasso(p))}<SituacaoLeads s={situacao?.passos.get(p)} /><PorPlataforma d={detalhe} valor={(n) => n.passos.get(p) ?? 0} />
         </td>
       ))}
-      <td className={celula}>{inteiro(m.vendas)}{marca("vendas")}</td>
-      <td className={celula}>{dinheiro(m.faturamento)}{marca("faturamento")}</td>
+      <td className={celula} data-valor={m.vendas ?? undefined}>{inteiro(m.vendas)}{marca("vendas")}<PorPlataforma d={detalhe} valor={(n) => n.vendas} /></td>
+      <td className={celula} data-valor={m.faturamento ?? undefined}>
+        {dinheiro(m.faturamento)}{marca("faturamento")}<PorPlataforma d={detalhe} valor={(n) => n.faturamento} formato={dinheiro} />
+      </td>
       {temValorPropostas && <td className={celula}>{dinheiro(m.valorPropostas)}{marca("valor_propostas")}</td>}
       {passos.map((p) => <td key={p} className={celula}>{taxa(passo(p)?.taxa ?? null)}</td>)}
       <td className={celula}>{taxa(m.conversaoVendas)}</td>
       <td className={celula}>{m.roas == null ? "—" : `${m.roas.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}x`}</td>
-      <td className={celula}>{dinheiro(m.cpl)}</td>
+      <td className={celula} data-valor={m.cpl ?? undefined}>
+        {dinheiro(m.cpl)}
+        {detalhe && (
+          <span className="so-plataforma whitespace-nowrap text-[11px] text-texto-3">
+            Meta {dinheiro(cplDe(m.gastoMeta, detalhe.plataforma.meta.leads))} · Google {dinheiro(cplDe(m.gastoGoogle, detalhe.plataforma.google.leads))}
+          </span>
+        )}
+      </td>
       <td className={celula}>{dinheiro(m.cplQualificado)}</td>
     </tr>
   );

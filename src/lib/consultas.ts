@@ -679,25 +679,65 @@ async function conexaoResumo(clienteId: string) {
   return (resp.data ?? null) as unknown as ConexaoResumo | null;
 }
 
+/** De qual plataforma veio o negócio: pela UTM de origem, depois pela fonte do CRM, mídia, campanha e gclid/fbclid. */
+export function plataformaDoNegocio(n: NegocioCrm): "meta" | "google" | null {
+  const GOOGLE = /google|gads|adwords|youtube|gclid|\bpmax\b|performance.?max|\bsearch\b|pesquisa|display/i;
+  const META = /facebook|\bfb\b|instagram|\big\b|\bmeta\b|messenger|fbclid|paid.?social|lead.?ads?|formul[aá]rio.*(face|insta)/i;
+  const chaves = Object.keys(n.campos ?? {}).join(" ");
+  for (const texto of [n.utm_source, n.origem, n.utm_medium, n.campanha, chaves]) {
+    if (!texto) continue;
+    const g = GOOGLE.test(texto), m = META.test(texto);
+    if (g !== m) return g ? "google" : "meta";
+  }
+  return null;
+}
+
+export type NumerosPlataforma = { leads: number; passos: Map<string, number>; vendas: number; faturamento: number };
+export type DetalheMes = {
+  leads: Situacao; passos: Map<string, Situacao>;
+  // leads, passos e vendas do funil do relatório separados por plataforma ("outros": sem Meta/Google identificado)
+  plataforma: Record<"meta" | "google" | "outros", NumerosPlataforma>;
+};
+
 /**
- * Histórico: dos leads de cada mês (e de cada passo do funil, ex.: Interessados), quantos estão abertos HOJE no CRM
- * e quantos já foram perdidos. Mesma regra do funil do relatório. Chave: o mês ("2026-01-01").
+ * Histórico, calculado na hora a partir do CRM (mesma regra do funil do relatório), por mês ("2026-01-01"):
+ * - situação de hoje dos leads do mês (e de cada passo, ex.: Interessados): abertos e perdidos;
+ * - leads, passos, vendas e valor separados por Meta e Google.
  */
-export async function situacaoPorMes(clienteId: string, meses: string[]) {
-  const resultado = new Map<string, { leads: Situacao; passos: Map<string, Situacao> }>();
+export async function detalheDosMeses(clienteId: string, meses: string[]) {
+  const resultado = new Map<string, DetalheMes>();
   if (!meses.length) return resultado;
   const cx = await conexaoResumo(clienteId);
   if (!cx) return resultado;
   const f = funilDaConexao(cx);
   const ordenados = [...meses].sort();
-  const negocios = (await negociosDe([clienteId], ordenados[0])).filter((n) => entraNoFunil(n, f, cx));
+  const negocios = (await negociosDe([clienteId], ordenados[0]))
+    .map((n) => {
+      const u = completarUtms(n, n.campos, cx.mapa_utm);
+      return { ...n, utm_source: u.source, utm_medium: u.medium, utm_campaign: u.campaign, utm_content: u.content, utm_term: u.term };
+    })
+    .filter((n) => entraNoFunil(n, f, cx));
+  const plataforma = new Map(negocios.map((n) => [n.id, plataformaDoNegocio(n) ?? "outros"] as const));
   for (const mes of ordenados) {
     const [a, m] = mes.split("-").map(Number);
     const proximo = m === 12 ? `${a + 1}-01-01` : `${a}-${String(m + 1).padStart(2, "0")}-01`;
-    const criados = negocios.filter((n) => noPeriodo(n.criado_em, { desde: mes, ate: somarDiasISO(proximo, -1) }));
+    const periodo = { desde: mes, ate: somarDiasISO(proximo, -1) };
+    const criados = negocios.filter((n) => noPeriodo(n.criado_em, periodo));
+    const ganhos = negocios.filter((n) => n.ganho === true && noPeriodo(n.fechado_em, periodo));
+    const daPlataforma = (p: "meta" | "google" | "outros"): NumerosPlataforma => {
+      const c = criados.filter((n) => plataforma.get(n.id) === p);
+      const g = ganhos.filter((n) => plataforma.get(n.id) === p);
+      return {
+        leads: c.length,
+        passos: new Map(f.passos.map((x, i) => [x.nome, c.filter(f.teste[i]).length])),
+        vendas: g.length,
+        faturamento: g.reduce((t, n) => t + Number(n.valor), 0),
+      };
+    };
     resultado.set(mes, {
       leads: situacaoDe(criados),
       passos: new Map(f.passos.map((p, i) => [p.nome, situacaoDe(criados.filter(f.teste[i]))])),
+      plataforma: { meta: daPlataforma("meta"), google: daPlataforma("google"), outros: daPlataforma("outros") },
     });
   }
   return resultado;

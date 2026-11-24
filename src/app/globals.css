@@ -73,6 +73,26 @@ input, select, textarea {
 .tabela-opcoes[data-compacto="sim"] td,
 .tabela-opcoes[data-compacto="sim"] th { padding-top: 3px; padding-bottom: 3px; }
 .tabela-opcoes[data-compacto="sim"] .so-detalhe { display: none; }
+.tabela-opcoes .so-plataforma { display: none; }
+.tabela-opcoes[data-plataformas="sim"] .so-plataforma,
+.tabela-opcoes[data-plataformas="sim"] .so-detalhe { display: block; }
 /* Tabela com alguma coluna de largura escolhida à mão (colunas-ajustaveis.ts): texto numa linha só */
 table[data-colunas] th,
 table[data-colunas] td { white-space: nowrap; }
+
+/* Alça para mudar a largura da coluna: um tracinho sempre visível na borda direita do cabeçalho */
+[data-alca]::after {
+  content: "";
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  right: 4px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--texto-3);
+  opacity: 0.45;
+  transition: background 0.1s, opacity 0.1s, top 0.1s, bottom 0.1s;
+}
+th:hover > [data-alca]::after { opacity: 0.9; }
+[data-alca]:hover::after,
+[data-alca][data-arrastando]::after { top: 0; bottom: 0; width: 3px; opacity: 1; background: var(--destaque); }

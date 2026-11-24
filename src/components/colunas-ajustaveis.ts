@@ -63,8 +63,8 @@ export function ajustarColunas(tabela: HTMLTableElement): () => void {
     const alca = document.createElement("span");
     alca.dataset.alca = "";
     alca.title = "Arraste para mudar a largura · duplo clique volta ao automático";
-    alca.className = "hover:bg-destaque/50";
-    Object.assign(alca.style, { position: "absolute", right: "0", top: "0", height: "100%", width: "6px", cursor: "col-resize", touchAction: "none", userSelect: "none", zIndex: "10" });
+    // a aparência (o tracinho visível na borda) fica no globals.css, em [data-alca]
+    Object.assign(alca.style, { position: "absolute", right: "0", top: "0", height: "100%", width: "11px", cursor: "col-resize", touchAction: "none", userSelect: "none", zIndex: "10" });
     th.appendChild(alca);
 
     let inicioX = 0, inicioLargura = 0;
@@ -78,6 +78,7 @@ export function ajustarColunas(tabela: HTMLTableElement): () => void {
       document.removeEventListener("pointermove", mover);
       document.removeEventListener("pointerup", soltar);
       document.body.style.cursor = "";
+      delete alca.dataset.arrastando;
       guardar();
     };
     const apertar = (e: PointerEvent) => {
@@ -86,6 +87,7 @@ export function ajustarColunas(tabela: HTMLTableElement): () => void {
       inicioX = e.clientX;
       inicioLargura = th.getBoundingClientRect().width;
       document.body.style.cursor = "col-resize";
+      alca.dataset.arrastando = "";
       document.addEventListener("pointermove", mover);
       document.addEventListener("pointerup", soltar);
     };
