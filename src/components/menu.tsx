@@ -19,6 +19,10 @@ export const ITENS: Item[] = [
     icone: icone(<><path d="M9 11l3 3 8-8" /><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9" /></>),
   },
   {
+    href: "/anotacoes", rotulo: "Anotações",
+    icone: icone(<><path d="M5 3h10l4 4v14H5z" /><path d="M9 9h6M9 13h6M9 17h3" /></>),
+  },
+  {
     href: "/alertas", rotulo: "Alertas", celular: true,
     icone: icone(<><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9L2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></>),
   },
@@ -135,7 +139,8 @@ export function MenuCelular({ pendentes }: { pendentes?: number }) {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M4 18 L9 11 L13 14 L20 5" /></svg>
         </span>
         <span className="font-extrabold tracking-tight">Visão Geral</span>
-        <Link href="/configuracoes" className="ml-auto text-sm text-texto-2">Ajustes</Link>
+        <Link href="/anotacoes" className="ml-auto text-sm text-texto-2">Anotações</Link>
+        <Link href="/configuracoes" className="text-sm text-texto-2">Ajustes</Link>
       </header>
       <nav aria-label="Menu" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-borda bg-lateral/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
         {ITENS.filter((i) => i.celular).map((i) => {
