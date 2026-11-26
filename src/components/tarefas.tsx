@@ -314,7 +314,12 @@ function LinhaTarefa({ t, hoje, cliente, clientes, mostrarCliente, mudar, exclui
           </div>
         </div>
         {!t.feita && t.data <= hoje && !aberta && (
-          <button type="button" onClick={() => mudar(t, { data: somarDias(hoje, 1) })} className={`${botao} shrink-0`} title="Passar para amanhã">Amanhã →</button>
+          <div className="flex shrink-0 flex-wrap justify-end gap-1">
+            {atrasada && (
+              <button type="button" onClick={() => mudar(t, { data: hoje })} className={botao} title="Trazer para hoje">Hoje</button>
+            )}
+            <button type="button" onClick={() => mudar(t, { data: somarDias(hoje, 1) })} className={botao} title="Passar para amanhã">Amanhã →</button>
+          </div>
         )}
       </div>
 
@@ -323,6 +328,7 @@ function LinhaTarefa({ t, hoje, cliente, clientes, mostrarCliente, mudar, exclui
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={() => setEditando(true)} className={botao}>Editar</button>
             {!t.feita && <>
+              {t.data !== hoje && <button type="button" onClick={() => mudar(t, { data: hoje })} className={botao}>Hoje</button>}
               <button type="button" onClick={() => mudar(t, { data: somarDias(hoje, 1) })} className={botao}>Amanhã</button>
               <button type="button" onClick={() => mudar(t, { data: somarDias(hoje, 7) })} className={botao}>+1 semana</button>
               <input type="date" value={t.data} onChange={(e) => e.target.value && mudar(t, { data: e.target.value })} className="rounded-lg border border-borda bg-fundo px-2 py-1 text-xs text-texto-2" aria-label="Data" />
