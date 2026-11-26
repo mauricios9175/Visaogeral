@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { criarTarefa, descartarSugestao, excluirTarefa, listarTarefas, mudarTarefa, type MudancaTarefa } from "@/lib/tarefas";
+import { moverTarefas, criarTarefa, descartarSugestao, excluirTarefa, listarTarefas, mudarTarefa, type MudancaTarefa } from "@/lib/tarefas";
 
 // Tarefas (protegido pelo login do painel). Toda resposta devolve a lista inteira, para a tela ficar igual ao banco.
 //   GET                                              → { tarefas }
@@ -38,6 +38,8 @@ export async function POST(request: NextRequest) {
         if (typeof m.feita === "boolean") mudanca.feita = m.feita;
         return NextResponse.json({ tarefas: await mudarTarefa(String(corpo.id), mudanca) });
       }
+      case "mover":
+        return NextResponse.json({ tarefas: await moverTarefas((Array.isArray(corpo.ids) ? corpo.ids : []).map(String), String(corpo.data ?? "")) });
       case "descartar":
         await descartarSugestao(String(corpo.chave ?? ""));
         return NextResponse.json({ tarefas: await listarTarefas() });

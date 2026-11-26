@@ -74,6 +74,15 @@ export async function criarTarefa(entrada: {
 
 export type MudancaTarefa = Partial<Pick<Tarefa, "titulo" | "clienteId" | "data" | "aguardando" | "nota" | "feita">>;
 
+/** Muda a data de várias tarefas de uma vez (ex.: trazer todas as atrasadas para hoje). */
+export async function moverTarefas(ids: string[], data: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) throw new Error("Data inválida.");
+  const lista = await listarTarefas();
+  const quais = new Set(ids);
+  for (const t of lista) if (quais.has(t.id) && !t.feita) t.data = data;
+  return gravar(lista);
+}
+
 export async function mudarTarefa(id: string, m: MudancaTarefa) {
   const lista = await listarTarefas();
   const t = lista.find((x) => x.id === id);

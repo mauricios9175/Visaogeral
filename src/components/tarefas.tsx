@@ -100,6 +100,10 @@ export function Tarefas({ inicial, clientes, hoje, clienteFixo, sugestoes: suges
 
   const mudar = (t: Tarefa, mudanca: Partial<Tarefa>) =>
     enviar({ op: "mudar", id: t.id, mudanca }, (xs) => xs.map((x) => (x.id === t.id ? { ...x, ...mudanca, ...(mudanca.feita ? { feitaEm: new Date().toISOString() } : {}) } : x)));
+  const moverParaHoje = (lista: Tarefa[]) => {
+    const ids = new Set(lista.map((t) => t.id));
+    enviar({ op: "mover", ids: [...ids], data: hoje }, (xs) => xs.map((x) => (ids.has(x.id) ? { ...x, data: hoje } : x)));
+  };
   const excluir = (t: Tarefa) => {
     if (!confirm(`Apagar a tarefa “${t.titulo}”?`)) return;
     enviar({ op: "excluir", id: t.id }, (xs) => xs.filter((x) => x.id !== t.id));
@@ -221,7 +225,13 @@ export function Tarefas({ inicial, clientes, hoje, clienteFixo, sugestoes: suges
         </div>
       ) : (
         <>
-          {atrasadas.length > 0 && <Secao titulo="Atrasadas" cor="text-critico" n={atrasadas.length}>{atrasadas.map(linha)}</Secao>}
+          {atrasadas.length > 0 && <Secao titulo="Atrasadas" cor="text-critico" n={atrasadas.length}
+            acao={atrasadas.length > 1 && (
+              <button type="button" onClick={() => moverParaHoje(atrasadas)}
+                className="ml-auto rounded-lg border border-borda px-2.5 py-1 text-xs font-semibold normal-case tracking-normal text-texto-2 hover:border-destaque hover:text-texto">
+                Trazer todas para hoje
+              </button>
+            )}>{atrasadas.map(linha)}</Secao>}
           <Secao titulo="Hoje" n={deHoje.length}>
             {deHoje.length ? deHoje.map(linha) : (
               <p className="py-3 text-sm text-texto-3">{atrasadas.length ? "Nada novo para hoje: zere as atrasadas acima." : feitasHoje.length ? "Tudo feito por hoje. ✓" : "Nada para hoje."}</p>
@@ -242,12 +252,13 @@ export function Tarefas({ inicial, clientes, hoje, clienteFixo, sugestoes: suges
   );
 }
 
-function Secao({ titulo, n, cor, dica, children }: { titulo: string; n: number; cor?: string; dica?: string; children: React.ReactNode }) {
+function Secao({ titulo, n, cor, dica, acao, children }: { titulo: string; n: number; cor?: string; dica?: string; acao?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="space-y-1.5">
       <h2 className={`flex items-baseline gap-2 text-sm font-bold uppercase tracking-wide ${cor ?? "text-texto"}`}>
         {titulo} <span className="text-xs font-medium text-texto-3">{n}</span>
         {dica && <span className="text-xs font-normal normal-case tracking-normal text-texto-3">· {dica}</span>}
+        {acao}
       </h2>
       <div className="space-y-1">{children}</div>
     </section>
