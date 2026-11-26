@@ -864,6 +864,20 @@ async function preencherRelatorio(p: PedidoRelatorio, cfg: ConfigEmpresa) {
       const idsG = Object.fromEntries(Object.values(ids).map((id, i) => [id, novoId(`mggt${i}`)]));
       reqs.push({ duplicateObject: { objectId: slide, objectIds: { [slide]: slideG, ...idsG } } });
       escrever(Object.values(idsG), [`${funil.leads} por mês: Meta × Google`, "Pela origem do lead no CRM"]);
+      // custo por lead de cada plataforma: cópia do slide do gráfico (antes de desenhar nele), logo depois dele
+      const slideC = novoId("mgc");
+      const idsC = Object.fromEntries(Object.values(idsG).map((id, i) => [id, novoId(`mgct${i}`)]));
+      reqs.push({ duplicateObject: { objectId: slideG, objectIds: { [slideG]: slideC, ...idsC } } });
+      const singular = funil.leads.toLowerCase().replace(/s$/, "");
+      escrever(Object.values(idsC), [`Custo por ${singular}: Meta × Google`, "Investimento de cada plataforma ÷ leads que vieram dela no CRM"]);
+      const cplMes = (gastoDe: (m: MesConsolidado) => number, pl: "meta" | "google") => serie.map((m) => {
+        const n = porMes.get(m.mes)?.plataforma[pl].leads ?? 0;
+        return n ? gastoDe(m) / n : null;
+      });
+      reqs.push(...grafico(slideC, { ...origemMG.caixa, h: alturaSlide - origemMG.caixa.y - 150_000 }, `Custo por ${singular}`, categorias, [
+        { nome: "Meta", valores: cplMes((m) => m.gastoMeta, "meta") },
+        { nome: "Google", valores: cplMes((m) => m.gastoGoogle, "google") },
+      ], dinheiro));
       const valores = (pl: "meta" | "google" | "outros") => mesesMG.map((m) => porMes.get(m)?.plataforma[pl].leads ?? null);
       const outros = valores("outros");
       reqs.push(...grafico(slideG, { ...origemMG.caixa, h: alturaSlide - origemMG.caixa.y - 150_000 }, `${funil.leads} por mês`, categorias, [
