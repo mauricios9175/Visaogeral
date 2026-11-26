@@ -6,7 +6,7 @@ import { tokenDeAcesso, tokenSoDrive } from "./google";
 import { atividadesDaConta } from "./meta";
 import { tokenDaConta } from "./sync";
 import type { ContaAnuncio } from "./db";
-import { detalheCliente, detalheCrm, funilPorPlataforma, type DimensaoUtm, type LinhaTabela } from "./consultas";
+import { detalheCliente, detalheCrm, detalheDosMeses, funilPorPlataforma, type DimensaoUtm, type LinhaTabela } from "./consultas";
 import { detalheGoogle } from "./consultas-google";
 import { funilDoCliente, lerHistorico, mesDe, nomeMes, somarMeses, type MesConsolidado } from "./historico";
 import { dinheiro, inteiro, pct } from "./formato";
@@ -851,10 +851,27 @@ async function preencherRelatorio(p: PedidoRelatorio, cfg: ConfigEmpresa) {
     const ids = Object.fromEntries(textos.slice(0, 2).map((el, i) => [el.objectId, novoId(`mgt${i}`)]));
     reqs.push({ duplicateObject: { objectId: origemMG.slide, objectIds: { [origemMG.slide]: slide, [origemMG.elemento]: elemento, ...ids } } });
     reqs.push({ deleteObject: { objectId: elemento } });
-    Object.values(ids).forEach((id, i) => {
+    const escrever = (lista: string[], textosNovos: string[]) => lista.forEach((id, i) => {
       reqs.push({ deleteText: { objectId: id, textRange: { type: "ALL" } } });
-      reqs.push({ insertText: { objectId: id, insertionIndex: 0, text: i === 0 ? "Meta × Google" : "De onde vieram os resultados (pela origem do lead no CRM)" } });
+      reqs.push({ insertText: { objectId: id, insertionIndex: 0, text: textosNovos[i] } });
     });
+    escrever(Object.values(ids), ["Meta × Google", "De onde vieram os resultados (pela origem do lead no CRM)"]);
+    // gráfico de leads por mês, Meta × Google: cópia deste slide (ainda sem a tabela), logo depois dele
+    const mesesMG = usaHistorico ? serie.map((m) => m.mes) : [];
+    const porMes = mesesMG.length ? await detalheDosMeses(p.clienteId, mesesMG).catch(() => null) : null;
+    if (porMes?.size) {
+      const slideG = novoId("mgg");
+      const idsG = Object.fromEntries(Object.values(ids).map((id, i) => [id, novoId(`mggt${i}`)]));
+      reqs.push({ duplicateObject: { objectId: slide, objectIds: { [slide]: slideG, ...idsG } } });
+      escrever(Object.values(idsG), [`${funil.leads} por mês: Meta × Google`, "Pela origem do lead no CRM"]);
+      const valores = (pl: "meta" | "google" | "outros") => mesesMG.map((m) => porMes.get(m)?.plataforma[pl].leads ?? null);
+      const outros = valores("outros");
+      reqs.push(...grafico(slideG, { ...origemMG.caixa, h: alturaSlide - origemMG.caixa.y - 150_000 }, `${funil.leads} por mês`, categorias, [
+        { nome: "Meta", valores: valores("meta") },
+        { nome: "Google", valores: valores("google") },
+        ...(outros.some((v) => v) ? [{ nome: "Outras origens", valores: outros }] : []),
+      ], (v) => inteiro(v)));
+    }
     const pl = porPlataforma;
     const total = { leads: leads ?? 0, vendas: vendas ?? 0, faturamento: faturamento ?? 0 };
     const linhaPl = (nome: string, n: typeof pl.meta, gastoPl: number | null) => [
