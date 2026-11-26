@@ -26,6 +26,7 @@ export function EditorFicha({ clienteId, inicial }: { clienteId: string; inicial
   const salva = useRef(inicial);
   const [estado, setEstado] = useState<string | null>(null);
   const [novoLink, setNovoLink] = useState({ rotulo: "", url: "" });
+  const [mexendo, setMexendo] = useState<number | null>(null); // link sendo alterado (posição)
 
   async function salvar(mudanca: Partial<Ficha>) {
     setEstado("Salvando…");
@@ -49,8 +50,10 @@ export function EditorFicha({ clienteId, inicial }: { clienteId: string; inicial
     let url = novoLink.url.trim();
     if (!url) return;
     if (!/^(https?:\/\/|mailto:|tel:)/i.test(url)) url = `https://${url}`;
-    links([...ficha.links, { rotulo: novoLink.rotulo.trim(), url }]);
+    const link = { rotulo: novoLink.rotulo.trim(), url };
+    links(mexendo == null ? [...ficha.links, link] : ficha.links.map((l, i) => (i === mexendo ? link : l)));
     setNovoLink({ rotulo: "", url: "" });
+    setMexendo(null);
   }
 
   const caixa = "w-full rounded-[10px] border border-borda bg-fundo px-3 py-2 text-sm leading-relaxed outline-none focus:border-destaque";
@@ -62,16 +65,21 @@ export function EditorFicha({ clienteId, inicial }: { clienteId: string; inicial
         {ficha.links.length === 0 && <p className="text-sm text-texto-3">Nenhum link ainda (redes sociais, site, Drive, landing page…).</p>}
         <ul className="flex flex-wrap gap-2">
           {ficha.links.map((l, i) => (
-            <li key={l.url} className="flex items-center gap-1 rounded-lg border border-borda bg-fundo pl-3 text-sm">
+            <li key={l.url} className={`flex items-center gap-1 rounded-lg border bg-fundo pl-3 text-sm ${mexendo === i ? "border-destaque" : "border-borda"}`}>
               <a href={l.url} target="_blank" rel="noopener noreferrer" className="py-1.5 font-medium text-destaque hover:underline" title={l.url}>{l.rotulo}</a>
-              <button type="button" onClick={() => links(ficha.links.filter((_, j) => j !== i))} aria-label={`Remover ${l.rotulo}`} className="px-2 py-1.5 text-texto-3 hover:text-critico">×</button>
+              <button type="button" onClick={() => { setMexendo(i); setNovoLink({ rotulo: l.rotulo, url: l.url }); }} aria-label={`Alterar ${l.rotulo}`} title="Alterar"
+                className="px-1 py-1.5 text-texto-3 hover:text-texto">✎</button>
+              <button type="button" onClick={() => { links(ficha.links.filter((_, j) => j !== i)); setMexendo(null); }} aria-label={`Remover ${l.rotulo}`} className="px-2 py-1.5 text-texto-3 hover:text-critico">×</button>
             </li>
           ))}
         </ul>
         <form onSubmit={adicionarLink} className="flex flex-wrap gap-2 pt-1">
           <input value={novoLink.url} onChange={(e) => setNovoLink((n) => ({ ...n, url: e.target.value }))} placeholder="Endereço (instagram.com/…, drive…)" className="min-h-10 min-w-0 flex-[2] rounded-lg border border-borda bg-fundo px-3 text-sm" />
           <input value={novoLink.rotulo} onChange={(e) => setNovoLink((n) => ({ ...n, rotulo: e.target.value }))} placeholder="Nome (opcional)" className="min-h-10 min-w-0 flex-1 rounded-lg border border-borda bg-fundo px-3 text-sm" />
-          <button className="min-h-10 rounded-lg border border-borda px-3 text-sm hover:border-destaque">Adicionar</button>
+          <button className="min-h-10 rounded-lg border border-borda px-3 text-sm hover:border-destaque">{mexendo == null ? "Adicionar" : "Atualizar link"}</button>
+          {mexendo != null && (
+            <button type="button" onClick={() => { setMexendo(null); setNovoLink({ rotulo: "", url: "" }); }} className="min-h-10 rounded-lg border border-borda px-3 text-sm text-texto-2">Cancelar</button>
+          )}
         </form>
       </section>
 

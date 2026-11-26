@@ -143,18 +143,25 @@ function Editor({ inicial, listas, salvar, cancelar, excluir }: {
   const [lista, setLista] = useState(inicial.lista ?? "");
   const [links, setLinks] = useState<LinkFicha[]>(inicial.links ?? []);
   const [novo, setNovo] = useState({ rotulo: "", url: "" });
+  const [mexendo, setMexendo] = useState<number | null>(null); // link sendo alterado (posição)
   const [salvando, setSalvando] = useState(false);
 
-  // link digitado e não adicionado ainda também vai junto ao salvar
+  // link digitado (novo ou alterado) e não confirmado ainda também vai junto ao salvar
   const comPendente = () => {
     let url = novo.url.trim();
     if (!url) return links;
     if (!/^(https?:\/\/|mailto:|tel:)/i.test(url)) url = `https://${url}`;
-    return [...links, { rotulo: novo.rotulo.trim(), url }];
+    const link = { rotulo: novo.rotulo.trim(), url };
+    return mexendo == null ? [...links, link] : links.map((l, i) => (i === mexendo ? link : l));
   };
   function adicionar() {
     setLinks(comPendente());
     setNovo({ rotulo: "", url: "" });
+    setMexendo(null);
+  }
+  function alterar(i: number) {
+    setMexendo(i);
+    setNovo({ rotulo: links[i].rotulo, url: links[i].url });
   }
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
@@ -181,9 +188,12 @@ function Editor({ inicial, listas, salvar, cancelar, excluir }: {
         {links.length > 0 && (
           <ul className="flex flex-wrap gap-1.5 text-xs">
             {links.map((l, i) => (
-              <li key={l.url + i} className="flex items-center gap-1 rounded-md border border-borda px-2 py-1 text-texto-2">
-                <span title={l.url}>{l.rotulo || l.url}</span>
-                <button type="button" onClick={() => setLinks(links.filter((_, j) => j !== i))} className="text-texto-3 hover:text-critico" aria-label={`Tirar ${l.rotulo || l.url}`}>✕</button>
+              <li key={l.url + i} className={`flex items-center gap-1 rounded-md border px-2 py-1 text-texto-2 ${mexendo === i ? "border-destaque" : "border-borda"}`}>
+                <button type="button" onClick={() => alterar(i)} title={`${l.url}\nClique para alterar`} className="hover:text-texto">
+                  {l.rotulo || l.url} <span className="text-texto-3">✎</span>
+                </button>
+                <button type="button" onClick={() => { setLinks(links.filter((_, j) => j !== i)); if (mexendo === i) { setMexendo(null); setNovo({ rotulo: "", url: "" }); } }}
+                  className="text-texto-3 hover:text-critico" aria-label={`Tirar ${l.rotulo || l.url}`}>✕</button>
               </li>
             ))}
           </ul>
@@ -192,7 +202,10 @@ function Editor({ inicial, listas, salvar, cancelar, excluir }: {
           <input value={novo.rotulo} onChange={(e) => setNovo({ ...novo, rotulo: e.target.value })} placeholder="Nome do link (opcional)" className={`${caixa} min-w-0 flex-1`} />
           <input value={novo.url} onChange={(e) => setNovo({ ...novo, url: e.target.value })} placeholder="Endereço (https://…)" className={`${caixa} min-w-0 flex-[2]`}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); adicionar(); } }} />
-          <button type="button" onClick={adicionar} disabled={!novo.url.trim()} className={`${botao} disabled:opacity-50`}>+ Link</button>
+          <button type="button" onClick={adicionar} disabled={!novo.url.trim()} className={`${botao} disabled:opacity-50`}>{mexendo == null ? "+ Link" : "Atualizar link"}</button>
+          {mexendo != null && (
+            <button type="button" onClick={() => { setMexendo(null); setNovo({ rotulo: "", url: "" }); }} className={botao}>Cancelar</button>
+          )}
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 pt-1">
