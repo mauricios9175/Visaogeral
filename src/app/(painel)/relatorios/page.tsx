@@ -60,7 +60,8 @@ export default async function Relatorios({ searchParams }: PageProps<"/relatorio
               <Link href={`/clientes/${r.cliente.id}`} className="font-medium hover:underline">{r.cliente.nome}</Link>
               <span className="text-xs text-texto-3">{r.cliente.empresa || EMPRESA_PADRAO}</span>
             </div>
-            <Mensagem textoInicial={r.texto} />
+            {/* a chave muda com o tipo: trocar de "semana anterior" para "parcial" recria a caixa com o texto novo */}
+            <Mensagem key={`${tipo}:${r.cliente.id}`} textoInicial={r.texto} />
           </section>
         ))}
       </div>
