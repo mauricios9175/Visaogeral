@@ -22,6 +22,10 @@ export default async function Relatorios({ searchParams }: PageProps<"/relatorio
   const empresa = busca.empresa && empresas.includes(busca.empresa) ? busca.empresa : null;
   const { atual } = periodoRelatorio(tipo);
   const relatorios = await gerarRelatorios(tipo, empresa);
+  // selo em cada mensagem, para não mandar a parcial achando que é a semana fechada (e vice-versa)
+  const selo = tipo === "parcial"
+    ? { texto: `PARCIAL · ${dataBRCurta(atual.desde)} a ${dataBRCurta(atual.ate)}`, cor: "border-atencao/60 bg-atencao-bg text-atencao" }
+    : { texto: `SEMANA FECHADA · ${dataBRCurta(atual.desde)} a ${dataBRCurta(atual.ate)}`, cor: "border-bom/60 bg-bom-bg text-bom" };
   const link = (t: TipoRelatorio, e: string | null) => `/relatorios?tipo=${t}${e ? `&empresa=${encodeURIComponent(e)}` : ""}`;
   const chip = (ativo: boolean) =>
     `rounded-full border px-3 py-1 ${ativo ? "border-destaque bg-superficie font-medium" : "border-borda text-texto-2 hover:text-texto"}`;
@@ -56,9 +60,12 @@ export default async function Relatorios({ searchParams }: PageProps<"/relatorio
       <div className="grid gap-4 lg:grid-cols-2">
         {relatorios.map((r) => (
           <section key={r.cliente.id} className="space-y-2 rounded-2xl border border-borda bg-superficie p-4">
-            <div className="flex items-baseline justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <Link href={`/clientes/${r.cliente.id}`} className="font-medium hover:underline">{r.cliente.nome}</Link>
-              <span className="text-xs text-texto-3">{r.cliente.empresa || EMPRESA_PADRAO}</span>
+              <span className="flex items-center gap-2">
+                <span className={`rounded-md border px-2 py-0.5 text-[11px] font-bold tracking-wide ${selo.cor}`}>{selo.texto}</span>
+                <span className="text-xs text-texto-3">{r.cliente.empresa || EMPRESA_PADRAO}</span>
+              </span>
             </div>
             {/* a chave muda com o tipo: trocar de "semana anterior" para "parcial" recria a caixa com o texto novo */}
             <Mensagem key={`${tipo}:${r.cliente.id}`} textoInicial={r.texto} />
